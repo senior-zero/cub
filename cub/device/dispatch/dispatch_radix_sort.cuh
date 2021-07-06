@@ -574,7 +574,14 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
 
   // Small segment handlers
   using BlockRadixSortT =
-    BlockRadixSort<KeyT, BLOCK_THREADS, ITEMS_PER_THREAD, ValueT, RADIX_BITS>;
+    BlockRadixSort<
+        KeyT,
+        BLOCK_THREADS,
+        ITEMS_PER_THREAD,
+        ValueT,
+        RADIX_BITS,
+        (ChainedPolicyT::ActivePolicy::SingleTilePolicy::RANK_ALGORITHM == RADIX_RANK_MEMOIZE),
+        ChainedPolicyT::ActivePolicy::SingleTilePolicy::SCAN_ALGORITHM>;
 
   // TODO Use proper LOAD/STORE algorithms
   using BlockKeyLoadT = BlockLoad<KeyT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_LOAD_WARP_TRANSPOSE>;
@@ -621,7 +628,11 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
     KeyT thread_keys[ITEMS_PER_THREAD];
     ValueT thread_values[ITEMS_PER_THREAD];
 
-    KeyT oob_default = IS_DESCENDING ? Traits<KeyT>::Lowest() : Traits<KeyT>::Max();
+    // TODO Why not?
+    // KeyT oob_default = IS_DESCENDING ? Traits<KeyT>::Lowest() : Traits<KeyT>::Max();
+    using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
+    UnsignedBitsT default_key_bits = (IS_DESCENDING) ? Traits<KeyT>::LOWEST_KEY : Traits<KeyT>::MAX_KEY;
+    KeyT          oob_default = reinterpret_cast<KeyT&>(default_key_bits);
 
     if (!KEYS_ONLY)
     {
@@ -637,11 +648,11 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
     // Collectively sort the keys
     if (IS_DESCENDING)
     {
-      BlockRadixSortT(temp_storage.sort).SortDescending(thread_keys, thread_values);
+      BlockRadixSortT(temp_storage.sort).SortDescending(thread_keys, thread_values, begin_bit, end_bit);
     }
     else
     {
-      BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values);
+      BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values, begin_bit, end_bit);
     }
     CTA_SYNC();
 
@@ -2037,7 +2048,7 @@ struct DispatchSegmentedRadixSort :
         {
           _CubLog("Invoking segmented_kernels<<<%lld, %lld, 0, %lld>>>(), "
                   "%lld items per thread, %lld SM occupancy, "
-                  "begin bit %d, end bit%d\n",
+                  "begin bit %d, end bit %d\n",
                   (long long)num_segments,
                   (long long)pass_config.segmented_config.block_threads,
                   (long long)stream,
@@ -2292,20 +2303,21 @@ struct DispatchSegmentedRadixSort :
     {
       typedef typename DispatchSegmentedRadixSort::MaxPolicy MaxPolicyT;
 
-      bool use_new_kernel = true;
+#define use_new_kernel 1
 
-      if (use_new_kernel)
+#if use_new_kernel
       {
         return InvokePassesNew<ActivePolicyT>(
           DeviceSegmentedRadixSortNewKernel<MaxPolicyT, IS_DESCENDING, KeyT, ValueT, BeginOffsetIteratorT, EndOffsetIteratorT, OffsetT>);
       }
-      else
+#else
       {
         // Force kernel code-generation in all compiler passes
         return InvokePasses<ActivePolicyT>(
             DeviceSegmentedRadixSortKernel<MaxPolicyT, false,   IS_DESCENDING, KeyT, ValueT, BeginOffsetIteratorT, EndOffsetIteratorT, OffsetT>,
             DeviceSegmentedRadixSortKernel<MaxPolicyT, true,    IS_DESCENDING, KeyT, ValueT, BeginOffsetIteratorT, EndOffsetIteratorT, OffsetT>);
       }
+#endif
     }
 
 
