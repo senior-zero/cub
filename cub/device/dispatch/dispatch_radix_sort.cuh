@@ -516,6 +516,251 @@ __global__ void DeviceSegmentedRadixSortKernel(
     downsweep.ProcessRegion(segment_begin, segment_end);
 }
 
+/**
+ * Segmented radix sorting pass (one block per segment)
+ */
+template <
+  typename                ChainedPolicyT,                 ///< Chained tuning policy
+  bool                    IS_DESCENDING,                  ///< Whether or not the sorted-order is high-to-low
+  typename                KeyT,                           ///< Key type
+  typename                ValueT,                         ///< Value type
+  typename                BeginOffsetIteratorT,           ///< Random-access input iterator type for reading segment beginning offsets \iterator
+  typename                EndOffsetIteratorT,             ///< Random-access input iterator type for reading segment ending offsets \iterator
+  typename                OffsetT>                        ///< Signed integer type for global offsets
+__launch_bounds__ (ChainedPolicyT::ActivePolicy::SegmentedPolicy::BLOCK_THREADS)
+__global__ void DeviceSegmentedRadixSortNewKernel(
+  const KeyT              *d_keys_in_origin,              ///< [in] Input keys buffer
+        KeyT              *d_keys_out_orig,               ///< [in] Input keys buffer
+  DoubleBuffer<KeyT>       d_keys_remaining_passes,       ///< [in] Output keys buffer
+  const ValueT            *d_values_in_origin,            ///< [in] Input values buffer
+        ValueT            *d_values_out_origin,           ///< [in] Input values buffer
+  DoubleBuffer<ValueT>     d_values_remaining_passes,     ///< [in] Output values buffer
+  BeginOffsetIteratorT     d_begin_offsets,               ///< [in] Random-access input iterator to the sequence of beginning offsets of length \p num_segments, such that <tt>d_begin_offsets[i]</tt> is the first element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
+  EndOffsetIteratorT       d_end_offsets,                 ///< [in] Random-access input iterator to the sequence of ending offsets of length \p num_segments, such that <tt>d_end_offsets[i]-1</tt> is the last element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>.  If <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>, the <em>i</em><sup>th</sup> is considered empty.
+  int                    /*num_segments*/,                ///< [in] The number of segments that comprise the sorting data
+  int                      begin_bit,                     ///< [in] Bit position of current radix digit
+  int                      end_bit)
+{
+  //
+  // Constants
+  //
+
+  using SegmentedPolicyT = typename ChainedPolicyT::ActivePolicy::SegmentedPolicy;
+
+  enum
+  {
+    BLOCK_THREADS       = SegmentedPolicyT::BLOCK_THREADS,
+    ITEMS_PER_THREAD    = SegmentedPolicyT::ITEMS_PER_THREAD,
+    RADIX_BITS          = SegmentedPolicyT::RADIX_BITS,
+    TILE_ITEMS          = BLOCK_THREADS * ITEMS_PER_THREAD,
+    RADIX_DIGITS        = 1 << RADIX_BITS,
+    KEYS_ONLY           = Equals<ValueT, NullType>::VALUE,
+  };
+
+  // Upsweep type
+  using BlockUpsweepT = AgentRadixSortUpsweep<SegmentedPolicyT, KeyT, OffsetT>;
+
+  // Digit-scan type
+  using DigitScanT = BlockScan<OffsetT, BLOCK_THREADS>;
+
+  // Downsweep type
+  using BlockDownsweepT = AgentRadixSortDownsweep<SegmentedPolicyT, IS_DESCENDING, KeyT, ValueT, OffsetT>;
+
+  enum
+  {
+    /// Number of bin-starting offsets tracked per thread
+    BINS_TRACKED_PER_THREAD = BlockDownsweepT::BINS_TRACKED_PER_THREAD
+  };
+
+  // Small segment handlers
+  using BlockRadixSortT =
+    BlockRadixSort<KeyT, BLOCK_THREADS, ITEMS_PER_THREAD, ValueT, RADIX_BITS>;
+
+  // TODO Use proper LOAD/STORE algorithms
+  using BlockKeyLoadT = BlockLoad<KeyT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_LOAD_WARP_TRANSPOSE>;
+  using BlockValueLoadT = BlockLoad<ValueT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_LOAD_WARP_TRANSPOSE>;
+
+  using BlockKeyStoreT = BlockStore<KeyT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_STORE_WARP_TRANSPOSE>;
+  using BlockValueStoreT = BlockStore<ValueT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_STORE_WARP_TRANSPOSE>;
+
+  //
+  // Process input tiles
+  //
+
+  // Shared memory storage
+  __shared__ union
+  {
+    typename BlockUpsweepT::TempStorage     upsweep;
+    typename BlockDownsweepT::TempStorage   downsweep;
+
+    struct
+    {
+      volatile OffsetT                      reverse_counts_in[RADIX_DIGITS];
+      volatile OffsetT                      reverse_counts_out[RADIX_DIGITS];
+      typename DigitScanT::TempStorage      scan;
+    };
+
+    typename BlockKeyLoadT::TempStorage keys_load;
+    typename BlockValueLoadT::TempStorage values_load;
+    typename BlockRadixSortT::TempStorage sort;
+    typename BlockKeyStoreT::TempStorage keys_store;
+    typename BlockValueStoreT::TempStorage values_store;
+  } temp_storage;
+
+  OffsetT segment_begin   = d_begin_offsets[blockIdx.x];
+  OffsetT segment_end     = d_end_offsets[blockIdx.x];
+  OffsetT num_items       = segment_end - segment_begin;
+
+  // Check if empty segment
+  if (num_items <= 0)
+  {
+    return;
+  }
+  else if (num_items < ITEMS_PER_THREAD * BLOCK_THREADS)
+  {
+    KeyT thread_keys[ITEMS_PER_THREAD];
+    ValueT thread_values[ITEMS_PER_THREAD];
+
+    KeyT oob_default = IS_DESCENDING ? Traits<KeyT>::Lowest() : Traits<KeyT>::Max();
+
+    if (!KEYS_ONLY)
+    {
+      BlockValueLoadT(temp_storage.values_load).Load(d_values_in_origin + segment_begin, thread_values, num_items);
+      CTA_SYNC();
+    }
+
+    {
+      BlockKeyLoadT(temp_storage.keys_load).Load(d_keys_in_origin + segment_begin, thread_keys, num_items, oob_default);
+      CTA_SYNC();
+    }
+
+    // Collectively sort the keys
+    if (IS_DESCENDING)
+    {
+      BlockRadixSortT(temp_storage.sort).SortDescending(thread_keys, thread_values);
+    }
+    else
+    {
+      BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values);
+    }
+    CTA_SYNC();
+
+    if (!KEYS_ONLY)
+    {
+      ValueT *output = d_values_out_origin + segment_begin;
+      BlockValueStoreT(temp_storage.values_store).Store(output, thread_values, num_items);
+      CTA_SYNC();
+    }
+
+    {
+      KeyT *output = d_keys_out_orig + segment_begin;
+      BlockKeyStoreT(temp_storage.keys_store).Store(output, thread_keys, num_items);
+    }
+  }
+  else
+  {
+    int current_bit = begin_bit;
+
+    const KeyT   *d_keys_in = d_keys_in_origin;
+    const ValueT *d_values_in = d_values_in_origin;
+
+    KeyT   *d_keys_out   = d_keys_remaining_passes.Current();
+    ValueT *d_values_out = d_values_remaining_passes.Current();
+
+    while(current_bit < end_bit)
+    {
+      CTA_SYNC();
+
+      int pass_bits = CUB_MIN(RADIX_BITS, (end_bit - current_bit));
+
+      // Upsweep
+      BlockUpsweepT upsweep(temp_storage.upsweep, d_keys_in, current_bit, pass_bits);
+      upsweep.ProcessRegion(segment_begin, segment_end);
+
+      CTA_SYNC();
+
+      // The count of each digit value in this pass (valid in the first RADIX_DIGITS threads)
+      OffsetT bin_count[BINS_TRACKED_PER_THREAD];
+      upsweep.ExtractCounts(bin_count);
+
+      CTA_SYNC();
+
+      if (IS_DESCENDING)
+      {
+        // Reverse bin counts
+        #pragma unroll
+        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        {
+          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
+
+          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+            temp_storage.reverse_counts_in[bin_idx] = bin_count[track];
+        }
+
+        CTA_SYNC();
+
+        #pragma unroll
+        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        {
+          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
+
+          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+            bin_count[track] = temp_storage.reverse_counts_in[RADIX_DIGITS - bin_idx - 1];
+        }
+      }
+
+      // Scan
+      OffsetT bin_offset[BINS_TRACKED_PER_THREAD];     // The global scatter base offset for each digit value in this pass (valid in the first RADIX_DIGITS threads)
+      DigitScanT(temp_storage.scan).ExclusiveSum(bin_count, bin_offset);
+
+      #pragma unroll
+      for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+      {
+        bin_offset[track] += segment_begin;
+      }
+
+      if (IS_DESCENDING)
+      {
+        // Reverse bin offsets
+        #pragma unroll
+        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        {
+          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
+
+          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+            temp_storage.reverse_counts_out[threadIdx.x] = bin_offset[track];
+        }
+
+        CTA_SYNC();
+
+        #pragma unroll
+        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        {
+          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
+
+          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+            bin_offset[track] = temp_storage.reverse_counts_out[RADIX_DIGITS - bin_idx - 1];
+        }
+      }
+
+      CTA_SYNC();
+
+      // Downsweep
+      BlockDownsweepT downsweep(temp_storage.downsweep, bin_offset, num_items, d_keys_in, d_keys_out, d_values_in, d_values_out, current_bit, pass_bits);
+      downsweep.ProcessRegion(segment_begin, segment_end);
+
+      d_keys_in  = d_keys_remaining_passes.d_buffers[d_keys_remaining_passes.selector];
+      d_keys_out = d_keys_remaining_passes.d_buffers[d_keys_remaining_passes.selector ^ 1];
+
+      d_values_in = d_values_remaining_passes.d_buffers[d_keys_remaining_passes.selector];
+      d_values_out = d_values_remaining_passes.d_buffers[d_keys_remaining_passes.selector ^ 1];
+
+      d_keys_remaining_passes.selector ^= 1;
+      current_bit += pass_bits;
+    }
+  }
+}
+
 
 /******************************************************************************
  * Onesweep kernels
@@ -529,10 +774,10 @@ __global__ void DeviceSegmentedRadixSortKernel(
  * Histogram kernel
  */
 template <
-    typename ChainedPolicyT,
-    bool IS_DESCENDING,
-    typename KeyT,
-    typename OffsetT>
+  typename ChainedPolicyT,
+  bool IS_DESCENDING,
+  typename KeyT,
+  typename OffsetT>
 __global__ void __launch_bounds__(ChainedPolicyT::ActivePolicy::HistogramPolicy::BLOCK_THREADS)
 DeviceRadixSortHistogramKernel
     (OffsetT* d_bins_out, const KeyT* d_keys_in, OffsetT num_items, int start_bit, int end_bit)
@@ -1773,6 +2018,55 @@ struct DispatchSegmentedRadixSort :
         return error;
     }
 
+    /// Invoke a three-kernel sorting pass at the current bit.
+    template <typename PassConfigT>
+    CUB_RUNTIME_FUNCTION __forceinline__ cudaError_t
+    InvokePassNew(const KeyT*          d_keys_in,
+                        KeyT*          d_keys_out,
+                  DoubleBuffer<KeyT>   d_keys_remaining_passes,
+                  const ValueT*        d_values_in,
+                        ValueT*        d_values_out,
+                  DoubleBuffer<ValueT> d_values_remaining_passes,
+                  PassConfigT &        pass_config)
+    {
+      cudaError error = cudaSuccess;
+      do
+      {
+        // Log kernel configuration
+        if (debug_synchronous)
+        {
+          _CubLog("Invoking segmented_kernels<<<%lld, %lld, 0, %lld>>>(), "
+                  "%lld items per thread, %lld SM occupancy, "
+                  "begin bit %d, end bit%d\n",
+                  (long long)num_segments,
+                  (long long)pass_config.segmented_config.block_threads,
+                  (long long)stream,
+                  (long long)pass_config.segmented_config.items_per_thread,
+                  (long long)pass_config.segmented_config.sm_occupancy,
+                  begin_bit,
+                  end_bit);
+        }
+
+        thrust::cuda_cub::launcher::triple_chevron(
+          num_segments, pass_config.segmented_config.block_threads, 0,
+          stream
+        ).doit(pass_config.segmented_kernel,
+               d_keys_in, d_keys_out, d_keys_remaining_passes,
+               d_values_in, d_values_out, d_values_remaining_passes,
+               d_begin_offsets, d_end_offsets, num_segments,
+               begin_bit, end_bit);
+
+        // Check for failure to launch
+        if (CubDebug(error = cudaPeekAtLastError())) break;
+
+        // Sync the stream if specified to flush runtime errors
+        if (debug_synchronous && (CubDebug(error = SyncStream(stream)))) break;
+      }
+      while (0);
+
+      return error;
+    }
+
 
     /// PassConfig data structure
     template <typename SegmentedKernelT>
@@ -1896,6 +2190,96 @@ struct DispatchSegmentedRadixSort :
 #endif // CUB_RUNTIME_ENABLED
     }
 
+    /// Invocation (run multiple digit passes)
+    template <
+      typename                ActivePolicyT,          ///< Umbrella policy active for the target device
+      typename                SegmentedKernelT>       ///< Function type of cub::DeviceSegmentedRadixSortKernel
+    CUB_RUNTIME_FUNCTION __forceinline__
+    cudaError_t InvokePassesNew(
+      SegmentedKernelT     segmented_kernel)          ///< [in] Kernel function pointer to parameterization of cub::DeviceSegmentedRadixSortKernel
+    {
+      #ifndef CUB_RUNTIME_ENABLED
+        (void)segmented_kernel;
+
+        // Kernel launch not supported from this device
+        return CubDebug(cudaErrorNotSupported);
+      #else
+
+      cudaError error = cudaSuccess;
+      do
+      {
+        // Temporary storage allocation requirements
+        void* allocations[2] = {};
+        size_t allocation_sizes[2] =
+          {
+            (is_overwrite_okay) ? 0 : num_items * sizeof(KeyT),                      // bytes needed for 3rd keys buffer
+            (is_overwrite_okay || (KEYS_ONLY)) ? 0 : num_items * sizeof(ValueT),     // bytes needed for 3rd values buffer
+          };
+
+        // Alias the temporary allocations from the single storage blob (or compute the necessary size of the blob)
+        if (CubDebug(error = AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes))) break;
+
+        // Return if the caller is simply requesting the size of the storage allocation
+        if (d_temp_storage == NULL)
+        {
+          if (temp_storage_bytes == 0)
+            temp_storage_bytes = 1;
+          return cudaSuccess;
+        }
+
+        // Pass planning.  Run passes of the alternate digit-size configuration until we have an even multiple of our preferred digit size
+        int radix_bits          = ActivePolicyT::SegmentedPolicy::RADIX_BITS;
+        int alt_radix_bits      = ActivePolicyT::AltSegmentedPolicy::RADIX_BITS;
+        int num_bits            = end_bit - begin_bit;
+        int num_passes          = (num_bits + radix_bits - 1) / radix_bits;
+        bool is_num_passes_odd  = num_passes & 1;
+
+        DoubleBuffer<KeyT> d_keys_remaining_passes(
+          (is_overwrite_okay || is_num_passes_odd) ? d_keys.Alternate() : static_cast<KeyT*>(allocations[0]),
+          (is_overwrite_okay) ? d_keys.Current() : (is_num_passes_odd) ? static_cast<KeyT*>(allocations[0]) : d_keys.Alternate());
+
+        DoubleBuffer<ValueT> d_values_remaining_passes(
+          (is_overwrite_okay || is_num_passes_odd) ? d_values.Alternate() : static_cast<ValueT*>(allocations[1]),
+          (is_overwrite_okay) ? d_values.Current() : (is_num_passes_odd) ? static_cast<ValueT*>(allocations[1]) : d_values.Alternate());
+
+        // Run first pass, consuming from the input's current buffers
+        // Init regular and alternate kernel configurations
+        PassConfig<SegmentedKernelT> pass_config;
+
+        if ((error = pass_config.template InitPassConfig<typename ActivePolicyT::SegmentedPolicy>(segmented_kernel)))
+        {
+          break;
+        }
+
+        const KeyT   *d_keys_in   = d_keys.Current();
+        const ValueT *d_values_in = d_values.Current();
+
+        // Update selector
+        if (!is_overwrite_okay) {
+          num_passes = 1; // Sorted data always ends up in the other vector
+        }
+
+        d_keys.selector = (d_keys.selector + num_passes) & 1;
+        d_values.selector = (d_values.selector + num_passes) & 1;
+
+        KeyT   *d_keys_out   = d_keys.Current();
+        ValueT *d_values_out = d_values.Current();
+
+        if (CubDebug(error = InvokePassNew(
+          d_keys_in, d_keys_out, d_keys_remaining_passes,
+          d_values_in, d_values_out, d_values_remaining_passes,
+          pass_config)))
+        {
+          break;
+        }
+      }
+      while (0);
+
+      return error;
+
+      #endif // CUB_RUNTIME_ENABLED
+    }
+
 
     //------------------------------------------------------------------------------
     // Chained policy invocation
@@ -1906,12 +2290,22 @@ struct DispatchSegmentedRadixSort :
     CUB_RUNTIME_FUNCTION __forceinline__
     cudaError_t Invoke()
     {
-        typedef typename DispatchSegmentedRadixSort::MaxPolicy MaxPolicyT;
+      typedef typename DispatchSegmentedRadixSort::MaxPolicy MaxPolicyT;
 
+      bool use_new_kernel = true;
+
+      if (use_new_kernel)
+      {
+        return InvokePassesNew<ActivePolicyT>(
+          DeviceSegmentedRadixSortNewKernel<MaxPolicyT, IS_DESCENDING, KeyT, ValueT, BeginOffsetIteratorT, EndOffsetIteratorT, OffsetT>);
+      }
+      else
+      {
         // Force kernel code-generation in all compiler passes
         return InvokePasses<ActivePolicyT>(
             DeviceSegmentedRadixSortKernel<MaxPolicyT, false,   IS_DESCENDING, KeyT, ValueT, BeginOffsetIteratorT, EndOffsetIteratorT, OffsetT>,
             DeviceSegmentedRadixSortKernel<MaxPolicyT, true,    IS_DESCENDING, KeyT, ValueT, BeginOffsetIteratorT, EndOffsetIteratorT, OffsetT>);
+      }
     }
 
 
