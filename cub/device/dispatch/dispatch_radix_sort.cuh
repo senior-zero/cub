@@ -37,6 +37,7 @@
 #include <stdio.h>
 #include <iterator>
 
+#include "../../agent/agent_segmented_radix_sort.cuh"
 #include "../../agent/agent_radix_sort_histogram.cuh"
 #include "../../agent/agent_radix_sort_onesweep.cuh"
 #include "../../agent/agent_radix_sort_upsweep.cuh"
@@ -530,241 +531,41 @@ template <
 __launch_bounds__ (ChainedPolicyT::ActivePolicy::SingleTilePolicy::BLOCK_THREADS)
 __global__ void DeviceSegmentedRadixSortNewKernel(
   const KeyT              *d_keys_in_origin,              ///< [in] Input keys buffer
-        KeyT              *d_keys_out_orig,               ///< [in] Input keys buffer
-  DoubleBuffer<KeyT>       d_keys_remaining_passes,       ///< [in] Output keys buffer
+        KeyT              *d_keys_out_orig,               ///< [out] Output keys buffer
+  DoubleBuffer<KeyT>       d_keys_remaining_passes,       ///< [in,out] Double keys buffer
   const ValueT            *d_values_in_origin,            ///< [in] Input values buffer
-        ValueT            *d_values_out_origin,           ///< [in] Input values buffer
-  DoubleBuffer<ValueT>     d_values_remaining_passes,     ///< [in] Output values buffer
+        ValueT            *d_values_out_origin,           ///< [out] Output values buffer
+  DoubleBuffer<ValueT>     d_values_remaining_passes,     ///< [in,out] Double values buffer
   BeginOffsetIteratorT     d_begin_offsets,               ///< [in] Random-access input iterator to the sequence of beginning offsets of length \p num_segments, such that <tt>d_begin_offsets[i]</tt> is the first element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
   EndOffsetIteratorT       d_end_offsets,                 ///< [in] Random-access input iterator to the sequence of ending offsets of length \p num_segments, such that <tt>d_end_offsets[i]-1</tt> is the last element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>.  If <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>, the <em>i</em><sup>th</sup> is considered empty.
   int                    /*num_segments*/,                ///< [in] The number of segments that comprise the sorting data
   int                      begin_bit,                     ///< [in] Bit position of current radix digit
   int                      end_bit)
 {
-  //
-  // Constants
-  //
+  const unsigned int segment_id = blockIdx.x;
+  OffsetT segment_begin         = d_begin_offsets[segment_id];
+  OffsetT segment_end           = d_end_offsets[segment_id];
+  OffsetT num_items             = segment_end - segment_begin;
 
-  using SegmentedPolicyT = typename ChainedPolicyT::ActivePolicy::SingleTilePolicy;
+  using AgentSegmentedRadixSortT =
+    AgentSegmentedRadixSort<ChainedPolicyT, IS_DESCENDING, KeyT, ValueT, OffsetT>;
 
-  constexpr int BLOCK_THREADS       = SegmentedPolicyT::BLOCK_THREADS;
-  constexpr int ITEMS_PER_THREAD    = SegmentedPolicyT::ITEMS_PER_THREAD;
-  constexpr int RADIX_BITS          = SegmentedPolicyT::RADIX_BITS;
-  constexpr int RADIX_DIGITS        = 1 << RADIX_BITS;
-  constexpr int KEYS_ONLY           = Equals<ValueT, NullType>::VALUE;
+  __shared__ typename AgentSegmentedRadixSortT::TempStorage temp_storage;
 
-  using BlockUpsweepT = AgentRadixSortUpsweep<SegmentedPolicyT, KeyT, OffsetT>;
-  using DigitScanT = BlockScan<OffsetT, BLOCK_THREADS>;
-  using BlockDownsweepT = AgentRadixSortDownsweep<SegmentedPolicyT, IS_DESCENDING, KeyT, ValueT, OffsetT>;
+  AgentSegmentedRadixSortT agent(d_keys_in_origin,
+                                 d_keys_out_orig,
+                                 d_keys_remaining_passes,
+                                 d_values_in_origin,
+                                 d_values_out_origin,
+                                 d_values_remaining_passes,
+                                 begin_bit,
+                                 end_bit,
+                                 segment_begin,
+                                 segment_end,
+                                 num_items,
+                                 temp_storage);
 
-  /// Number of bin-starting offsets tracked per thread
-  constexpr int BINS_TRACKED_PER_THREAD = BlockDownsweepT::BINS_TRACKED_PER_THREAD;
-
-  // Small segment handlers
-  using BlockRadixSortT =
-    BlockRadixSort<
-        KeyT,
-        BLOCK_THREADS,
-        ITEMS_PER_THREAD,
-        ValueT,
-        RADIX_BITS,
-        (ChainedPolicyT::ActivePolicy::SingleTilePolicy::RANK_ALGORITHM == RADIX_RANK_MEMOIZE),
-        ChainedPolicyT::ActivePolicy::SingleTilePolicy::SCAN_ALGORITHM>;
-
-  using BlockKeyLoadT =
-    BlockLoad<KeyT,
-              BLOCK_THREADS,
-              ITEMS_PER_THREAD,
-              ChainedPolicyT::ActivePolicy::SingleTilePolicy::LOAD_ALGORITHM>;
-
-  using BlockValueLoadT =
-    BlockLoad<ValueT,
-              BLOCK_THREADS,
-              ITEMS_PER_THREAD,
-              ChainedPolicyT::ActivePolicy::SingleTilePolicy::LOAD_ALGORITHM>;
-
-  //
-  // Process input tiles
-  //
-
-  // Shared memory storage
-  __shared__ union
-  {
-    typename BlockUpsweepT::TempStorage     upsweep;
-    typename BlockDownsweepT::TempStorage   downsweep;
-
-    struct
-    {
-      volatile OffsetT                      reverse_counts_in[RADIX_DIGITS];
-      volatile OffsetT                      reverse_counts_out[RADIX_DIGITS];
-      typename DigitScanT::TempStorage      scan;
-    };
-
-    typename BlockKeyLoadT::TempStorage keys_load;
-    typename BlockValueLoadT::TempStorage values_load;
-    typename BlockRadixSortT::TempStorage sort;
-  } temp_storage;
-
-  OffsetT segment_begin   = d_begin_offsets[blockIdx.x];
-  OffsetT segment_end     = d_end_offsets[blockIdx.x];
-  OffsetT num_items       = segment_end - segment_begin;
-
-  // Check if empty segment
-  if (num_items <= 0)
-  {
-    return;
-  }
-  else if (num_items < ITEMS_PER_THREAD * BLOCK_THREADS)
-  {
-    KeyT thread_keys[ITEMS_PER_THREAD];
-    ValueT thread_values[ITEMS_PER_THREAD];
-
-    // For FP64 the difference is following:
-    // Lowest() -> -1.79769e+308 = 0000000000000000000000000000000000000000000000000000000000000000b -> TwiddleIn -> -0 = 1000000000000000000000000000000000000000000000000000000000000000b
-    // LOWEST   -> -nan          = 1111111111111111111111111111111111111111111111111111111111111111b -> TwiddleIn ->  0 = 0000000000000000000000000000000000000000000000000000000000000000b
-
-    using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
-    UnsignedBitsT default_key_bits = IS_DESCENDING ? Traits<KeyT>::LOWEST_KEY
-                                                   : Traits<KeyT>::MAX_KEY;
-    KeyT oob_default = reinterpret_cast<KeyT &>(default_key_bits);
-
-    if (!KEYS_ONLY)
-    {
-      BlockValueLoadT(temp_storage.values_load).Load(d_values_in_origin + segment_begin, thread_values, num_items);
-      CTA_SYNC();
-    }
-
-    {
-      BlockKeyLoadT(temp_storage.keys_load).Load(d_keys_in_origin + segment_begin, thread_keys, num_items, oob_default);
-      CTA_SYNC();
-    }
-
-    BlockRadixSortT(temp_storage.sort).SortBlockedToStriped(
-      thread_keys,
-      thread_values,
-      begin_bit,
-      end_bit,
-      Int2Type<IS_DESCENDING>(),
-      Int2Type<KEYS_ONLY>());
-
-    // Store keys and values
-    KeyT *d_keys_out = d_keys_out_orig + segment_begin;
-    ValueT *d_values_out = d_values_out_origin + segment_begin;
-
-    #pragma unroll
-    for (int item = 0; item < ITEMS_PER_THREAD; ++item)
-    {
-      int item_offset = item * BLOCK_THREADS + threadIdx.x;
-      if (item_offset < num_items)
-      {
-        d_keys_out[item_offset] = thread_keys[item];
-        if (!KEYS_ONLY)
-          d_values_out[item_offset] = thread_values[item];
-      }
-    }
-  }
-  else
-  {
-    int current_bit = begin_bit;
-
-    const KeyT   *d_keys_in = d_keys_in_origin;
-    const ValueT *d_values_in = d_values_in_origin;
-
-    KeyT   *d_keys_out   = d_keys_remaining_passes.Current();
-    ValueT *d_values_out = d_values_remaining_passes.Current();
-
-    while(current_bit < end_bit)
-    {
-      CTA_SYNC();
-
-      int pass_bits = CUB_MIN(RADIX_BITS, (end_bit - current_bit));
-
-      // Upsweep
-      BlockUpsweepT upsweep(temp_storage.upsweep, d_keys_in, current_bit, pass_bits);
-      upsweep.ProcessRegion(segment_begin, segment_end);
-
-      CTA_SYNC();
-
-      // The count of each digit value in this pass (valid in the first RADIX_DIGITS threads)
-      OffsetT bin_count[BINS_TRACKED_PER_THREAD];
-      upsweep.ExtractCounts(bin_count);
-
-      CTA_SYNC();
-
-      if (IS_DESCENDING)
-      {
-        // Reverse bin counts
-        #pragma unroll
-        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-        {
-          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
-
-          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
-            temp_storage.reverse_counts_in[bin_idx] = bin_count[track];
-        }
-
-        CTA_SYNC();
-
-        #pragma unroll
-        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-        {
-          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
-
-          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
-            bin_count[track] = temp_storage.reverse_counts_in[RADIX_DIGITS - bin_idx - 1];
-        }
-      }
-
-      // Scan
-      OffsetT bin_offset[BINS_TRACKED_PER_THREAD];     // The global scatter base offset for each digit value in this pass (valid in the first RADIX_DIGITS threads)
-      DigitScanT(temp_storage.scan).ExclusiveSum(bin_count, bin_offset);
-
-      #pragma unroll
-      for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-      {
-        bin_offset[track] += segment_begin;
-      }
-
-      if (IS_DESCENDING)
-      {
-        // Reverse bin offsets
-        #pragma unroll
-        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-        {
-          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
-
-          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
-            temp_storage.reverse_counts_out[threadIdx.x] = bin_offset[track];
-        }
-
-        CTA_SYNC();
-
-        #pragma unroll
-        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-        {
-          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
-
-          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
-            bin_offset[track] = temp_storage.reverse_counts_out[RADIX_DIGITS - bin_idx - 1];
-        }
-      }
-
-      CTA_SYNC();
-
-      // Downsweep
-      BlockDownsweepT downsweep(temp_storage.downsweep, bin_offset, num_items, d_keys_in, d_keys_out, d_values_in, d_values_out, current_bit, pass_bits);
-      downsweep.ProcessRegion(segment_begin, segment_end);
-
-      d_keys_in  = d_keys_remaining_passes.d_buffers[d_keys_remaining_passes.selector];
-      d_keys_out = d_keys_remaining_passes.d_buffers[d_keys_remaining_passes.selector ^ 1];
-
-      d_values_in = d_values_remaining_passes.d_buffers[d_keys_remaining_passes.selector];
-      d_values_out = d_values_remaining_passes.d_buffers[d_keys_remaining_passes.selector ^ 1];
-
-      d_keys_remaining_passes.selector ^= 1;
-      current_bit += pass_bits;
-    }
-  }
+  agent.ProcessSegment();
 }
 
 
@@ -2309,7 +2110,13 @@ struct DispatchSegmentedRadixSort :
 #if use_new_kernel
       {
         return InvokePassesNew<ActivePolicyT>(
-          DeviceSegmentedRadixSortNewKernel<MaxPolicyT, IS_DESCENDING, KeyT, ValueT, BeginOffsetIteratorT, EndOffsetIteratorT, OffsetT>);
+          DeviceSegmentedRadixSortNewKernel<MaxPolicyT,
+                                            IS_DESCENDING,
+                                            KeyT,
+                                            ValueT,
+                                            BeginOffsetIteratorT,
+                                            EndOffsetIteratorT,
+                                            OffsetT>);
       }
 #else
       {
