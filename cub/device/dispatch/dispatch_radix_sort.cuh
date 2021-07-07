@@ -623,8 +623,10 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
     KeyT thread_keys[ITEMS_PER_THREAD];
     ValueT thread_values[ITEMS_PER_THREAD];
 
-    // TODO Why not?
-    // KeyT oob_default = IS_DESCENDING ? Traits<KeyT>::Lowest() : Traits<KeyT>::Max();
+    // For FP64 the difference is following:
+    // Lowest() -> -1.79769e+308 = 0000000000000000000000000000000000000000000000000000000000000000b -> TwiddleIn -> -0 = 1000000000000000000000000000000000000000000000000000000000000000b
+    // LOWEST   -> -nan          = 1111111111111111111111111111111111111111111111111111111111111111b -> TwiddleIn ->  0 = 0000000000000000000000000000000000000000000000000000000000000000b
+
     using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
     UnsignedBitsT default_key_bits = IS_DESCENDING ? Traits<KeyT>::LOWEST_KEY
                                                    : Traits<KeyT>::MAX_KEY;
