@@ -158,6 +158,187 @@ struct AgentSegmentedRadixSort
 
   }
 
+  __device__ __forceinline__ void ProcessSmallSegment()
+  {
+    KeyT thread_keys[ITEMS_PER_THREAD];
+    ValueT thread_values[ITEMS_PER_THREAD];
+
+    // For FP64 the difference is following:
+    // Lowest() -> -1.79769e+308 = 0000000000000000000000000000000000000000000000000000000000000000b -> TwiddleIn -> -0 = 1000000000000000000000000000000000000000000000000000000000000000b
+    // LOWEST   -> -nan          = 1111111111111111111111111111111111111111111111111111111111111111b -> TwiddleIn ->  0 = 0000000000000000000000000000000000000000000000000000000000000000b
+
+    using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
+    UnsignedBitsT default_key_bits = IS_DESCENDING ? Traits<KeyT>::LOWEST_KEY
+                                                   : Traits<KeyT>::MAX_KEY;
+    KeyT oob_default = reinterpret_cast<KeyT &>(default_key_bits);
+
+    if (!KEYS_ONLY)
+    {
+      BlockValueLoadT(temp_storage.values_load)
+        .Load(d_values_in_origin + segment_begin, thread_values, num_items);
+      CTA_SYNC();
+    }
+
+    {
+      BlockKeyLoadT(temp_storage.keys_load)
+        .Load(d_keys_in_origin + segment_begin,
+              thread_keys,
+              num_items,
+              oob_default);
+      CTA_SYNC();
+    }
+
+    BlockRadixSortT(temp_storage.sort)
+      .SortBlockedToStriped(thread_keys,
+                            thread_values,
+                            begin_bit,
+                            end_bit,
+                            Int2Type<IS_DESCENDING>(),
+                            Int2Type<KEYS_ONLY>());
+
+    // Store keys and values
+    KeyT *d_keys_out     = d_keys_out_orig + segment_begin;
+    ValueT *d_values_out = d_values_out_origin + segment_begin;
+
+    #pragma unroll
+    for (int item = 0; item < ITEMS_PER_THREAD; ++item)
+    {
+      int item_offset = item * BLOCK_THREADS + threadIdx.x;
+
+      if (item_offset < num_items)
+      {
+        d_keys_out[item_offset] = thread_keys[item];
+        if (!KEYS_ONLY)
+          d_values_out[item_offset] = thread_values[item];
+      }
+    }
+  }
+
+  __device__ __forceinline__ void ProcessHugeSegment()
+  {
+    int current_bit = begin_bit;
+
+    const KeyT *d_keys_in     = d_keys_in_origin;
+    const ValueT *d_values_in = d_values_in_origin;
+
+    KeyT *d_keys_out     = d_keys_remaining_passes.Current();
+    ValueT *d_values_out = d_values_remaining_passes.Current();
+
+    int selector = d_keys_remaining_passes.selector;
+
+    while (current_bit < end_bit)
+    {
+      CTA_SYNC();
+
+      int pass_bits = CUB_MIN(RADIX_BITS, (end_bit - current_bit));
+
+      // Upsweep
+      BlockUpsweepT upsweep(temp_storage.upsweep,
+                            d_keys_in,
+                            current_bit,
+                            pass_bits);
+      upsweep.ProcessRegion(segment_begin, segment_end);
+
+      CTA_SYNC();
+
+      // The count of each digit value in this pass (valid in the first RADIX_DIGITS threads)
+      OffsetT bin_count[BINS_TRACKED_PER_THREAD];
+      upsweep.ExtractCounts(bin_count);
+
+      CTA_SYNC();
+
+      if (IS_DESCENDING)
+      {
+        // Reverse bin counts
+        #pragma unroll
+        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        {
+          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
+
+          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+          {
+            temp_storage.reverse_counts_in[bin_idx] = bin_count[track];
+          }
+        }
+
+        CTA_SYNC();
+
+        #pragma unroll
+        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        {
+          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
+
+          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+          {
+            bin_count[track] = temp_storage.reverse_counts_in[RADIX_DIGITS - bin_idx - 1];
+          }
+        }
+      }
+
+      // Scan
+      OffsetT bin_offset[BINS_TRACKED_PER_THREAD]; // The global scatter base offset for each digit value in this pass (valid in the first RADIX_DIGITS threads)
+      DigitScanT(temp_storage.scan).ExclusiveSum(bin_count, bin_offset);
+
+      #pragma unroll
+      for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+      {
+        bin_offset[track] += segment_begin;
+      }
+
+      if (IS_DESCENDING)
+      {
+        // Reverse bin offsets
+        #pragma unroll
+        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        {
+          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
+
+          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+          {
+            temp_storage.reverse_counts_out[threadIdx.x] = bin_offset[track];
+          }
+        }
+
+        CTA_SYNC();
+
+        #pragma unroll
+        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
+        {
+          int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
+
+          if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
+          {
+            bin_offset[track] = temp_storage.reverse_counts_out[RADIX_DIGITS - bin_idx - 1];
+          }
+        }
+      }
+
+      CTA_SYNC();
+
+      // Downsweep
+      BlockDownsweepT downsweep(temp_storage.downsweep,
+                                bin_offset,
+                                num_items,
+                                d_keys_in,
+                                d_keys_out,
+                                d_values_in,
+                                d_values_out,
+                                current_bit,
+                                pass_bits);
+      downsweep.ProcessRegion(segment_begin, segment_end);
+
+      // Update pointers of double buffers
+      d_keys_in = d_keys_remaining_passes.d_buffers[selector];
+      d_keys_out = d_keys_remaining_passes.d_buffers[selector ^ 1];
+
+      d_values_in = d_values_remaining_passes.d_buffers[selector];
+      d_values_out = d_values_remaining_passes.d_buffers[selector ^ 1];
+
+      selector ^= 1;
+      current_bit += pass_bits;
+    }
+  }
+
   __device__ __forceinline__ void ProcessSegment()
   {
     // Check if empty segment
@@ -167,180 +348,11 @@ struct AgentSegmentedRadixSort
     }
     else if (num_items < ITEMS_PER_THREAD * BLOCK_THREADS)
     {
-      KeyT thread_keys[ITEMS_PER_THREAD];
-      ValueT thread_values[ITEMS_PER_THREAD];
-
-      // For FP64 the difference is following:
-      // Lowest() -> -1.79769e+308 = 0000000000000000000000000000000000000000000000000000000000000000b -> TwiddleIn -> -0 = 1000000000000000000000000000000000000000000000000000000000000000b
-      // LOWEST   -> -nan          = 1111111111111111111111111111111111111111111111111111111111111111b -> TwiddleIn ->  0 = 0000000000000000000000000000000000000000000000000000000000000000b
-
-      using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
-      UnsignedBitsT default_key_bits = IS_DESCENDING ? Traits<KeyT>::LOWEST_KEY
-                                                     : Traits<KeyT>::MAX_KEY;
-      KeyT oob_default = reinterpret_cast<KeyT &>(default_key_bits);
-
-      if (!KEYS_ONLY)
-      {
-        BlockValueLoadT(temp_storage.values_load)
-          .Load(d_values_in_origin + segment_begin, thread_values, num_items);
-        CTA_SYNC();
-      }
-
-      {
-        BlockKeyLoadT(temp_storage.keys_load)
-          .Load(d_keys_in_origin + segment_begin,
-                thread_keys,
-                num_items,
-                oob_default);
-        CTA_SYNC();
-      }
-
-      BlockRadixSortT(temp_storage.sort)
-        .SortBlockedToStriped(thread_keys,
-                              thread_values,
-                              begin_bit,
-                              end_bit,
-                              Int2Type<IS_DESCENDING>(),
-                              Int2Type<KEYS_ONLY>());
-
-      // Store keys and values
-      KeyT *d_keys_out     = d_keys_out_orig + segment_begin;
-      ValueT *d_values_out = d_values_out_origin + segment_begin;
-
-      #pragma unroll
-      for (int item = 0; item < ITEMS_PER_THREAD; ++item)
-      {
-        int item_offset = item * BLOCK_THREADS + threadIdx.x;
-        if (item_offset < num_items)
-        {
-          d_keys_out[item_offset] = thread_keys[item];
-          if (!KEYS_ONLY)
-            d_values_out[item_offset] = thread_values[item];
-        }
-      }
+      ProcessSmallSegment();
     }
     else
     {
-      int current_bit = begin_bit;
-
-      const KeyT *d_keys_in     = d_keys_in_origin;
-      const ValueT *d_values_in = d_values_in_origin;
-
-      KeyT *d_keys_out     = d_keys_remaining_passes.Current();
-      ValueT *d_values_out = d_values_remaining_passes.Current();
-
-      int selector = d_keys_remaining_passes.selector;
-
-      while (current_bit < end_bit)
-      {
-        CTA_SYNC();
-
-        int pass_bits = CUB_MIN(RADIX_BITS, (end_bit - current_bit));
-
-        // Upsweep
-        BlockUpsweepT upsweep(temp_storage.upsweep,
-                              d_keys_in,
-                              current_bit,
-                              pass_bits);
-        upsweep.ProcessRegion(segment_begin, segment_end);
-
-        CTA_SYNC();
-
-        // The count of each digit value in this pass (valid in the first RADIX_DIGITS threads)
-        OffsetT bin_count[BINS_TRACKED_PER_THREAD];
-        upsweep.ExtractCounts(bin_count);
-
-        CTA_SYNC();
-
-        if (IS_DESCENDING)
-        {
-          // Reverse bin counts
-          #pragma unroll
-          for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-          {
-            int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
-
-            if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
-            {
-              temp_storage.reverse_counts_in[bin_idx] = bin_count[track];
-            }
-          }
-
-          CTA_SYNC();
-
-          #pragma unroll
-          for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-          {
-            int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
-
-            if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
-            {
-              bin_count[track] = temp_storage.reverse_counts_in[RADIX_DIGITS - bin_idx - 1];
-            }
-          }
-        }
-
-        // Scan
-        OffsetT bin_offset[BINS_TRACKED_PER_THREAD]; // The global scatter base offset for each digit value in this pass (valid in the first RADIX_DIGITS threads)
-        DigitScanT(temp_storage.scan).ExclusiveSum(bin_count, bin_offset);
-
-        #pragma unroll
-        for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-        {
-          bin_offset[track] += segment_begin;
-        }
-
-        if (IS_DESCENDING)
-        {
-          // Reverse bin offsets
-          #pragma unroll
-          for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-          {
-            int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
-
-            if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
-            {
-              temp_storage.reverse_counts_out[threadIdx.x] = bin_offset[track];
-            }
-          }
-
-          CTA_SYNC();
-
-#pragma unroll
-          for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
-          {
-            int bin_idx = (threadIdx.x * BINS_TRACKED_PER_THREAD) + track;
-
-            if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
-            {
-              bin_offset[track] = temp_storage.reverse_counts_out[RADIX_DIGITS - bin_idx - 1];
-            }
-          }
-        }
-
-        CTA_SYNC();
-
-        // Downsweep
-        BlockDownsweepT downsweep(temp_storage.downsweep,
-                                  bin_offset,
-                                  num_items,
-                                  d_keys_in,
-                                  d_keys_out,
-                                  d_values_in,
-                                  d_values_out,
-                                  current_bit,
-                                  pass_bits);
-        downsweep.ProcessRegion(segment_begin, segment_end);
-
-        d_keys_in = d_keys_remaining_passes.d_buffers[selector];
-        d_keys_out = d_keys_remaining_passes.d_buffers[selector ^ 1];
-
-        d_values_in = d_values_remaining_passes.d_buffers[selector];
-        d_values_out = d_values_remaining_passes.d_buffers[selector ^ 1];
-
-        selector ^= 1;
-        current_bit += pass_bits;
-      }
+      ProcessHugeSegment();
     }
   }
 };
