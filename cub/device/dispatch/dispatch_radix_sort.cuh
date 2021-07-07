@@ -547,30 +547,18 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
 
   using SegmentedPolicyT = typename ChainedPolicyT::ActivePolicy::SingleTilePolicy;
 
-  enum
-  {
-    BLOCK_THREADS       = SegmentedPolicyT::BLOCK_THREADS,
-    ITEMS_PER_THREAD    = SegmentedPolicyT::ITEMS_PER_THREAD,
-    RADIX_BITS          = SegmentedPolicyT::RADIX_BITS,
-    TILE_ITEMS          = BLOCK_THREADS * ITEMS_PER_THREAD,
-    RADIX_DIGITS        = 1 << RADIX_BITS,
-    KEYS_ONLY           = Equals<ValueT, NullType>::VALUE,
-  };
+  constexpr int BLOCK_THREADS       = SegmentedPolicyT::BLOCK_THREADS;
+  constexpr int ITEMS_PER_THREAD    = SegmentedPolicyT::ITEMS_PER_THREAD;
+  constexpr int RADIX_BITS          = SegmentedPolicyT::RADIX_BITS;
+  constexpr int RADIX_DIGITS        = 1 << RADIX_BITS;
+  constexpr int KEYS_ONLY           = Equals<ValueT, NullType>::VALUE;
 
-  // Upsweep type
   using BlockUpsweepT = AgentRadixSortUpsweep<SegmentedPolicyT, KeyT, OffsetT>;
-
-  // Digit-scan type
   using DigitScanT = BlockScan<OffsetT, BLOCK_THREADS>;
-
-  // Downsweep type
   using BlockDownsweepT = AgentRadixSortDownsweep<SegmentedPolicyT, IS_DESCENDING, KeyT, ValueT, OffsetT>;
 
-  enum
-  {
-    /// Number of bin-starting offsets tracked per thread
-    BINS_TRACKED_PER_THREAD = BlockDownsweepT::BINS_TRACKED_PER_THREAD
-  };
+  /// Number of bin-starting offsets tracked per thread
+  constexpr int BINS_TRACKED_PER_THREAD = BlockDownsweepT::BINS_TRACKED_PER_THREAD;
 
   // Small segment handlers
   using BlockRadixSortT =
@@ -583,9 +571,17 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
         (ChainedPolicyT::ActivePolicy::SingleTilePolicy::RANK_ALGORITHM == RADIX_RANK_MEMOIZE),
         ChainedPolicyT::ActivePolicy::SingleTilePolicy::SCAN_ALGORITHM>;
 
-  // TODO Use proper LOAD/STORE algorithms
-  using BlockKeyLoadT = BlockLoad<KeyT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_LOAD_WARP_TRANSPOSE>;
-  using BlockValueLoadT = BlockLoad<ValueT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_LOAD_WARP_TRANSPOSE>;
+  using BlockKeyLoadT =
+    BlockLoad<KeyT,
+              BLOCK_THREADS,
+              ITEMS_PER_THREAD,
+              ChainedPolicyT::ActivePolicy::SingleTilePolicy::LOAD_ALGORITHM>;
+
+  using BlockValueLoadT =
+    BlockLoad<ValueT,
+              BLOCK_THREADS,
+              ITEMS_PER_THREAD,
+              ChainedPolicyT::ActivePolicy::SingleTilePolicy::LOAD_ALGORITHM>;
 
   //
   // Process input tiles
