@@ -527,7 +527,7 @@ template <
   typename                BeginOffsetIteratorT,           ///< Random-access input iterator type for reading segment beginning offsets \iterator
   typename                EndOffsetIteratorT,             ///< Random-access input iterator type for reading segment ending offsets \iterator
   typename                OffsetT>                        ///< Signed integer type for global offsets
-__launch_bounds__ (ChainedPolicyT::ActivePolicy::SegmentedPolicy::BLOCK_THREADS)
+__launch_bounds__ (ChainedPolicyT::ActivePolicy::SingleTilePolicy::BLOCK_THREADS)
 __global__ void DeviceSegmentedRadixSortNewKernel(
   const KeyT              *d_keys_in_origin,              ///< [in] Input keys buffer
         KeyT              *d_keys_out_orig,               ///< [in] Input keys buffer
@@ -545,7 +545,7 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
   // Constants
   //
 
-  using SegmentedPolicyT = typename ChainedPolicyT::ActivePolicy::SegmentedPolicy;
+  using SegmentedPolicyT = typename ChainedPolicyT::ActivePolicy::SingleTilePolicy;
 
   enum
   {
@@ -587,9 +587,6 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
   using BlockKeyLoadT = BlockLoad<KeyT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_LOAD_WARP_TRANSPOSE>;
   using BlockValueLoadT = BlockLoad<ValueT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_LOAD_WARP_TRANSPOSE>;
 
-  using BlockKeyStoreT = BlockStore<KeyT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_STORE_WARP_TRANSPOSE>;
-  using BlockValueStoreT = BlockStore<ValueT, BLOCK_THREADS, ITEMS_PER_THREAD, BLOCK_STORE_WARP_TRANSPOSE>;
-
   //
   // Process input tiles
   //
@@ -610,8 +607,6 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
     typename BlockKeyLoadT::TempStorage keys_load;
     typename BlockValueLoadT::TempStorage values_load;
     typename BlockRadixSortT::TempStorage sort;
-    typename BlockKeyStoreT::TempStorage keys_store;
-    typename BlockValueStoreT::TempStorage values_store;
   } temp_storage;
 
   OffsetT segment_begin   = d_begin_offsets[blockIdx.x];
@@ -631,8 +626,9 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
     // TODO Why not?
     // KeyT oob_default = IS_DESCENDING ? Traits<KeyT>::Lowest() : Traits<KeyT>::Max();
     using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
-    UnsignedBitsT default_key_bits = (IS_DESCENDING) ? Traits<KeyT>::LOWEST_KEY : Traits<KeyT>::MAX_KEY;
-    KeyT          oob_default = reinterpret_cast<KeyT&>(default_key_bits);
+    UnsignedBitsT default_key_bits = IS_DESCENDING ? Traits<KeyT>::LOWEST_KEY
+                                                   : Traits<KeyT>::MAX_KEY;
+    KeyT oob_default = reinterpret_cast<KeyT &>(default_key_bits);
 
     if (!KEYS_ONLY)
     {
@@ -645,27 +641,28 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
       CTA_SYNC();
     }
 
-    // Collectively sort the keys
-    if (IS_DESCENDING)
-    {
-      BlockRadixSortT(temp_storage.sort).SortDescending(thread_keys, thread_values, begin_bit, end_bit);
-    }
-    else
-    {
-      BlockRadixSortT(temp_storage.sort).Sort(thread_keys, thread_values, begin_bit, end_bit);
-    }
-    CTA_SYNC();
+    BlockRadixSortT(temp_storage.sort).SortBlockedToStriped(
+      thread_keys,
+      thread_values,
+      begin_bit,
+      end_bit,
+      Int2Type<IS_DESCENDING>(),
+      Int2Type<KEYS_ONLY>());
 
-    if (!KEYS_ONLY)
-    {
-      ValueT *output = d_values_out_origin + segment_begin;
-      BlockValueStoreT(temp_storage.values_store).Store(output, thread_values, num_items);
-      CTA_SYNC();
-    }
+    // Store keys and values
+    KeyT *d_keys_out = d_keys_out_orig + segment_begin;
+    ValueT *d_values_out = d_values_out_origin + segment_begin;
 
+    #pragma unroll
+    for (int item = 0; item < ITEMS_PER_THREAD; ++item)
     {
-      KeyT *output = d_keys_out_orig + segment_begin;
-      BlockKeyStoreT(temp_storage.keys_store).Store(output, thread_keys, num_items);
+      int item_offset = item * BLOCK_THREADS + threadIdx.x;
+      if (item_offset < num_items)
+      {
+        d_keys_out[item_offset] = thread_keys[item];
+        if (!KEYS_ONLY)
+          d_values_out[item_offset] = thread_values[item];
+      }
     }
   }
   else
@@ -2228,19 +2225,24 @@ struct DispatchSegmentedRadixSort :
           };
 
         // Alias the temporary allocations from the single storage blob (or compute the necessary size of the blob)
-        if (CubDebug(error = AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes))) break;
+        if (CubDebug(error = AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes)))
+        {
+          break;
+        }
 
         // Return if the caller is simply requesting the size of the storage allocation
         if (d_temp_storage == NULL)
         {
           if (temp_storage_bytes == 0)
+          {
             temp_storage_bytes = 1;
+          }
+
           return cudaSuccess;
         }
 
         // Pass planning.  Run passes of the alternate digit-size configuration until we have an even multiple of our preferred digit size
-        int radix_bits          = ActivePolicyT::SegmentedPolicy::RADIX_BITS;
-        int alt_radix_bits      = ActivePolicyT::AltSegmentedPolicy::RADIX_BITS;
+        int radix_bits          = ActivePolicyT::SingleTilePolicy::RADIX_BITS;
         int num_bits            = end_bit - begin_bit;
         int num_passes          = (num_bits + radix_bits - 1) / radix_bits;
         bool is_num_passes_odd  = num_passes & 1;
@@ -2257,7 +2259,7 @@ struct DispatchSegmentedRadixSort :
         // Init regular and alternate kernel configurations
         PassConfig<SegmentedKernelT> pass_config;
 
-        if ((error = pass_config.template InitPassConfig<typename ActivePolicyT::SegmentedPolicy>(segmented_kernel)))
+        if ((error = pass_config.template InitPassConfig<typename ActivePolicyT::SingleTilePolicy>(segmented_kernel)))
         {
           break;
         }
@@ -2266,7 +2268,8 @@ struct DispatchSegmentedRadixSort :
         const ValueT *d_values_in = d_values.Current();
 
         // Update selector
-        if (!is_overwrite_okay) {
+        if (!is_overwrite_okay)
+        {
           num_passes = 1; // Sorted data always ends up in the other vector
         }
 
