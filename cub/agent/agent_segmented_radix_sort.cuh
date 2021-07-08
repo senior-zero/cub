@@ -48,7 +48,7 @@ CUB_NS_PREFIX
 namespace cub {
 
 template <
-  typename                ChainedPolicyT,                 ///< Chained tuning policy
+  typename                SegmentedPolicyT,               ///< Chained tuning policy
   bool                    IS_DESCENDING,                  ///< Whether or not the sorted-order is high-to-low
   typename                KeyT,                           ///< Key type
   typename                ValueT,                         ///< Value type
@@ -68,8 +68,6 @@ struct AgentSegmentedRadixSort
   OffsetT segment_end;
   OffsetT num_items;
 
-  using SegmentedPolicyT = typename ChainedPolicyT::ActivePolicy::SingleTilePolicy;
-
   static constexpr int BLOCK_THREADS       = SegmentedPolicyT::BLOCK_THREADS;
   static constexpr int ITEMS_PER_THREAD    = SegmentedPolicyT::ITEMS_PER_THREAD;
   static constexpr int RADIX_BITS          = SegmentedPolicyT::RADIX_BITS;
@@ -85,27 +83,25 @@ struct AgentSegmentedRadixSort
   static constexpr int BINS_TRACKED_PER_THREAD = BlockDownsweepT::BINS_TRACKED_PER_THREAD;
 
   // Small segment handlers
-  using BlockRadixSortT = BlockRadixSort<
-    KeyT,
-    BLOCK_THREADS,
-    ITEMS_PER_THREAD,
-    ValueT,
-    RADIX_BITS,
-    (ChainedPolicyT::ActivePolicy::SingleTilePolicy::RANK_ALGORITHM ==
-     RADIX_RANK_MEMOIZE),
-    ChainedPolicyT::ActivePolicy::SingleTilePolicy::SCAN_ALGORITHM>;
+  using BlockRadixSortT =
+    BlockRadixSort<KeyT,
+                   BLOCK_THREADS,
+                   ITEMS_PER_THREAD,
+                   ValueT,
+                   RADIX_BITS,
+                   (SegmentedPolicyT::RANK_ALGORITHM == RADIX_RANK_MEMOIZE),
+                   SegmentedPolicyT::SCAN_ALGORITHM>;
 
-  using BlockKeyLoadT =
-    BlockLoad<KeyT,
-              BLOCK_THREADS,
-              ITEMS_PER_THREAD,
-              ChainedPolicyT::ActivePolicy::SingleTilePolicy::LOAD_ALGORITHM>;
+  using BlockKeyLoadT = BlockLoad<KeyT,
+                                  BLOCK_THREADS,
+                                  ITEMS_PER_THREAD,
+                                  SegmentedPolicyT::LOAD_ALGORITHM>;
 
   using BlockValueLoadT =
     BlockLoad<ValueT,
               BLOCK_THREADS,
               ITEMS_PER_THREAD,
-              ChainedPolicyT::ActivePolicy::SingleTilePolicy::LOAD_ALGORITHM>;
+              SegmentedPolicyT::LOAD_ALGORITHM>;
 
   union _TempStorage
   {
@@ -228,8 +224,6 @@ struct AgentSegmentedRadixSort
 
     while (current_bit < end_bit)
     {
-      CTA_SYNC();
-
       int pass_bits = CUB_MIN(RADIX_BITS, (end_bit - current_bit));
 
       // Upsweep
@@ -333,6 +327,8 @@ struct AgentSegmentedRadixSort
 
       d_values_in = d_values_remaining_passes.d_buffers[selector];
       d_values_out = d_values_remaining_passes.d_buffers[selector ^ 1];
+
+      CTA_SYNC();
 
       selector ^= 1;
       current_bit += pass_bits;

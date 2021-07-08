@@ -521,14 +521,17 @@ __global__ void DeviceSegmentedRadixSortKernel(
  * Segmented radix sorting pass (one block per segment)
  */
 template <
-  typename                ChainedPolicyT,                 ///< Chained tuning policy
+  typename                ChainedPolicyT,                 ///< Active tuning policy
+  bool                    ALT_DIGIT_BITS,                 ///< Whether or not to use the alternate (lower-bits) policy
   bool                    IS_DESCENDING,                  ///< Whether or not the sorted-order is high-to-low
   typename                KeyT,                           ///< Key type
   typename                ValueT,                         ///< Value type
   typename                BeginOffsetIteratorT,           ///< Random-access input iterator type for reading segment beginning offsets \iterator
   typename                EndOffsetIteratorT,             ///< Random-access input iterator type for reading segment ending offsets \iterator
   typename                OffsetT>                        ///< Signed integer type for global offsets
-__launch_bounds__ (ChainedPolicyT::ActivePolicy::SingleTilePolicy::BLOCK_THREADS)
+__launch_bounds__ (int((ALT_DIGIT_BITS) ?
+                       ChainedPolicyT::ActivePolicy::AltSegmentedPolicy::BLOCK_THREADS :
+                       ChainedPolicyT::ActivePolicy::SegmentedPolicy::BLOCK_THREADS))
 __global__ void DeviceSegmentedRadixSortNewKernel(
   const KeyT              *d_keys_in_origin,              ///< [in] Input keys buffer
         KeyT              *d_keys_out_orig,               ///< [out] Output keys buffer
@@ -547,8 +550,12 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
   OffsetT segment_end           = d_end_offsets[segment_id];
   OffsetT num_items             = segment_end - segment_begin;
 
+  using SegmentedPolicyT = typename If<(ALT_DIGIT_BITS),
+    typename ChainedPolicyT::ActivePolicy::AltSegmentedPolicy,
+    typename ChainedPolicyT::ActivePolicy::SegmentedPolicy>::Type;
+
   using AgentSegmentedRadixSortT =
-    AgentSegmentedRadixSort<ChainedPolicyT, IS_DESCENDING, KeyT, ValueT, OffsetT>;
+    AgentSegmentedRadixSort<SegmentedPolicyT, IS_DESCENDING, KeyT, ValueT, OffsetT>;
 
   __shared__ typename AgentSegmentedRadixSortT::TempStorage temp_storage;
 
@@ -986,7 +993,7 @@ struct DeviceRadixSortPolicy
         typedef AgentRadixSortUpsweepPolicy <256, 47, DominantT, LOAD_DEFAULT, PRIMARY_RADIX_BITS - 1> AltUpsweepPolicy;
 
         // Single-tile policy
-        typedef AgentRadixSortDownsweepPolicy <256, 19, DominantT,  BLOCK_LOAD_DIRECT, LOAD_LDG, RADIX_RANK_MEMOIZE, BLOCK_SCAN_WARP_SCANS, SINGLE_TILE_RADIX_BITS>          SingleTilePolicy;
+        typedef AgentRadixSortDownsweepPolicy <256, 23, DominantT,  BLOCK_LOAD_TRANSPOSE, LOAD_DEFAULT, RADIX_RANK_MEMOIZE, BLOCK_SCAN_WARP_SCANS, 6>          SingleTilePolicy;
 
         // Segmented policies
         typedef AgentRadixSortDownsweepPolicy <192, 39, DominantT,  BLOCK_LOAD_TRANSPOSE, LOAD_DEFAULT, RADIX_RANK_MEMOIZE, BLOCK_SCAN_WARP_SCANS, SEGMENTED_RADIX_BITS>     SegmentedPolicy;
@@ -1834,11 +1841,18 @@ struct DispatchSegmentedRadixSort :
                   const ValueT*        d_values_in,
                         ValueT*        d_values_out,
                   DoubleBuffer<ValueT> d_values_remaining_passes,
-                  PassConfigT &        pass_config)
+                  PassConfigT &        pass_config,
+                  int                  pass_begin_bit,
+                  int                  pass_end_bit)
     {
       cudaError error = cudaSuccess;
       do
       {
+        if (pass_begin_bit >= pass_end_bit)
+        {
+          break;
+        }
+
         // Log kernel configuration
         if (debug_synchronous)
         {
@@ -1850,8 +1864,8 @@ struct DispatchSegmentedRadixSort :
                   (long long)stream,
                   (long long)pass_config.segmented_config.items_per_thread,
                   (long long)pass_config.segmented_config.sm_occupancy,
-                  begin_bit,
-                  end_bit);
+                  pass_begin_bit,
+                  pass_end_bit);
         }
 
         thrust::cuda_cub::launcher::triple_chevron(
@@ -1861,13 +1875,22 @@ struct DispatchSegmentedRadixSort :
                d_keys_in, d_keys_out, d_keys_remaining_passes,
                d_values_in, d_values_out, d_values_remaining_passes,
                d_begin_offsets, d_end_offsets, num_segments,
-               begin_bit, end_bit);
+               pass_begin_bit, pass_end_bit);
 
         // Check for failure to launch
-        if (CubDebug(error = cudaPeekAtLastError())) break;
+        if (CubDebug(error = cudaPeekAtLastError()))
+        {
+          break;
+        }
 
         // Sync the stream if specified to flush runtime errors
-        if (debug_synchronous && (CubDebug(error = SyncStream(stream)))) break;
+        if (debug_synchronous)
+        {
+          if (CubDebug(error = SyncStream(stream)))
+          {
+            break;
+          }
+        }
       }
       while (0);
 
@@ -2003,10 +2026,12 @@ struct DispatchSegmentedRadixSort :
       typename                SegmentedKernelT>       ///< Function type of cub::DeviceSegmentedRadixSortKernel
     CUB_RUNTIME_FUNCTION __forceinline__
     cudaError_t InvokePassesNew(
-      SegmentedKernelT     segmented_kernel)          ///< [in] Kernel function pointer to parameterization of cub::DeviceSegmentedRadixSortKernel
+      SegmentedKernelT segmented_kernel,
+      SegmentedKernelT alt_segmented_kernel)     ///< [in] Kernel function pointer to parameterization of cub::DeviceSegmentedRadixSortKernel
     {
       #ifndef CUB_RUNTIME_ENABLED
         (void)segmented_kernel;
+        (void)alt_segmented_kernel;
 
         // Kernel launch not supported from this device
         return CubDebug(cudaErrorNotSupported);
@@ -2041,10 +2066,13 @@ struct DispatchSegmentedRadixSort :
         }
 
         // Pass planning.  Run passes of the alternate digit-size configuration until we have an even multiple of our preferred digit size
-        int radix_bits          = ActivePolicyT::SingleTilePolicy::RADIX_BITS;
+        int radix_bits          = ActivePolicyT::SegmentedPolicy::RADIX_BITS;
+        int alt_radix_bits      = ActivePolicyT::AltSegmentedPolicy::RADIX_BITS;
         int num_bits            = end_bit - begin_bit;
         int num_passes          = (num_bits + radix_bits - 1) / radix_bits;
         bool is_num_passes_odd  = num_passes & 1;
+        int max_alt_passes      = (num_passes * radix_bits) - num_bits;
+        int alt_end_bit         = CUB_MIN(end_bit, begin_bit + (max_alt_passes * alt_radix_bits));
 
         DoubleBuffer<KeyT> d_keys_remaining_passes(
           (is_overwrite_okay || is_num_passes_odd) ? d_keys.Alternate() : static_cast<KeyT*>(allocations[0]),
@@ -2054,11 +2082,17 @@ struct DispatchSegmentedRadixSort :
           (is_overwrite_okay || is_num_passes_odd) ? d_values.Alternate() : static_cast<ValueT*>(allocations[1]),
           (is_overwrite_okay) ? d_values.Current() : (is_num_passes_odd) ? static_cast<ValueT*>(allocations[1]) : d_values.Alternate());
 
-        // Run first pass, consuming from the input's current buffers
         // Init regular and alternate kernel configurations
-        PassConfig<SegmentedKernelT> pass_config;
+        PassConfig<SegmentedKernelT> pass_config, alt_pass_config;
+        if (error = pass_config.template InitPassConfig<
+                    typename ActivePolicyT::SegmentedPolicy>(segmented_kernel))
+        {
+          break;
+        }
 
-        if ((error = pass_config.template InitPassConfig<typename ActivePolicyT::SingleTilePolicy>(segmented_kernel)))
+        if (error = alt_pass_config.template InitPassConfig<
+                    typename ActivePolicyT::AltSegmentedPolicy>(
+              alt_segmented_kernel))
         {
           break;
         }
@@ -2066,25 +2100,55 @@ struct DispatchSegmentedRadixSort :
         const KeyT   *d_keys_in   = d_keys.Current();
         const ValueT *d_values_in = d_values.Current();
 
-        // Update selector
-        if (!is_overwrite_okay)
-        {
-          num_passes = 1; // Sorted data always ends up in the other vector
-        }
+        // Sorted data always ends up in the other vector
+        int final_selector_state = (d_keys.selector + (is_overwrite_okay ? num_passes : 1)) & 1;
 
-        d_keys.selector = (d_keys.selector + num_passes) & 1;
-        d_values.selector = (d_values.selector + num_passes) & 1;
-
-        KeyT   *d_keys_out   = d_keys.Current();
-        ValueT *d_values_out = d_values.Current();
+        KeyT   *d_keys_out   = d_keys.d_buffers[final_selector_state];
+        ValueT *d_values_out = d_values.d_buffers[final_selector_state];
 
         if (CubDebug(error = InvokePassNew(
           d_keys_in, d_keys_out, d_keys_remaining_passes,
           d_values_in, d_values_out, d_values_remaining_passes,
-          pass_config)))
+          alt_pass_config, begin_bit, alt_end_bit)))
         {
           break;
         }
+
+        int current_bit = begin_bit;
+        int num_alt_passes = 0;
+        while (current_bit < alt_end_bit)
+        {
+          num_alt_passes++;
+
+          d_keys_remaining_passes.selector ^= 1;
+          d_values_remaining_passes.selector ^= 1;
+
+          current_bit += alt_radix_bits;
+        }
+
+        if (num_alt_passes > 0)
+        {
+          d_keys_remaining_passes.selector ^= 1;
+          d_values_remaining_passes.selector ^= 1;
+
+          d_keys_in   = d_keys_remaining_passes.Current();
+          d_values_in = d_values_remaining_passes.Current();
+
+          d_keys_remaining_passes.selector ^= 1;
+          d_values_remaining_passes.selector ^= 1;
+        }
+
+        if (CubDebug(error = InvokePassNew(
+          d_keys_in, d_keys_out, d_keys_remaining_passes,
+          d_values_in, d_values_out, d_values_remaining_passes,
+          pass_config, alt_end_bit, end_bit)))
+        {
+          break;
+        }
+
+        d_keys.selector = final_selector_state;
+        d_values.selector = final_selector_state;
+
       }
       while (0);
 
@@ -2103,20 +2167,15 @@ struct DispatchSegmentedRadixSort :
     CUB_RUNTIME_FUNCTION __forceinline__
     cudaError_t Invoke()
     {
-      typedef typename DispatchSegmentedRadixSort::MaxPolicy MaxPolicyT;
+      using MaxPolicyT = typename DispatchSegmentedRadixSort::MaxPolicy;
 
 #define use_new_kernel 1
 
 #if use_new_kernel
       {
         return InvokePassesNew<ActivePolicyT>(
-          DeviceSegmentedRadixSortNewKernel<MaxPolicyT,
-                                            IS_DESCENDING,
-                                            KeyT,
-                                            ValueT,
-                                            BeginOffsetIteratorT,
-                                            EndOffsetIteratorT,
-                                            OffsetT>);
+          DeviceSegmentedRadixSortNewKernel<MaxPolicyT, false, IS_DESCENDING, KeyT, ValueT, BeginOffsetIteratorT, EndOffsetIteratorT, OffsetT>,
+          DeviceSegmentedRadixSortNewKernel<MaxPolicyT, true,  IS_DESCENDING, KeyT, ValueT, BeginOffsetIteratorT, EndOffsetIteratorT, OffsetT>);
       }
 #else
       {
