@@ -543,7 +543,10 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
   EndOffsetIteratorT       d_end_offsets,                 ///< [in] Random-access input iterator to the sequence of ending offsets of length \p num_segments, such that <tt>d_end_offsets[i]-1</tt> is the last element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>.  If <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>, the <em>i</em><sup>th</sup> is considered empty.
   int                    /*num_segments*/,                ///< [in] The number of segments that comprise the sorting data
   int                      begin_bit,                     ///< [in] Bit position of current radix digit
-  int                      end_bit)
+  int                      end_bit,
+  int                      actual_begin_bit,
+  int                      actual_end_bit,
+  bool                     is_first_kernel)
 {
   const unsigned int segment_id = blockIdx.x;
   OffsetT segment_begin         = d_begin_offsets[segment_id];
@@ -554,8 +557,20 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
     typename ChainedPolicyT::ActivePolicy::AltSegmentedPolicy,
     typename ChainedPolicyT::ActivePolicy::SegmentedPolicy>::Type;
 
+  // TODO Min
+  using SmallSegmentPolicyT = typename ChainedPolicyT::ActivePolicy::SegmentedPolicy;
+
+  constexpr int alt_tile_size = ChainedPolicyT::ActivePolicy::AltSegmentedPolicy::BLOCK_THREADS * ChainedPolicyT::ActivePolicy::AltSegmentedPolicy::ITEMS_PER_THREAD;
+  constexpr int seg_tile_size = ChainedPolicyT::ActivePolicy::SegmentedPolicy::BLOCK_THREADS * ChainedPolicyT::ActivePolicy::SegmentedPolicy::ITEMS_PER_THREAD;
+  constexpr int small_tile_size = alt_tile_size < seg_tile_size ? alt_tile_size : seg_tile_size;
+
   using AgentSegmentedRadixSortT =
-    AgentSegmentedRadixSort<SegmentedPolicyT, IS_DESCENDING, KeyT, ValueT, OffsetT>;
+    AgentSegmentedRadixSort<SegmentedPolicyT,
+                            IS_DESCENDING, 
+                            KeyT, 
+                            ValueT, 
+                            OffsetT,
+                            small_tile_size>;
 
   __shared__ typename AgentSegmentedRadixSortT::TempStorage temp_storage;
 
@@ -567,9 +582,12 @@ __global__ void DeviceSegmentedRadixSortNewKernel(
                                  d_values_remaining_passes,
                                  begin_bit,
                                  end_bit,
+                                 actual_begin_bit,
+                                 actual_end_bit,
                                  segment_begin,
                                  segment_end,
                                  num_items,
+                                 is_first_kernel,
                                  temp_storage);
 
   agent.ProcessSegment();
@@ -1843,7 +1861,8 @@ struct DispatchSegmentedRadixSort :
                   DoubleBuffer<ValueT> d_values_remaining_passes,
                   PassConfigT &        pass_config,
                   int                  pass_begin_bit,
-                  int                  pass_end_bit)
+                  int                  pass_end_bit,
+                  bool &               is_first_kernel)
     {
       cudaError error = cudaSuccess;
       do
@@ -1875,7 +1894,8 @@ struct DispatchSegmentedRadixSort :
                d_keys_in, d_keys_out, d_keys_remaining_passes,
                d_values_in, d_values_out, d_values_remaining_passes,
                d_begin_offsets, d_end_offsets, num_segments,
-               pass_begin_bit, pass_end_bit);
+               pass_begin_bit, pass_end_bit, begin_bit, end_bit,
+               is_first_kernel);
 
         // Check for failure to launch
         if (CubDebug(error = cudaPeekAtLastError()))
@@ -1891,6 +1911,8 @@ struct DispatchSegmentedRadixSort :
             break;
           }
         }
+
+        is_first_kernel = false;
       }
       while (0);
 
@@ -2073,6 +2095,8 @@ struct DispatchSegmentedRadixSort :
         bool is_num_passes_odd  = num_passes & 1;
         int max_alt_passes      = (num_passes * radix_bits) - num_bits;
         int alt_end_bit         = CUB_MIN(end_bit, begin_bit + (max_alt_passes * alt_radix_bits));
+        int num_alt_bits        = alt_end_bit - begin_bit;
+        int num_alt_passes      = (num_alt_bits + alt_radix_bits - 1) / alt_radix_bits;
 
         DoubleBuffer<KeyT> d_keys_remaining_passes(
           (is_overwrite_okay || is_num_passes_odd) ? d_keys.Alternate() : static_cast<KeyT*>(allocations[0]),
@@ -2106,30 +2130,21 @@ struct DispatchSegmentedRadixSort :
         KeyT   *d_keys_out   = d_keys.d_buffers[final_selector_state];
         ValueT *d_values_out = d_values.d_buffers[final_selector_state];
 
+        bool is_first_kernel = true;
+
         if (CubDebug(error = InvokePassNew(
           d_keys_in, d_keys_out, d_keys_remaining_passes,
           d_values_in, d_values_out, d_values_remaining_passes,
-          alt_pass_config, begin_bit, alt_end_bit)))
+          alt_pass_config, begin_bit, alt_end_bit, is_first_kernel)))
         {
           break;
         }
 
-        int current_bit = begin_bit;
-        int num_alt_passes = 0;
-        while (current_bit < alt_end_bit)
+        if (!is_first_kernel)
         {
-          num_alt_passes++;
-
-          d_keys_remaining_passes.selector ^= 1;
-          d_values_remaining_passes.selector ^= 1;
-
-          current_bit += alt_radix_bits;
-        }
-
-        if (num_alt_passes > 0)
-        {
-          d_keys_remaining_passes.selector ^= 1;
-          d_values_remaining_passes.selector ^= 1;
+          const int intermediate_selector = (num_alt_passes + 1) % 2;
+          d_keys_remaining_passes.selector = intermediate_selector;
+          d_values_remaining_passes.selector = intermediate_selector;
 
           d_keys_in   = d_keys_remaining_passes.Current();
           d_values_in = d_values_remaining_passes.Current();
@@ -2141,7 +2156,7 @@ struct DispatchSegmentedRadixSort :
         if (CubDebug(error = InvokePassNew(
           d_keys_in, d_keys_out, d_keys_remaining_passes,
           d_values_in, d_values_out, d_values_remaining_passes,
-          pass_config, alt_end_bit, end_bit)))
+          pass_config, alt_end_bit, end_bit, is_first_kernel)))
         {
           break;
         }

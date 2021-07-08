@@ -52,7 +52,8 @@ template <
   bool                    IS_DESCENDING,                  ///< Whether or not the sorted-order is high-to-low
   typename                KeyT,                           ///< Key type
   typename                ValueT,                         ///< Value type
-  typename                OffsetT>                        ///< Signed integer type for global offsets
+  typename                OffsetT,
+  int                     SmallTileSize>                  ///< Signed integer type for global offsets
 struct AgentSegmentedRadixSort
 {
   const KeyT              *d_keys_in_origin;              ///< [in] Input keys buffer
@@ -64,9 +65,14 @@ struct AgentSegmentedRadixSort
   int                      begin_bit;                     ///< [in] Bit position of current radix digit
   int                      end_bit;
 
+  int                      actual_begin_bit;
+  int                      actual_end_bit;
+
   OffsetT segment_begin;
   OffsetT segment_end;
   OffsetT num_items;
+
+  bool is_first_kernel;
 
   static constexpr int BLOCK_THREADS       = SegmentedPolicyT::BLOCK_THREADS;
   static constexpr int ITEMS_PER_THREAD    = SegmentedPolicyT::ITEMS_PER_THREAD;
@@ -134,9 +140,12 @@ struct AgentSegmentedRadixSort
     DoubleBuffer<ValueT>     d_values_remaining_passes,     ///< [in,out] Double values buffer
     int                      begin_bit,                     ///< [in] Bit position of current radix digit
     int                      end_bit,
+    int                      actual_begin_bit,
+    int                      actual_end_bit,
     OffsetT                  segment_begin,
     OffsetT                  segment_end,
     OffsetT                  num_items,
+    bool                     is_first_kernel,
     TempStorage             &temp_storage)
       : d_keys_in_origin(d_keys_in_origin)
       , d_keys_out_orig(d_keys_out_orig)
@@ -146,9 +155,12 @@ struct AgentSegmentedRadixSort
       , d_values_remaining_passes(d_values_remaining_passes)
       , begin_bit(begin_bit)
       , end_bit(end_bit)
+      , actual_begin_bit(actual_begin_bit)
+      , actual_end_bit(actual_end_bit)
       , segment_begin(segment_begin)
       , segment_end(segment_end)
       , num_items(num_items)
+      , is_first_kernel(is_first_kernel)
       , temp_storage(temp_storage.Alias())
   {
 
@@ -156,6 +168,11 @@ struct AgentSegmentedRadixSort
 
   __device__ __forceinline__ void ProcessSmallSegment()
   {
+    if (!is_first_kernel)
+    {
+      return;
+    }
+
     KeyT thread_keys[ITEMS_PER_THREAD];
     ValueT thread_values[ITEMS_PER_THREAD];
 
@@ -187,8 +204,8 @@ struct AgentSegmentedRadixSort
     BlockRadixSortT(temp_storage.sort)
       .SortBlockedToStriped(thread_keys,
                             thread_values,
-                            begin_bit,
-                            end_bit,
+                            actual_begin_bit,
+                            actual_end_bit,
                             Int2Type<IS_DESCENDING>(),
                             Int2Type<KEYS_ONLY>());
 
@@ -342,7 +359,7 @@ struct AgentSegmentedRadixSort
     {
       return;
     }
-    else if (num_items < ITEMS_PER_THREAD * BLOCK_THREADS)
+    else if (num_items < SmallTileSize)
     {
       ProcessSmallSegment();
     }
