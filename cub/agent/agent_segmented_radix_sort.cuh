@@ -52,21 +52,21 @@ template <
   bool                    IS_DESCENDING,                  ///< Whether or not the sorted-order is high-to-low
   typename                KeyT,                           ///< Key type
   typename                ValueT,                         ///< Value type
-  typename                OffsetT,
-  int                     SmallTileSize>                  ///< Signed integer type for global offsets
+  typename                OffsetT,                        ///< Signed integer type for global offsets
+  int                     SMALL_TILE_SIZE>
 struct AgentSegmentedRadixSort
 {
-  const KeyT              *d_keys_in_origin;              ///< [in] Input keys buffer
-  KeyT                    *d_keys_out_orig;               ///< [out] Output keys buffer
-  DoubleBuffer<KeyT>       d_keys_remaining_passes;       ///< [in,out] Double keys buffer
-  const ValueT            *d_values_in_origin;            ///< [in] Input values buffer
-  ValueT                  *d_values_out_origin;           ///< [out] Output values buffer
-  DoubleBuffer<ValueT>     d_values_remaining_passes;     ///< [in,out] Double values buffer
-  int                      begin_bit;                     ///< [in] Bit position of current radix digit
-  int                      end_bit;
+  const KeyT                *d_keys_in_origin;              ///< [in] Input keys buffer
+  KeyT                      *d_keys_out_orig;               ///< [out] Output keys buffer
+  DeviceDoubleBuffer<KeyT>   d_keys_remaining_passes;       ///< [in,out] Double keys buffer
+  const ValueT              *d_values_in_origin;            ///< [in] Input values buffer
+  ValueT                    *d_values_out_origin;           ///< [out] Output values buffer
+  DeviceDoubleBuffer<ValueT> d_values_remaining_passes;     ///< [in,out] Double values buffer
+  int                        begin_bit;                     ///< [in] Bit position of current radix digit
+  int                        end_bit;
 
-  int                      actual_begin_bit;
-  int                      actual_end_bit;
+  int                        actual_begin_bit;
+  int                        actual_end_bit;
 
   OffsetT segment_begin;
   OffsetT segment_end;
@@ -132,21 +132,21 @@ struct AgentSegmentedRadixSort
   _TempStorage &temp_storage;
 
   __device__ __forceinline__ AgentSegmentedRadixSort(
-    const KeyT              *d_keys_in_origin,              ///< [in] Input keys buffer
-    KeyT                    *d_keys_out_orig,               ///< [out] Output keys buffer
-    DoubleBuffer<KeyT>       d_keys_remaining_passes,       ///< [in,out] Double keys buffer
-    const ValueT            *d_values_in_origin,            ///< [in] Input values buffer
-    ValueT                  *d_values_out_origin,           ///< [out] Output values buffer
-    DoubleBuffer<ValueT>     d_values_remaining_passes,     ///< [in,out] Double values buffer
-    int                      begin_bit,                     ///< [in] Bit position of current radix digit
-    int                      end_bit,
-    int                      actual_begin_bit,
-    int                      actual_end_bit,
-    OffsetT                  segment_begin,
-    OffsetT                  segment_end,
-    OffsetT                  num_items,
-    bool                     is_first_kernel,
-    TempStorage             &temp_storage)
+    const KeyT                *d_keys_in_origin,              ///< [in] Input keys buffer
+    KeyT                      *d_keys_out_orig,               ///< [out] Output keys buffer
+    DeviceDoubleBuffer<KeyT>   d_keys_remaining_passes,       ///< [in,out] Double keys buffer
+    const ValueT              *d_values_in_origin,            ///< [in] Input values buffer
+    ValueT                    *d_values_out_origin,           ///< [out] Output values buffer
+    DeviceDoubleBuffer<ValueT> d_values_remaining_passes,     ///< [in,out] Double values buffer
+    int                        begin_bit,                     ///< [in] Bit position of current radix digit
+    int                        end_bit,
+    int                        actual_begin_bit,
+    int                        actual_end_bit,
+    OffsetT                    segment_begin,
+    OffsetT                    segment_end,
+    OffsetT                    num_items,
+    bool                       is_first_kernel,
+    TempStorage               &temp_storage)
       : d_keys_in_origin(d_keys_in_origin)
       , d_keys_out_orig(d_keys_out_orig)
       , d_keys_remaining_passes(d_keys_remaining_passes)
@@ -229,18 +229,19 @@ struct AgentSegmentedRadixSort
 
   __device__ __forceinline__ void ProcessHugeSegment()
   {
-    int current_bit = begin_bit;
-
     const KeyT *d_keys_in     = d_keys_in_origin;
     const ValueT *d_values_in = d_values_in_origin;
 
     KeyT *d_keys_out     = d_keys_remaining_passes.Current();
     ValueT *d_values_out = d_values_remaining_passes.Current();
 
-    int selector = d_keys_remaining_passes.selector;
-
-    while (current_bit < end_bit)
+    for (int current_bit = begin_bit; current_bit < end_bit; current_bit += RADIX_BITS)
     {
+      if (current_bit > begin_bit)
+      {
+        CTA_SYNC();
+      }
+
       int pass_bits = CUB_MIN(RADIX_BITS, (end_bit - current_bit));
 
       // Upsweep
@@ -339,16 +340,13 @@ struct AgentSegmentedRadixSort
       downsweep.ProcessRegion(segment_begin, segment_end);
 
       // Update pointers of double buffers
-      d_keys_in = d_keys_remaining_passes.d_buffers[selector];
-      d_keys_out = d_keys_remaining_passes.d_buffers[selector ^ 1];
+      d_keys_in = d_keys_remaining_passes.Current();
+      d_keys_out = d_keys_remaining_passes.Alternate();
+      d_keys_remaining_passes.Swap();
 
-      d_values_in = d_values_remaining_passes.d_buffers[selector];
-      d_values_out = d_values_remaining_passes.d_buffers[selector ^ 1];
-
-      CTA_SYNC();
-
-      selector ^= 1;
-      current_bit += pass_bits;
+      d_values_in = d_values_remaining_passes.Current();
+      d_values_out = d_values_remaining_passes.Alternate();
+      d_values_remaining_passes.Swap();
     }
   }
 
@@ -359,7 +357,7 @@ struct AgentSegmentedRadixSort
     {
       return;
     }
-    else if (num_items < SmallTileSize)
+    else if (num_items < SMALL_TILE_SIZE)
     {
       ProcessSmallSegment();
     }
