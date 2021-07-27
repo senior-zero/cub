@@ -37,6 +37,22 @@ CUB_NS_PREFIX
 /// CUB namespace
 namespace cub {
 
+__device__ unsigned char clz(std::uint32_t val)
+{
+  return __clz(val);
+}
+
+__device__ unsigned char clz(int val)
+{
+  return __clz(val);
+}
+
+__device__ unsigned char clz(std::uint64_t val)
+{
+  return __clzll(val);
+}
+
+
 // TODO Extract agent
 template <
   int BinsCount,
@@ -60,7 +76,7 @@ __global__ void BinCountKernel(const unsigned int num_segments,
   if (segment_id < num_segments)
   {
     const auto segment_size = segment_handler.get_segment_size(segment_id);
-    const int bin_id        = __clz(segment_size); // TODO __clzll for 64b types
+    const int bin_id        = clz(segment_size);
 
     atomicAdd(bins_cache + bin_id, 1);
   }
@@ -75,26 +91,29 @@ __global__ void BinCountKernel(const unsigned int num_segments,
 // TODO Extract agent
 template <int BinsCount,
   int BlockSize>
-__global__ void BinsPrefixKernel(const int *bins, int *bins_prefix)
+__global__ void BinsPrefixKernel(const int *bins, int *bins_prefix, int *bins_prefix_copy)
 {
   using BlockScan = cub::BlockScan<int, BlockSize>;
   __shared__ typename BlockScan::TempStorage temp_storage;
 
-  const int tid = threadIdx.x;
+  const int tid = static_cast<int>(threadIdx.x);
 
   int thread_data = tid < BinsCount ? bins[tid] : 0u;
 
   BlockScan(temp_storage).ExclusiveSum(thread_data, thread_data);
 
-  if (tid <= BlockSize)
+  if (tid <= BinsCount)
+  {
     bins_prefix[tid] = thread_data;
+    bins_prefix_copy[tid] = thread_data;
+  }
 }
 
 // TODO Extract agent
 template <int BinsCount,
   typename SegmentHandlerT>
 __global__ void BalanceSegments(
-  const unsigned int num_segments,
+  const int num_segments,
   int *bins_prefix,
   SegmentHandlerT segment_handler)
 {
@@ -118,7 +137,7 @@ __global__ void BalanceSegments(
   {
     const auto segment_size = segment_handler.get_segment_size(segment_id);
 
-    bin_id = __clz(segment_size); // TODO __clzll for 64b types
+    bin_id = clz(segment_size);
     my_pos = atomicAdd(local_bins + bin_id, 1);
   }
   __syncthreads();
@@ -170,8 +189,10 @@ struct DispatchLogarithmicRadixBinning
 
     do
     {
-      void*  allocations[2]      = {nullptr, nullptr};
-      size_t allocation_sizes[2] = {PREFIX_SIZE * sizeof(int), BINS_SIZE * sizeof(int)};
+      void*  allocations[3]      = {nullptr, nullptr, nullptr};
+      size_t allocation_sizes[3] = {BINS_SIZE * sizeof(int),
+                                    PREFIX_SIZE * sizeof(int),
+                                    PREFIX_SIZE * sizeof(int)};
 
       if (CubDebug(status = AliasTemporaries(d_storage,
                                              storage_bytes,
@@ -192,6 +213,9 @@ struct DispatchLogarithmicRadixBinning
       result.d_bins        = reinterpret_cast<int *>(allocations[0]);
       result.d_bins_prefix = reinterpret_cast<int *>(allocations[1]);
 
+      int *d_counts = reinterpret_cast<int *>(allocations[2]);
+      cudaMemsetAsync(result.d_bins, 0, sizeof(int) * BINS_SIZE);
+
       // TODO Extract into policy
       const unsigned int threads_in_block = 256;
       const unsigned int blocks_in_grid =
@@ -204,12 +228,12 @@ struct DispatchLogarithmicRadixBinning
 
       // TODO Use thrust launch
       BinsPrefixKernel<BINS_SIZE, SCAN_BLOCK_SIZE><<<1, SCAN_BLOCK_SIZE>>>(
-        result.d_bins, result.d_bins_prefix);
+        result.d_bins, result.d_bins_prefix, d_counts);
       // TODO Check launch failure and sync
 
       // TODO Use thrust launch
       BalanceSegments<BINS_SIZE><<<blocks_in_grid, threads_in_block>>>(
-        num_segments, result.d_bins_prefix, segment_handler);
+        num_segments, d_counts, segment_handler);
       // TODO Check launch failure and sync
     } while (false);
 
