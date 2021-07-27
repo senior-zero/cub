@@ -179,7 +179,7 @@ void TestSingleItemSegments(OffsetT segments)
                                                   0,
                                                   true));
 
-  AssertEquals(d_keys_input, d_keys_output);
+  AssertEquals(keys_input, keys_output);
 }
 
 template <typename KeyT,

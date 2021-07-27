@@ -52,7 +52,9 @@ struct DeviceSegmentedSort
            cudaStream_t stream    = 0,
            bool debug_synchronous = false)
   {
-    using DispatchT = DispatchSegmentedSort<KeyT,
+    constexpr bool is_descending = false;
+    using DispatchT = DispatchSegmentedSort<is_descending,
+                                            KeyT,
                                             cub::NullType,
                                             OffsetT,
                                             BeginOffsetIteratorT,
