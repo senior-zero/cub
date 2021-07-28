@@ -33,9 +33,11 @@
 #include "../../block/block_scan.cuh"
 #include "../../block/block_load.cuh"
 #include "../../block/block_radix_rank.cuh"
+#include "../../device/device_partition.cuh"
 #include "../../agent/agent_segmented_radix_sort.cuh"
 
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
+#include <thrust/iterator/counting_iterator.h>
 
 #include <type_traits>
 
@@ -169,8 +171,59 @@ __global__ void DeviceSegmentedRadixSortFallbackKernel(
 }
 
 
+template <typename T,
+  typename BeginOffsetIteratorT,
+  typename EndOffsetIteratorT>
+struct SegmentSizeGreaterThan
+{
+  T value {};
+  BeginOffsetIteratorT d_offset_begin {};
+  EndOffsetIteratorT d_offset_end {};
+
+  explicit SegmentSizeGreaterThan(
+    T value,
+    BeginOffsetIteratorT d_offset_begin,
+    EndOffsetIteratorT d_offset_end)
+    : value(value)
+    , d_offset_begin(d_offset_begin)
+    , d_offset_end(d_offset_end)
+  {}
+
+  __device__ bool operator()(unsigned int segment_id) const
+  {
+    // const T segment_size = d_offset_end[segment_id] - d_offset_begin[segment_id];
+    return 1; // || segment_size > value;
+  }
+};
+
+template <typename T,
+  typename BeginOffsetIteratorT,
+  typename EndOffsetIteratorT>
+struct SegmentSizeLessThan
+{
+  T value {};
+  BeginOffsetIteratorT d_offset_begin {};
+  EndOffsetIteratorT d_offset_end {};
+
+  explicit SegmentSizeLessThan(
+    T value,
+    BeginOffsetIteratorT d_offset_begin,
+    EndOffsetIteratorT d_offset_end)
+    : value(value)
+    , d_offset_begin(d_offset_begin)
+    , d_offset_end(d_offset_end)
+  {}
+
+  __device__ bool operator()(unsigned int segment_id) const
+  {
+    // const T segment_size = d_offset_end[segment_id] - d_offset_begin[segment_id];
+    return 0;// && segment_size < value;
+  }
+};
+
+
 template <typename KeyT,
-          typename ValueT>
+  typename ValueT>
 struct DeviceSegmentedSortPolicy
 {
   using DominantT = typename std::conditional<(sizeof(ValueT) > sizeof(KeyT)), ValueT, KeyT>::type;
@@ -270,15 +323,69 @@ struct DispatchSegmentedSort : SelectedPolicy
     do
     {
       // TODO Add DoubleBuffer option - is_override_enabled
+      const bool reorder_segments = num_segments > 500; // TODO Magick number
 
       std::size_t tmp_keys_storage_bytes = num_items * sizeof(KeyT);
       std::size_t tmp_values_storage_bytes = KEYS_ONLY
                                            ? std::size_t{}
                                            : num_items * sizeof(KeyT);
 
-      void *allocations[2]            = {nullptr, nullptr};
-      std::size_t allocation_sizes[2] = {tmp_keys_storage_bytes,
-                                         tmp_values_storage_bytes};
+      OffsetT *d_large_and_medium_segments_reordering = nullptr;
+      OffsetT *d_small_segments_reordering = nullptr;
+      OffsetT *d_group_sizes = nullptr;
+
+      std::size_t three_way_partition_temp_storage_bytes {};
+
+      SegmentSizeGreaterThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>
+        large_segments_selector(ActivePolicyT::MEDIUM_SEGMENT_MAX_SIZE,
+                                d_begin_offsets,
+                                d_end_offsets);
+
+      SegmentSizeLessThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>
+        small_segments_selector(ActivePolicyT::SMALL_SEGMENT_MAX_SIZE + 1,
+                                d_begin_offsets,
+                                d_end_offsets);
+
+      if (reorder_segments)
+      {
+        cub::DevicePartition::If(nullptr,
+                                 three_way_partition_temp_storage_bytes,
+                                 THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
+                                 d_large_and_medium_segments_reordering,
+                                 d_small_segments_reordering,
+                                 d_group_sizes,
+                                 num_segments,
+                                 large_segments_selector,
+                                 small_segments_selector,
+                                 stream,
+                                 debug_synchronous);
+      }
+
+      std::size_t large_and_medium_segments_reordering_bytes =
+        reorder_segments ? sizeof(OffsetT) * num_segments : 0;
+
+      std::size_t small_segments_reordering_bytes =
+        reorder_segments ? sizeof(OffsetT) * num_segments : 0;
+
+      std::size_t keys_and_partitioning_union =
+        std::max(tmp_keys_storage_bytes,
+                 three_way_partition_temp_storage_bytes);
+
+      std::size_t num_size_groups = 3;
+      std::size_t group_sizes_bytes = reorder_segments
+                                    ? sizeof(OffsetT) * num_size_groups
+                                    : 0ul;
+
+      std::size_t allocation_sizes[5] = {
+        keys_and_partitioning_union,
+        tmp_values_storage_bytes,
+        large_and_medium_segments_reordering_bytes,
+        small_segments_reordering_bytes,
+        group_sizes_bytes
+      };
+
+      void *allocations[5] =
+        {nullptr, nullptr, nullptr, nullptr, nullptr};
 
       if (CubDebug(error = AliasTemporaries(d_temp_storage,
                                             temp_storage_bytes,
@@ -297,6 +404,33 @@ struct DispatchSegmentedSort : SelectedPolicy
 
         // Return if the caller is simply requesting the size of the storage allocation
         break;
+      }
+
+      d_large_and_medium_segments_reordering = reinterpret_cast<OffsetT*>(allocations[2]);
+      d_small_segments_reordering = reinterpret_cast<OffsetT*>(allocations[3]);
+      d_group_sizes = reinterpret_cast<OffsetT*>(allocations[4]);
+
+      if (reorder_segments)
+      {
+        void *d_partition_temp_storage = allocations[0];
+
+        error = cub::DevicePartition::If(
+          d_partition_temp_storage,
+          three_way_partition_temp_storage_bytes,
+          THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
+          d_large_and_medium_segments_reordering,
+          d_small_segments_reordering,
+          d_group_sizes,
+          num_segments,
+          large_segments_selector,
+          small_segments_selector,
+          stream,
+          debug_synchronous);
+
+        if (CubDebug(error))
+        {
+          break;
+        }
       }
 
       KeyT *d_keys_allocation = reinterpret_cast<KeyT*>(allocations[0]);

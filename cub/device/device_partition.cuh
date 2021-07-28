@@ -38,6 +38,7 @@
 #include <iterator>
 
 #include "dispatch/dispatch_select_if.cuh"
+#include "dispatch/dispatch_three_way_partition.cuh"
 #include "../config.cuh"
 
 CUB_NAMESPACE_BEGIN
@@ -228,8 +229,8 @@ struct DevicePartition
         typename                    SelectOp>
     CUB_RUNTIME_FUNCTION __forceinline__
     static cudaError_t If(
-        void*               d_temp_storage,                ///< [in] %Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
-        size_t                      &temp_storage_bytes,            ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
+        void*                       d_temp_storage,                 ///< [in] %Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
+        size_t&                     temp_storage_bytes,             ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
         InputIteratorT              d_in,                           ///< [in] Pointer to the input sequence of data items
         OutputIteratorT             d_out,                          ///< [out] Pointer to the output sequence of partitioned data items
         NumSelectedIteratorT        d_num_selected_out,             ///< [out] Pointer to the output total number of items selected (i.e., the offset of the unselected partition)
@@ -238,7 +239,7 @@ struct DevicePartition
         cudaStream_t                stream             = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
         bool                        debug_synchronous  = false)     ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  May cause significant slowdown.  Default is \p false.
     {
-        typedef int                     OffsetT;         // Signed integer type for global offsets
+        typedef int                     OffsetT;        // Signed integer type for global offsets
         typedef NullType*               FlagIterator;   // FlagT iterator type (not used)
         typedef NullType                EqualityOp;     // Equality operator (not used)
 
@@ -256,6 +257,49 @@ struct DevicePartition
             debug_synchronous);
     }
 
+    template <typename InputIteratorT,
+              typename OutputIteratorT,
+              typename NumSelectedIteratorT,
+              typename SelectBeginOp,
+              typename SelectEndOp>
+    static cudaError_t If(
+      void*                       d_temp_storage,                 ///< [in] %Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
+      size_t&                     temp_storage_bytes,             ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
+      InputIteratorT              d_in,                           ///< [in] Pointer to the input sequence of data items
+      OutputIteratorT             d_begin_and_middle_out,         ///< [out] Pointer to the output sequence of partitioned data items
+      OutputIteratorT             d_end_out,                      ///< [out] Pointer to the output sequence of partitioned data items
+      NumSelectedIteratorT        d_num_selected_out,             ///< [out] Pointer to the output total number of items selected (i.e., the offset of the unselected partition)
+      int                         num_items,                      ///< [in] Total number of items to select from
+      SelectBeginOp               select_begin_op,                ///< [in] Unary selection operator
+      SelectEndOp                 select_end_op,                  ///< [in] Unary selection operator
+      cudaStream_t                stream             = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
+      bool                        debug_synchronous  = false)     ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  May cause significant slowdown.  Default is \p false.
+    {
+      using OffsetT = int;                  // Signed integer type for global offsets
+      using FlagIterator = cub::NullType *; // FlagT iterator type (not used)
+      using EqualityOp = cub::NullType;     // Equality operator (not used)
+
+      return DispatchThreeWayPartitionIf<InputIteratorT,
+                                         FlagIterator,
+                                         OutputIteratorT,
+                                         NumSelectedIteratorT,
+                                         SelectBeginOp,
+                                         SelectEndOp,
+                                         EqualityOp,
+                                         OffsetT>::Dispatch(d_temp_storage,
+                                                            temp_storage_bytes,
+                                                            d_in,
+                                                            nullptr,
+                                                            d_begin_and_middle_out,
+                                                            d_end_out,
+                                                            d_num_selected_out,
+                                                            select_begin_op,
+                                                            select_end_op,
+                                                            EqualityOp(),
+                                                            num_items,
+                                                            stream,
+                                                            debug_synchronous);
+    }
 };
 
 /**
