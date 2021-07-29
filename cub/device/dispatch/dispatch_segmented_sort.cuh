@@ -419,7 +419,7 @@ template <bool IS_DESCENDING,
           typename EndOffsetIteratorT,
           typename OffsetT>
 __launch_bounds__ (SegmentedPolicyT::BLOCK_THREADS)
-__global__ void DeviceSegmentedRadixSortFallbackKernel(
+__global__ void DeviceSegmentedSortFallbackKernel(
   const KeyT                      *d_keys_in_origin,              ///< [in] Input keys buffer
   KeyT                            *d_keys_out_orig,               ///< [out] Output keys buffer
   cub::DeviceDoubleBuffer<KeyT>    d_keys_remaining_passes,       ///< [in,out] Double keys buffer
@@ -542,7 +542,7 @@ template <
   typename                EndOffsetIteratorT,             ///< Random-access input iterator type for reading segment ending offsets \iterator
   typename                OffsetT>                        ///< Signed integer type for global offsets
 __launch_bounds__ (SegmentedPolicyT::BLOCK_THREADS)
-__global__ void DeviceSegmentedRadixSortNewKernelWithReorderingSmall(
+__global__ void DeviceSegmentedSortKernelWithReorderingSmall(
   OffsetT                          small_segments,
   OffsetT                          medium_segments,
   OffsetT                          medium_blocks,
@@ -639,7 +639,7 @@ template <
   typename                EndOffsetIteratorT,             ///< Random-access input iterator type for reading segment ending offsets \iterator
   typename                OffsetT>                        ///< Signed integer type for global offsets
 __launch_bounds__ (SegmentedPolicyT::BLOCK_THREADS)
-__global__ void DeviceSegmentedRadixSortNewKernelWithReorderingLarge(
+__global__ void DeviceSegmentedSortKernelWithReorderingLarge(
   const OffsetT                   *d_segments_reordering,
   const KeyT                      *d_keys_in_origin,              ///< [in] Input keys buffer
   KeyT                            *d_keys_out_orig,               ///< [out] Output keys buffer
@@ -1017,13 +1017,23 @@ struct DispatchSegmentedSort : SelectedPolicy
           const OffsetT blocks_in_grid = large_segments; // One CTA per segment
 
           // TODO cudaGraph
+          if (debug_synchronous)
+          {
+            _CubLog("Invoking "
+                    "DeviceSegmentedSortKernelWithReorderingLarge<<<"
+                    "%d, %d, 0, %lld>>>(), %d items per thread\n",
+                    static_cast<int>(blocks_in_grid),
+                    SmallAndMediumPolicyT::BLOCK_THREADS,
+                    (long long)stream,
+                    SmallAndMediumPolicyT::ITEMS_PER_THREAD);
+          }
 
           THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
             blocks_in_grid,
             LargeSegmentPolicyT::BLOCK_THREADS,
             0,
             stream)
-            .doit(DeviceSegmentedRadixSortNewKernelWithReorderingLarge<
+            .doit(DeviceSegmentedSortKernelWithReorderingLarge<
                     IS_DESCENDING,
                     LargeSegmentPolicyT,
                     KeyT,
@@ -1076,13 +1086,24 @@ struct DispatchSegmentedSort : SelectedPolicy
 
         if (small_and_medium_blocks_in_grid)
         {
+          if (debug_synchronous)
+          {
+            _CubLog("Invoking "
+                    "DeviceSegmentedSortKernelWithReorderingSmall<<<"
+                    "%d, %d, 0, %lld>>>(), %d items per thread\n",
+                    static_cast<int>(small_and_medium_blocks_in_grid),
+                    SmallAndMediumPolicyT::BLOCK_THREADS,
+                    (long long)stream,
+                    SmallAndMediumPolicyT::ITEMS_PER_THREAD);
+          }
+
           // TODO cudaGraph
           THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
             small_and_medium_blocks_in_grid,
             SmallAndMediumPolicyT::BLOCK_THREADS,
             0,
             stream)
-            .doit(DeviceSegmentedRadixSortNewKernelWithReorderingSmall<
+            .doit(DeviceSegmentedSortKernelWithReorderingSmall<
                     IS_DESCENDING,
                     SmallAndMediumPolicyT,
                     KeyT,
@@ -1110,10 +1131,10 @@ struct DispatchSegmentedSort : SelectedPolicy
         const unsigned int threads_in_block =
           LargeSegmentPolicyT::BLOCK_THREADS;
 
-        // Log single_tile_kernel configuration
+        // Log kernel configuration
         if (debug_synchronous)
         {
-          _CubLog("Invoking DeviceSegmentedRadixSortFallbackKernel<<<%d, %d, "
+          _CubLog("Invoking DeviceSegmentedSortFallbackKernel<<<%d, %d, "
                   "0, %lld>>>(), %d items per thread, bit_grain %d\n",
                   blocks_in_grid,
                   threads_in_block,
@@ -1127,13 +1148,13 @@ struct DispatchSegmentedSort : SelectedPolicy
                                                                 threads_in_block,
                                                                 0,
                                                                 stream)
-          .doit(DeviceSegmentedRadixSortFallbackKernel<IS_DESCENDING,
-                                                       LargeSegmentPolicyT,
-                                                       KeyT,
-                                                       ValueT,
-                                                       BeginOffsetIteratorT,
-                                                       EndOffsetIteratorT,
-                                                       OffsetT>,
+          .doit(DeviceSegmentedSortFallbackKernel<IS_DESCENDING,
+                                                  LargeSegmentPolicyT,
+                                                  KeyT,
+                                                  ValueT,
+                                                  BeginOffsetIteratorT,
+                                                  EndOffsetIteratorT,
+                                                  OffsetT>,
                 d_keys_in,
                 d_keys_out,
                 d_keys_remaining_passes,

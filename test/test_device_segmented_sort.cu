@@ -484,7 +484,8 @@ int main(int argc, char** argv)
   Test<std::uint8_t,  std::uint32_t>();
   Test<std::uint16_t, std::uint32_t>();
   Test<std::uint32_t, std::uint32_t>();
-  Test<std::uint32_t, std::uint64_t>();
+  Test<std::uint64_t, std::uint32_t>();
+  Test<std::uint32_t, std::int64_t>();
 
   return 0;
 }
