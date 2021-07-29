@@ -38,8 +38,8 @@ CUB_NAMESPACE_BEGIN
 
 
 template <
-  typename  SegmentedPolicyT,               ///< Chained tuning policy
   bool      IS_DESCENDING,                  ///< Whether or not the sorted-order is high-to-low
+  typename  SegmentedPolicyT,               ///< Chained tuning policy
   typename  KeyT,                           ///< Key type
   typename  ValueT,                         ///< Value type
   typename  OffsetT>                        ///< Signed integer type for global offsets

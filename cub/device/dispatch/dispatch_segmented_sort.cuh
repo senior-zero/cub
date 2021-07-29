@@ -34,6 +34,7 @@
 #include "../../block/block_load.cuh"
 #include "../../block/block_radix_rank.cuh"
 #include "../../device/device_partition.cuh"
+#include "../../agent/agent_segmented_sort.cuh"
 #include "../../agent/agent_segmented_radix_sort.cuh"
 #include "../../block/block_merge_sort.cuh"
 #include "../../thread/thread_sort.cuh"
@@ -439,8 +440,8 @@ __global__ void DeviceSegmentedRadixSortFallbackKernel(
   }
 
   using AgentSegmentedRadixSortT =
-    cub::AgentSegmentedRadixSort<SegmentedPolicyT,
-                                 IS_DESCENDING,
+    cub::AgentSegmentedRadixSort<IS_DESCENDING,
+                                 SegmentedPolicyT,
                                  KeyT,
                                  ValueT,
                                  OffsetT>;
@@ -532,6 +533,194 @@ __global__ void DeviceSegmentedRadixSortFallbackKernel(
 }
 
 
+template <
+  bool                    IS_DESCENDING,
+  typename                SegmentedPolicyT,               ///< Active tuning policy
+  typename                KeyT,                           ///< Key type
+  typename                ValueT,                         ///< Value type
+  typename                BeginOffsetIteratorT,           ///< Random-access input iterator type for reading segment beginning offsets \iterator
+  typename                EndOffsetIteratorT,             ///< Random-access input iterator type for reading segment ending offsets \iterator
+  typename                OffsetT>                        ///< Signed integer type for global offsets
+__launch_bounds__ (SegmentedPolicyT::BLOCK_THREADS)
+__global__ void DeviceSegmentedRadixSortNewKernelWithReorderingSmall(
+  OffsetT                          small_segments,
+  OffsetT                          medium_segments,
+  OffsetT                          medium_blocks,
+  const OffsetT                   *d_small_segments_reordering,
+  const OffsetT                   *d_medium_segments_reordering,
+  const KeyT                      *d_keys_in_origin,              ///< [in] Input keys buffer
+  KeyT                            *d_keys_out_orig,               ///< [out] Output keys buffer
+  const ValueT                    *d_values_in_origin,            ///< [in] Input values buffer
+  ValueT                          *d_values_out_origin,           ///< [out] Output values buffer
+  BeginOffsetIteratorT             d_begin_offsets,               ///< [in] Random-access input iterator to the sequence of beginning offsets of length \p num_segments, such that <tt>d_begin_offsets[i]</tt> is the first element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
+  EndOffsetIteratorT               d_end_offsets)                 ///< [in] Random-access input iterator to the sequence of ending offsets of length \p num_segments, such that <tt>d_end_offsets[i]-1</tt> is the last element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>.  If <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>, the <em>i</em><sup>th</sup> is considered empty.
+{
+  const unsigned int tid = threadIdx.x;
+  const unsigned int bid = blockIdx.x;
+
+  constexpr int items_per_thread = SegmentedPolicyT::ITEMS_PER_THREAD;
+  constexpr int threads_per_medium_segment = SegmentedPolicyT::THREADS_PER_MEDIUM_SEGMENT;
+  constexpr int threads_per_small_segment = SegmentedPolicyT::THREADS_PER_SMALL_SEGMENT;
+  constexpr int medium_segment_max_size = SegmentedPolicyT::MEDIUM_SEGMENT_MAX_SIZE;
+  constexpr int small_segment_max_size = SegmentedPolicyT::SMALL_SEGMENT_MAX_SIZE;
+
+  __shared__ union
+  {
+    KeyT block_keys_cache[items_per_thread * SegmentedPolicyT::BLOCK_THREADS + 1];
+    ValueT block_values_cache[items_per_thread * SegmentedPolicyT::BLOCK_THREADS + 1];
+  } temp_storage;
+
+  if (bid < medium_blocks)
+  {
+    constexpr OffsetT segments_per_medium_block =
+      static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_MEDIUM_BLOCK);
+
+    const OffsetT sid_within_block = tid / threads_per_medium_segment;
+    const OffsetT reordered_segment_id = bid * segments_per_medium_block + sid_within_block;
+
+    if (reordered_segment_id < medium_segments)
+    {
+      const OffsetT segment_id =
+        d_medium_segments_reordering[reordered_segment_id];
+
+      OffsetT segment_begin = d_begin_offsets[segment_id];
+      OffsetT segment_end   = d_end_offsets[segment_id];
+      OffsetT num_items     = segment_end - segment_begin;
+
+      const int group_offset = sid_within_block * medium_segment_max_size;
+
+      sub_warp_merge_sort<IS_DESCENDING, items_per_thread, threads_per_medium_segment, KeyT, ValueT>(
+        d_keys_in_origin + segment_begin,
+        d_keys_out_orig + segment_begin,
+        d_values_in_origin + segment_begin,
+        d_values_out_origin + segment_begin,
+        num_items,
+        temp_storage.block_keys_cache + group_offset,
+        temp_storage.block_values_cache + group_offset);
+    }
+  }
+  else
+  {
+    constexpr OffsetT segments_per_small_block =
+      static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_SMALL_BLOCK);
+
+    const OffsetT sid_within_block = tid / threads_per_small_segment;
+    const OffsetT reordered_segment_id = (bid - medium_blocks) * segments_per_small_block + sid_within_block;
+
+    if (reordered_segment_id < small_segments)
+    {
+      const OffsetT segment_id =
+        d_small_segments_reordering[reordered_segment_id];
+
+      OffsetT segment_begin = d_begin_offsets[segment_id];
+      OffsetT segment_end   = d_end_offsets[segment_id];
+      OffsetT num_items     = segment_end - segment_begin;
+
+      const int group_offset = sid_within_block * small_segment_max_size;
+
+      sub_warp_merge_sort<IS_DESCENDING, items_per_thread, threads_per_small_segment, KeyT, ValueT>(
+        d_keys_in_origin + segment_begin,
+        d_keys_out_orig + segment_begin,
+        d_values_in_origin + segment_begin,
+        d_values_out_origin + segment_begin,
+        num_items,
+        temp_storage.block_keys_cache + group_offset,
+        temp_storage.block_values_cache + group_offset);
+    }
+  }
+}
+
+template <
+  bool                    IS_DESCENDING,
+  typename                SegmentedPolicyT,               ///< Active tuning policy
+  typename                KeyT,                           ///< Key type
+  typename                ValueT,                         ///< Value type
+  typename                BeginOffsetIteratorT,           ///< Random-access input iterator type for reading segment beginning offsets \iterator
+  typename                EndOffsetIteratorT,             ///< Random-access input iterator type for reading segment ending offsets \iterator
+  typename                OffsetT>                        ///< Signed integer type for global offsets
+__launch_bounds__ (SegmentedPolicyT::BLOCK_THREADS)
+__global__ void DeviceSegmentedRadixSortNewKernelWithReorderingLarge(
+  const OffsetT                   *d_segments_reordering,
+  const KeyT                      *d_keys_in_origin,              ///< [in] Input keys buffer
+  KeyT                            *d_keys_out_orig,               ///< [out] Output keys buffer
+  cub::DeviceDoubleBuffer<KeyT>    d_keys_remaining_passes,       ///< [in,out] Double keys buffer
+  const ValueT                    *d_values_in_origin,            ///< [in] Input values buffer
+  ValueT                          *d_values_out_origin,           ///< [out] Output values buffer
+  cub::DeviceDoubleBuffer<ValueT>  d_values_remaining_passes,     ///< [in,out] Double values buffer
+  BeginOffsetIteratorT             d_begin_offsets,               ///< [in] Random-access input iterator to the sequence of beginning offsets of length \p num_segments, such that <tt>d_begin_offsets[i]</tt> is the first element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
+  EndOffsetIteratorT               d_end_offsets)                 ///< [in] Random-access input iterator to the sequence of ending offsets of length \p num_segments, such that <tt>d_end_offsets[i]-1</tt> is the last element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>.  If <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>, the <em>i</em><sup>th</sup> is considered empty.
+{
+  constexpr int small_tile_size = SegmentedPolicyT::BLOCK_THREADS *
+                                  SegmentedPolicyT::ITEMS_PER_THREAD;
+
+  using AgentSegmentedRadixSortT =
+    cub::AgentSegmentedRadixSort<IS_DESCENDING,
+                                 SegmentedPolicyT,
+                                 KeyT,
+                                 ValueT,
+                                 OffsetT>;
+
+  __shared__ typename AgentSegmentedRadixSortT::TempStorage block_sort;
+
+  const unsigned int bid = blockIdx.x;
+
+  constexpr int begin_bit = 0;
+  constexpr int end_bit   = sizeof(KeyT) * 8;
+
+  const OffsetT segment_id    = d_segments_reordering[bid];
+  const OffsetT segment_begin = d_begin_offsets[segment_id];
+  const OffsetT segment_end   = d_end_offsets[segment_id];
+  const OffsetT num_items     = segment_end - segment_begin;
+
+  AgentSegmentedRadixSortT agent(segment_begin,
+                                 segment_end,
+                                 num_items,
+                                 block_sort);
+
+  if (num_items < small_tile_size)
+  {
+    agent.ProcessSmallSegment(begin_bit,
+                              end_bit,
+                              d_keys_in_origin,
+                              d_values_in_origin,
+                              d_keys_out_orig,
+                              d_values_out_origin);
+  }
+  else
+  {
+    int current_bit = begin_bit;
+    int pass_bits   = CUB_MIN(SegmentedPolicyT::RADIX_BITS,
+                              (end_bit - current_bit));
+
+    agent.ProcessLargeSegment(current_bit,
+                              pass_bits,
+                              d_keys_in_origin,
+                              d_values_in_origin,
+                              d_keys_remaining_passes.Current(),
+                              d_values_remaining_passes.Current());
+    current_bit += pass_bits;
+
+#pragma unroll 1
+    while (current_bit < end_bit)
+    {
+      pass_bits = CUB_MIN(SegmentedPolicyT::RADIX_BITS,
+                          (end_bit - current_bit));
+
+      __syncthreads();
+      agent.ProcessLargeSegment(current_bit,
+                                pass_bits,
+                                d_keys_remaining_passes.Current(),
+                                d_values_remaining_passes.Current(),
+                                d_keys_remaining_passes.Alternate(),
+                                d_values_remaining_passes.Alternate());
+
+        d_keys_remaining_passes.Swap();
+        d_values_remaining_passes.Swap();
+        current_bit += pass_bits;
+      }
+    }
+        }
+
 template <typename T,
   typename BeginOffsetIteratorT,
   typename EndOffsetIteratorT>
@@ -552,8 +741,8 @@ struct SegmentSizeGreaterThan
 
   __device__ bool operator()(unsigned int segment_id) const
   {
-    // const T segment_size = d_offset_end[segment_id] - d_offset_begin[segment_id];
-    return 1; // || segment_size > value;
+    const T segment_size = d_offset_end[segment_id] - d_offset_begin[segment_id];
+    return segment_size > value;
   }
 };
 
@@ -577,8 +766,8 @@ struct SegmentSizeLessThan
 
   __device__ bool operator()(unsigned int segment_id) const
   {
-    // const T segment_size = d_offset_end[segment_id] - d_offset_begin[segment_id];
-    return 0;// && segment_size < value;
+    const T segment_size = d_offset_end[segment_id] - d_offset_begin[segment_id];
+    return segment_size < value;
   }
 };
 
@@ -607,14 +796,14 @@ struct DeviceSegmentedSortPolicy
                                          cub::BLOCK_SCAN_WARP_SCANS,
                                          6>;
 
-    constexpr static int ITEMS_PER_THREAD = KEYS_ONLY ? 9 : 7; // TODO 4B ITEMS
-    constexpr static int THREADS_PER_MEDIUM_SEGMENT = 32;
-    constexpr static int MEDIUM_SEGMENT_MAX_SIZE = ITEMS_PER_THREAD *
-                                                   THREADS_PER_MEDIUM_SEGMENT;
+    constexpr static int ITEMS_PER_SMALL_AND_MEDIUM_THREAD =
+      Nominal4BItemsToItems<DominantT>(KEYS_ONLY ? 9 : 7);
 
-    constexpr static int THREADS_PER_SMALL_SEGMENT = 4;
-    constexpr static int SMALL_SEGMENT_MAX_SIZE = ITEMS_PER_THREAD *
-                                                  THREADS_PER_SMALL_SEGMENT;
+    using SmallAndMediumPolicy = cub::AgentSmallAndMediumSegmentedSortPolicy<
+      256,                               // Block size
+      ITEMS_PER_SMALL_AND_MEDIUM_THREAD, // Items per thread in small and medium segments
+      32,                                // Threads per medium segment
+      4>;                                // Threads per small segment
   };
 
   /// MaxPolicy
@@ -678,6 +867,7 @@ struct DispatchSegmentedSort : SelectedPolicy
   CUB_RUNTIME_FUNCTION __forceinline__ cudaError_t Invoke()
   {
     using LargeSegmentPolicyT = typename ActivePolicyT::LargeSegmentPolicy;
+    using SmallAndMediumPolicyT = typename ActivePolicyT::SmallAndMediumPolicy;
 
     cudaError error = cudaSuccess;
 
@@ -698,14 +888,16 @@ struct DispatchSegmentedSort : SelectedPolicy
       std::size_t three_way_partition_temp_storage_bytes {};
 
       SegmentSizeGreaterThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>
-        large_segments_selector(ActivePolicyT::MEDIUM_SEGMENT_MAX_SIZE,
-                                d_begin_offsets,
-                                d_end_offsets);
+        large_segments_selector(
+          SmallAndMediumPolicyT::MEDIUM_SEGMENT_MAX_SIZE,
+          d_begin_offsets,
+          d_end_offsets);
 
       SegmentSizeLessThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>
-        small_segments_selector(ActivePolicyT::SMALL_SEGMENT_MAX_SIZE + 1,
-                                d_begin_offsets,
-                                d_end_offsets);
+        small_segments_selector(
+          SmallAndMediumPolicyT::SMALL_SEGMENT_MAX_SIZE + 1,
+          d_begin_offsets,
+          d_end_offsets);
 
       if (reorder_segments)
       {
@@ -732,9 +924,11 @@ struct DispatchSegmentedSort : SelectedPolicy
         std::max(tmp_keys_storage_bytes,
                  three_way_partition_temp_storage_bytes);
 
-      std::size_t num_size_groups = 3;
+      // Partition selects large and small groups.
+      // The middle group is not selected.
+      constexpr std::size_t num_selected_groups = 2;
       std::size_t group_sizes_bytes = reorder_segments
-                                    ? sizeof(OffsetT) * num_size_groups
+                                    ? sizeof(OffsetT) * num_selected_groups
                                     : 0ul;
 
       std::size_t allocation_sizes[5] = {
@@ -807,7 +1001,108 @@ struct DispatchSegmentedSort : SelectedPolicy
           break;
         }
 
+        OffsetT h_group_sizes[num_selected_groups];
+        if (CubDebug(error = cudaMemcpy(h_group_sizes,
+                                        d_group_sizes,
+                                        group_sizes_bytes,
+                                        cudaMemcpyDeviceToHost)))
+        {
+          break;
+        }
 
+        const OffsetT large_segments = h_group_sizes[0];
+
+        if (large_segments > 0)
+        {
+          const OffsetT blocks_in_grid = large_segments; // One CTA per segment
+
+          // TODO cudaGraph
+
+          THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
+            blocks_in_grid,
+            LargeSegmentPolicyT::BLOCK_THREADS,
+            0,
+            stream)
+            .doit(DeviceSegmentedRadixSortNewKernelWithReorderingLarge<
+                    IS_DESCENDING,
+                    LargeSegmentPolicyT,
+                    KeyT,
+                    ValueT,
+                    BeginOffsetIteratorT,
+                    EndOffsetIteratorT,
+                    OffsetT>,
+                  d_large_and_medium_segments_reordering,
+                  d_keys_in,
+                  d_keys_out,
+                  d_keys_remaining_passes,
+                  d_values_in,
+                  d_values_out,
+                  d_values_remaining_passes,
+                  d_begin_offsets,
+                  d_end_offsets);
+
+          // Check for failure to launch
+          if (CubDebug(error = cudaPeekAtLastError()))
+          {
+            break;
+          }
+
+          // Sync the stream if specified to flush runtime errors
+          if (debug_synchronous)
+          {
+            if (CubDebug(error = SyncStream(stream)))
+            {
+              break;
+            }
+          }
+        }
+
+        const OffsetT small_segments = h_group_sizes[1];
+        const OffsetT medium_segments = num_segments -
+                                        (large_segments + small_segments);
+
+        const OffsetT small_blocks =
+          (small_segments +
+           ActivePolicyT::SmallAndMediumPolicy::SEGMENTS_PER_SMALL_BLOCK - 1) /
+          ActivePolicyT::SmallAndMediumPolicy::SEGMENTS_PER_SMALL_BLOCK;
+
+        const OffsetT medium_blocks =
+          (medium_segments +
+           ActivePolicyT::SmallAndMediumPolicy::SEGMENTS_PER_MEDIUM_BLOCK - 1) /
+          ActivePolicyT::SmallAndMediumPolicy::SEGMENTS_PER_MEDIUM_BLOCK;
+
+        const OffsetT small_and_medium_blocks_in_grid = small_blocks +
+                                                        medium_blocks;
+
+        if (small_and_medium_blocks_in_grid)
+        {
+          // TODO cudaGraph
+          THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
+            small_and_medium_blocks_in_grid,
+            SmallAndMediumPolicyT::BLOCK_THREADS,
+            0,
+            stream)
+            .doit(DeviceSegmentedRadixSortNewKernelWithReorderingSmall<
+                    IS_DESCENDING,
+                    SmallAndMediumPolicyT,
+                    KeyT,
+                    ValueT,
+                    BeginOffsetIteratorT,
+                    EndOffsetIteratorT,
+                    OffsetT>,
+                  small_segments,
+                  medium_segments,
+                  medium_blocks,
+                  d_small_segments_reordering,
+                  d_large_and_medium_segments_reordering + num_segments -
+                    medium_segments,
+                  d_keys_in,
+                  d_keys_out,
+                  d_values_in,
+                  d_values_out,
+                  d_begin_offsets,
+                  d_end_offsets);
+        }
       }
       else
       {
