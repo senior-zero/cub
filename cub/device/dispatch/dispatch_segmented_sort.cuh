@@ -35,6 +35,7 @@
 #include "../../block/block_radix_rank.cuh"
 #include "../../device/device_partition.cuh"
 #include "../../agent/agent_segmented_radix_sort.cuh"
+#include "../../block/block_merge_sort.cuh"
 
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -42,6 +43,371 @@
 #include <type_traits>
 
 CUB_NAMESPACE_BEGIN
+
+
+// TODO There should be function like that in CUB already, look it up
+template <int threads_per_segment>
+__device__ __forceinline__ unsigned int gen_mask()
+{
+  const unsigned int group_id = LaneId() / threads_per_segment;
+  const unsigned int group_mask = (1 << threads_per_segment) - 1;
+  const unsigned int final_mask = group_mask << (group_id * threads_per_segment);
+
+  return final_mask;
+}
+
+template <>
+__device__ __forceinline__ unsigned int gen_mask<32>()
+{
+  return 0xFFFFFFFF;
+}
+
+template <int items_per_thread,
+  int threads_per_segment,
+  typename T>
+__device__ void sub_warp_load(int lane_id,
+                              int segment_size,
+                              int group_mask,
+                              const T *input,
+                              T (&keys)[items_per_thread],
+                              T *cache)
+{
+  if (items_per_thread > 10)
+  {
+    // COALESCED_LOAD
+
+#pragma unroll
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = threads_per_segment * item + lane_id;
+
+      if (idx < segment_size)
+      {
+        keys[item] = input[idx];
+      }
+    }
+
+// store in shared
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = threads_per_segment * item + lane_id;
+      cache[idx]    = keys[item];
+    }
+    __syncwarp(group_mask);
+
+// load blocked
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = items_per_thread * lane_id + item;
+      keys[item]    = cache[idx];
+    }
+    __syncwarp(group_mask);
+  }
+  else
+  {
+    // Naive load
+
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const unsigned int idx = lane_id * items_per_thread + item;
+
+      if (idx < segment_size)
+      {
+        keys[item] = input[idx];
+      }
+    }
+  }
+}
+
+template <int items_per_thread,
+  int threads_per_segment,
+  typename T>
+__device__ void sub_warp_store(int lane_id,
+                               int segment_size,
+                               int group_mask,
+                               T *output,
+                               T (&keys)[items_per_thread],
+                               T *cache)
+{
+  if (items_per_thread > 10)
+  {
+    // Coalesced store
+    __syncwarp(group_mask);
+
+    // load blocked
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = items_per_thread * lane_id + item;
+      cache[idx] = keys[item];
+    }
+    __syncwarp(group_mask);
+
+    // store in shared
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = threads_per_segment * item + lane_id;
+      keys[item] = cache[idx];
+    }
+
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = threads_per_segment * item + lane_id;
+
+      if (idx < segment_size)
+      {
+        output[idx] = keys[item];
+      }
+    }
+  }
+  else
+  {
+    // Naive store
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = lane_id * items_per_thread + item;
+
+      if (idx < segment_size)
+      {
+        output[idx] = keys[item];
+      }
+    }
+  }
+}
+
+template <bool IS_DESCENDING,
+          int items_per_thread,
+          int threads_per_segment,
+          typename KeyT,
+          typename ValueT>
+__device__ void
+sub_warp_merge_sort(const KeyT *keys_input,
+                    KeyT *keys_output,
+                    const ValueT *values_input,
+                    ValueT *values_output,
+                    int segment_size,
+                    KeyT *keys_cache,
+                    ValueT *values_cache) // T *cache = block_cache + (tid /
+                                          // threads_per_segment) *
+                                          // threads_per_segment *
+                                          // items_per_thread;
+{
+  static constexpr bool KEYS_ONLY = cub::Equals<ValueT, cub::NullType>::VALUE;
+
+  auto binary_op = [] (KeyT lhs, KeyT rhs) -> bool
+  {
+    if (IS_DESCENDING)
+    {
+      return lhs > rhs;
+    }
+    else
+    {
+      return lhs < rhs;
+    }
+  };
+
+  int tid = static_cast<int>(threadIdx.x);
+
+  if (segment_size == 0)
+  {
+    return;
+  }
+
+  int lane_id = tid % threads_per_segment;
+
+  if (segment_size == 1)
+  {
+    if (lane_id == 0)
+    {
+      keys_output[0] = keys_input[0];
+
+      if (!KEYS_ONLY)
+      {
+        values_output[0] = values_input[1];
+      }
+    }
+
+    return;
+  }
+  else if (segment_size == 2)
+  {
+    if (lane_id == 0)
+    {
+      KeyT lhs = keys_input[0];
+      KeyT rhs = keys_input[1];
+
+      if (lhs < rhs)
+      {
+        keys_output[0] = lhs;
+        keys_output[1] = rhs;
+
+        if (!KEYS_ONLY)
+        {
+          values_output[0] = values_input[0];
+          values_output[1] = values_input[1];
+        }
+      }
+      else
+      {
+        keys_output[0] = rhs;
+        keys_output[1] = lhs;
+
+        if (!KEYS_ONLY)
+        {
+          values_output[0] = values_input[1];
+          values_output[1] = values_input[0];
+        }
+      }
+    }
+
+    return;
+  }
+
+  KeyT keys[items_per_thread];
+  ValueT values[items_per_thread];
+
+  int indices[items_per_thread];
+
+  int group_mask = static_cast<int>(gen_mask<threads_per_segment>());
+
+  sub_warp_load<items_per_thread, threads_per_segment>(lane_id,
+                                                       segment_size,
+                                                       group_mask,
+                                                       keys_input,
+                                                       keys,
+                                                       keys_cache);
+
+  if (!KEYS_ONLY)
+  {
+    sub_warp_load<items_per_thread, threads_per_segment>(lane_id,
+                                                         segment_size,
+                                                         group_mask,
+                                                         values_input,
+                                                         values,
+                                                         values_cache);
+  }
+
+  // 2) Sort
+
+  KeyT max_key = keys_input[0];
+
+#pragma unroll
+  for (int item = 1; item < items_per_thread; ++item)
+  {
+    if (items_per_thread * lane_id + item < segment_size)
+    {
+      max_key = max_key < keys[item] ? keys[item] : max_key;
+    }
+    else
+    {
+      keys[item] = max_key;
+    }
+  }
+
+  if (lane_id * items_per_thread < segment_size)
+  {
+    StableOddEvenSort(keys, values, binary_op);
+  }
+
+  if (segment_size > items_per_thread)
+  {
+#pragma unroll
+    for (int target_merged_threads_number = 2;
+         target_merged_threads_number <= threads_per_segment;
+         target_merged_threads_number *= 2)
+    {
+      int merged_threads_number = target_merged_threads_number / 2;
+      int mask                  = target_merged_threads_number - 1;
+
+      WARP_SYNC(group_mask);
+
+      for (int item = 0; item < items_per_thread; item++)
+      {
+        keys_cache[lane_id * items_per_thread + item] = keys[item];
+      }
+      WARP_SYNC(group_mask);
+
+      int first_thread_idx_in_thread_group_being_merged = ~mask & lane_id;
+      int start                                         = items_per_thread *
+                  first_thread_idx_in_thread_group_being_merged;
+      int size = items_per_thread * merged_threads_number;
+
+      int thread_idx_in_thread_group_being_merged = mask & lane_id;
+
+      int diag =
+        min(segment_size,
+            items_per_thread * thread_idx_in_thread_group_being_merged);
+
+      int keys1_beg = min(segment_size, start);
+      int keys1_end = min(segment_size, keys1_beg + size);
+      int keys2_beg = keys1_end;
+      int keys2_end = min(segment_size, keys2_beg + size);
+
+      int keys1_count = keys1_end - keys1_beg;
+      int keys2_count = keys2_end - keys2_beg;
+
+      int partition_diag = MergePath<KeyT>(&keys_cache[keys1_beg],
+                                            &keys_cache[keys2_beg],
+                                            keys1_count,
+                                            keys2_count,
+                                            diag,
+                                            binary_op);
+
+      int keys1_beg_loc   = keys1_beg + partition_diag;
+      int keys1_end_loc   = keys1_end;
+      int keys2_beg_loc   = keys2_beg + diag - partition_diag;
+      int keys2_end_loc   = keys2_end;
+      int keys1_count_loc = keys1_end_loc - keys1_beg_loc;
+      int keys2_count_loc = keys2_end_loc - keys2_beg_loc;
+
+      SerialMerge(&keys_cache[0],
+                  keys1_beg_loc,
+                  keys2_beg_loc,
+                  keys1_count_loc,
+                  keys2_count_loc,
+                  keys,
+                  indices,
+                  binary_op);
+
+      if (!KEYS_ONLY)
+      {
+        WARP_SYNC(group_mask);
+
+#pragma unroll
+        for (int item = 0; item < items_per_thread; item++)
+        {
+          int idx           = items_per_thread * lane_id + item;
+          values_cache[idx] = values[item];
+        }
+        WARP_SYNC(group_mask);
+
+        // gather items from shmem
+        //
+#pragma unroll
+        for (int item = 0; item < items_per_thread; item++)
+        {
+          values[item] = values_cache[indices[item]];
+        }
+      }
+    }
+  }
+
+  sub_warp_store<items_per_thread, threads_per_segment>(lane_id,
+                                                        segment_size,
+                                                        group_mask,
+                                                        keys_output,
+                                                        keys,
+                                                        keys_cache);
+
+  if (!KEYS_ONLY)
+  {
+    sub_warp_store<items_per_thread, threads_per_segment>(lane_id,
+                                                          segment_size,
+                                                          group_mask,
+                                                          values_output,
+                                                          values,
+                                                          values_cache);
+  }
+}
 
 template <bool IS_DESCENDING,
           typename SegmentedPolicyT,
@@ -105,30 +471,25 @@ __global__ void DeviceSegmentedRadixSortFallbackKernel(
   constexpr int small_tile_size = SegmentedPolicyT::BLOCK_THREADS *
                                   SegmentedPolicyT::ITEMS_PER_THREAD;
 
-  // TODO
-  /*
   constexpr int single_thread_sort_threshold = 4;
   if (num_items <= sub_warp_sort_threshold)
   {
     if (threadIdx.x < threads_per_medium_segment)
     {
-      sub_warp_merge_sort<items_per_medium_segment,
-        threads_per_medium_segment,
-        KeyT,
-        ValueT>(
-        d_keys_in_origin + segment_begin,
-        d_keys_out_orig + segment_begin,
-        d_values_in_origin + segment_begin,
-        d_values_out_origin + segment_begin,
-        num_items,
-        temp_storage.medium_tile_keys_cache,
-        temp_storage.medium_tile_values_cache);
+      sub_warp_merge_sort<IS_DESCENDING,
+                          items_per_medium_segment,
+                          threads_per_medium_segment,
+                          KeyT,
+                          ValueT>(d_keys_in_origin + segment_begin,
+                                  d_keys_out_orig + segment_begin,
+                                  d_values_in_origin + segment_begin,
+                                  d_values_out_origin + segment_begin,
+                                  num_items,
+                                  temp_storage.medium_tile_keys_cache,
+                                  temp_storage.medium_tile_values_cache);
     }
   }
-  else
-   */
-
-  if (num_items < small_tile_size)
+  else if (num_items < small_tile_size)
   {
     agent.ProcessSmallSegment(begin_bit,
                               end_bit,
@@ -155,7 +516,7 @@ __global__ void DeviceSegmentedRadixSortFallbackKernel(
     {
       pass_bits = CUB_MIN(SegmentedPolicyT::RADIX_BITS, (end_bit - current_bit));
 
-      __syncthreads();
+      CTA_SYNC();
       agent.ProcessLargeSegment(current_bit,
                                 pass_bits,
                                 d_keys_remaining_passes.Current(),
@@ -410,29 +771,6 @@ struct DispatchSegmentedSort : SelectedPolicy
       d_small_segments_reordering = reinterpret_cast<OffsetT*>(allocations[3]);
       d_group_sizes = reinterpret_cast<OffsetT*>(allocations[4]);
 
-      if (reorder_segments)
-      {
-        void *d_partition_temp_storage = allocations[0];
-
-        error = cub::DevicePartition::If(
-          d_partition_temp_storage,
-          three_way_partition_temp_storage_bytes,
-          THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
-          d_large_and_medium_segments_reordering,
-          d_small_segments_reordering,
-          d_group_sizes,
-          num_segments,
-          large_segments_selector,
-          small_segments_selector,
-          stream,
-          debug_synchronous);
-
-        if (CubDebug(error))
-        {
-          break;
-        }
-      }
-
       KeyT *d_keys_allocation = reinterpret_cast<KeyT*>(allocations[0]);
       ValueT *d_values_allocation = reinterpret_cast<ValueT*>(allocations[1]);
 
@@ -449,41 +787,67 @@ struct DispatchSegmentedSort : SelectedPolicy
         is_num_passes_odd ? d_values_out: d_values_allocation,
         is_num_passes_odd ? d_values_allocation : d_values_out);
 
-      const unsigned int blocks_in_grid = num_segments;
-      const unsigned int threads_in_block = LargeSegmentPolicyT::BLOCK_THREADS;
-
-      // Log single_tile_kernel configuration
-      if (debug_synchronous)
+      if (reorder_segments)
       {
-        _CubLog("Invoking DeviceSegmentedRadixSortFallbackKernel<<<%d, %d, 0, "
-                "%lld>>>(), %d items per thread, bit_grain %d\n",
-                blocks_in_grid,
-                threads_in_block,
-                (long long)stream,
-                LargeSegmentPolicyT::ITEMS_PER_THREAD,
-                LargeSegmentPolicyT::RADIX_BITS);
-      }
+        void *d_partition_temp_storage = allocations[0];
 
-      // Invoke fallback kernel
-      THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(blocks_in_grid,
-                                                              threads_in_block,
-                                                              0,
-                                                              stream)
-        .doit(DeviceSegmentedRadixSortFallbackKernel<IS_DESCENDING,
-                                                     LargeSegmentPolicyT,
-                                                     KeyT,
-                                                     ValueT,
-                                                     BeginOffsetIteratorT,
-                                                     EndOffsetIteratorT,
-                                                     OffsetT>,
-              d_keys_in,
-              d_keys_out,
-              d_keys_remaining_passes,
-              d_values_in,
-              d_values_out,
-              d_values_remaining_passes,
-              d_begin_offsets,
-              d_end_offsets);
+        if (CubDebug(error = cub::DevicePartition::If(
+          d_partition_temp_storage,
+          three_way_partition_temp_storage_bytes,
+          THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
+          d_large_and_medium_segments_reordering,
+          d_small_segments_reordering,
+          d_group_sizes,
+          num_segments,
+          large_segments_selector,
+          small_segments_selector,
+          stream,
+          debug_synchronous)))
+        {
+          break;
+        }
+
+
+      }
+      else
+      {
+        const unsigned int blocks_in_grid = num_segments;
+        const unsigned int threads_in_block =
+          LargeSegmentPolicyT::BLOCK_THREADS;
+
+        // Log single_tile_kernel configuration
+        if (debug_synchronous)
+        {
+          _CubLog("Invoking DeviceSegmentedRadixSortFallbackKernel<<<%d, %d, "
+                  "0, %lld>>>(), %d items per thread, bit_grain %d\n",
+                  blocks_in_grid,
+                  threads_in_block,
+                  (long long)stream,
+                  LargeSegmentPolicyT::ITEMS_PER_THREAD,
+                  LargeSegmentPolicyT::RADIX_BITS);
+        }
+
+        // Invoke fallback kernel
+        THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(blocks_in_grid,
+                                                                threads_in_block,
+                                                                0,
+                                                                stream)
+          .doit(DeviceSegmentedRadixSortFallbackKernel<IS_DESCENDING,
+                                                       LargeSegmentPolicyT,
+                                                       KeyT,
+                                                       ValueT,
+                                                       BeginOffsetIteratorT,
+                                                       EndOffsetIteratorT,
+                                                       OffsetT>,
+                d_keys_in,
+                d_keys_out,
+                d_keys_remaining_passes,
+                d_values_in,
+                d_values_out,
+                d_values_remaining_passes,
+                d_begin_offsets,
+                d_end_offsets);
+      }
 
       // Check for failure to launch
       if (CubDebug(error = cudaPeekAtLastError()))
@@ -499,7 +863,6 @@ struct DispatchSegmentedSort : SelectedPolicy
           break;
         }
       }
-
     } while (false);
 
     return error;

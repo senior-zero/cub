@@ -42,6 +42,7 @@
 
 CUB_NAMESPACE_BEGIN
 
+
 /******************************************************************************
  * Kernel entry points
  *****************************************************************************/
@@ -326,7 +327,7 @@ struct DispatchThreeWayPartitionIf
       if (debug_synchronous) _CubLog("Invoking scan_init_kernel<<<%d, %d, 0, %lld>>>()\n", init_grid_size, INIT_KERNEL_THREADS, (long long) stream);
 
       // Invoke scan_init_kernel to initialize tile descriptors
-      thrust::cuda_cub::launcher::triple_chevron(
+      THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
         init_grid_size, INIT_KERNEL_THREADS, 0, stream
       ).doit(scan_init_kernel,
              tile_status_1,
@@ -460,7 +461,6 @@ struct DispatchThreeWayPartitionIf
     return error;
   }
 };
-
 
 
 CUB_NAMESPACE_END
