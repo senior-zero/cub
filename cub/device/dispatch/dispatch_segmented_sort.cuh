@@ -36,6 +36,7 @@
 #include "../../device/device_partition.cuh"
 #include "../../agent/agent_segmented_radix_sort.cuh"
 #include "../../block/block_merge_sort.cuh"
+#include "../../thread/thread_sort.cuh"
 
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -471,7 +472,6 @@ __global__ void DeviceSegmentedRadixSortFallbackKernel(
   constexpr int small_tile_size = SegmentedPolicyT::BLOCK_THREADS *
                                   SegmentedPolicyT::ITEMS_PER_THREAD;
 
-  constexpr int single_thread_sort_threshold = 4;
   if (num_items <= sub_warp_sort_threshold)
   {
     if (threadIdx.x < threads_per_medium_segment)
