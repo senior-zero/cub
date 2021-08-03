@@ -135,25 +135,17 @@ public:
 
   bool operator!=(const ThreeWayPartitionResult<T> &other)
   {
-    if (num_items_in_first_part != other.num_items_in_first_part)
-    {
-      return true;
-    }
-
-    if (num_items_in_second_part != other.num_items_in_second_part)
-    {
-      return true;
-    }
-
-    if (num_unselected_items != other.num_unselected_items)
-    {
-      return true;
-    }
-
-
-    // TODO mismatch
-
-    return false;
+    return std::tie(num_items_in_first_part,
+                    num_items_in_second_part,
+                    num_unselected_items,
+                    first_part,
+                    second_part,
+                    unselected) != std::tie(other.num_items_in_first_part,
+                                            other.num_items_in_second_part,
+                                            other.num_unselected_items,
+                                            other.first_part,
+                                            other.second_part,
+                                            other.unselected);
   }
 };
 
@@ -278,17 +270,29 @@ void TestStability(int num_items)
 }
 
 template <typename T>
-void Test()
+void TestDependent(int num_items)
 {
-  TestEmpty<T>();
+  TestStability<T>(num_items);
+}
 
+template <typename T>
+void TestDependent()
+{
   for (int num_items = 1; num_items < 1000000; num_items <<= 2)
   {
-    TestStability<T>(num_items);
-    TestStability<T>(num_items + 31);
+    TestDependent<T>(num_items);
+    TestDependent<T>(num_items + 31);
   }
 }
 
+template <typename T>
+void Test()
+{
+  TestEmpty<T>();
+  TestDependent<T>();
+}
+
+// TODO Iterators
 int main(int argc, char **argv)
 {
   CommandLineArgs args(argc, argv);
