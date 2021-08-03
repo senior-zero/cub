@@ -45,9 +45,6 @@ CUB_NAMESPACE_BEGIN
  * Tuning policy types
  ******************************************************************************/
 
-/**
- * Parameterizable tuning policy type for AgentSelectIf
- */
 template <
     int                         _BLOCK_THREADS,                 ///< Threads per thread block
     int                         _ITEMS_PER_THREAD,              ///< Items per thread (per tile of input)
@@ -70,26 +67,15 @@ struct AgentThreeWayPartitionPolicy
 
 
 
-/******************************************************************************
- * Thread block abstractions
- ******************************************************************************/
-
-
-/**
- * \brief AgentSelectIf implements a stateful abstraction of CUDA thread blocks for participating in device-wide selection
- *
- * Performs functor-based selection if SelectOpT functor type != NullType
- * Otherwise performs flag-based selection if FlagsInputIterator's value type != NullType
- * Otherwise performs discontinuity selection (keep unique)
- */
 template <
-  typename    AgentThreeWayPartitionPolicyT,  ///< Parameterized AgentSelectIfPolicy tuning policy type
-  typename    InputIteratorT,                 ///< Random-access input iterator type for selection items
-  typename    FlagsInputIteratorT,            ///< Random-access input iterator type for selections (NullType* if a selection functor or discontinuity flagging is to be used for selection)
-  typename    SelectedOutputIteratorT,        ///< Random-access input iterator type for selection_flags items
-  typename    SelectOp1T,                     ///< Selection operator type (NullType if selections or discontinuity flagging is to be used for selection)
-  typename    SelectOp2T,                     ///< Selection operator type (NullType if selections or discontinuity flagging is to be used for selection)
-  typename    OffsetT>                        ///< Signed integer type for global offsets
+  typename    AgentThreeWayPartitionPolicyT,
+  typename    InputIteratorT,
+  typename    FirstOutputIteratorT,
+  typename    SecondOutputIteratorT,
+  typename    UnselectedOutputIteratorT,
+  typename    SelectFirstPartOp,
+  typename    SelectSecondPartOp,
+  typename    OffsetT>
 struct AgentThreeWayPartition
 {
   //---------------------------------------------------------------------
@@ -98,12 +84,6 @@ struct AgentThreeWayPartition
 
   // The input value type
   typedef typename std::iterator_traits<InputIteratorT>::value_type InputT;
-
-  // The output value type
-  using OutputT = typename std::iterator_traits<SelectedOutputIteratorT>::value_type;
-
-  // The flag value type
-  typedef typename std::iterator_traits<FlagsInputIteratorT>::value_type FlagT;
 
   // Tile status descriptor interface type
   typedef cub::ScanTileState<OffsetT> ScanTileStateT;
@@ -129,28 +109,12 @@ struct AgentThreeWayPartition
     InputIteratorT>::Type                                                               // Directly use the supplied input iterator type
   WrappedInputIteratorT;
 
-  // Cache-modified Input iterator wrapper type (for applying cache modifier) for values
-  typedef typename cub::If<cub::IsPointer<FlagsInputIteratorT>::VALUE,
-    cub::CacheModifiedInputIterator<AgentThreeWayPartitionPolicyT::LOAD_MODIFIER, FlagT, OffsetT>,    // Wrap the native input pointer with CacheModifiedValuesInputIterator
-    FlagsInputIteratorT>::Type                                                          // Directly use the supplied input iterator type
-  WrappedFlagsInputIteratorT;
-
   // Parameterized BlockLoad type for input data
-  typedef cub::BlockLoad<OutputT,
+  typedef cub::BlockLoad<InputT,
     BLOCK_THREADS,
     ITEMS_PER_THREAD,
     AgentThreeWayPartitionPolicyT::LOAD_ALGORITHM>
     BlockLoadT;
-
-  // Parameterized BlockLoad type for flags
-  typedef cub::BlockLoad<FlagT,
-    BLOCK_THREADS,
-    ITEMS_PER_THREAD,
-    AgentThreeWayPartitionPolicyT::LOAD_ALGORITHM>
-    BlockLoadFlags;
-
-  // Parameterized BlockDiscontinuity type for items
-  typedef cub::BlockDiscontinuity<OutputT, BLOCK_THREADS> BlockDiscontinuityT;
 
   // Parameterized BlockScan type
   typedef cub::BlockScan<OffsetT, BLOCK_THREADS, AgentThreeWayPartitionPolicyT::SCAN_ALGORITHM>
@@ -161,7 +125,7 @@ struct AgentThreeWayPartition
     TilePrefixCallbackOpT;
 
   // Item exchange type
-  typedef OutputT ItemExchangeT[TILE_ITEMS];
+  typedef InputT ItemExchangeT[TILE_ITEMS];
 
   // Shared memory type for this thread block
   union _TempStorage
@@ -170,14 +134,10 @@ struct AgentThreeWayPartition
     {
       typename BlockScanT::TempStorage                scan;           // Smem needed for tile scanning
       typename TilePrefixCallbackOpT::TempStorage     prefix;         // Smem needed for cooperative prefix callback
-      typename BlockDiscontinuityT::TempStorage       discontinuity;  // Smem needed for discontinuity detection
     } scan_storage;
 
     // Smem needed for loading items
     typename BlockLoadT::TempStorage load_items;
-
-    // Smem needed for loading values
-    typename BlockLoadFlags::TempStorage load_flags;
 
     // Smem needed for compacting items (allows non POD items in this union)
     cub::Uninitialized<ItemExchangeT> raw_exchange;
@@ -193,11 +153,11 @@ struct AgentThreeWayPartition
 
   _TempStorage&                        temp_storage;       ///< Reference to temp_storage
   WrappedInputIteratorT                d_in;               ///< Input items
-  SelectedOutputIteratorT              d_selected_out_1;   ///< Unique output items
-  SelectedOutputIteratorT              d_selected_out_2;   ///< Unique output items
-  WrappedFlagsInputIteratorT           d_flags_in;         ///< Input selection flags (if applicable)
-  SelectOp1T                           select_op_1;        ///< Selection operator
-  SelectOp2T                           select_op_2;        ///< Selection operator
+  FirstOutputIteratorT                 d_first_part_out;
+  SecondOutputIteratorT                d_second_part_out;
+  UnselectedOutputIteratorT            d_unselected_out;
+  SelectFirstPartOp                    select_first_part_op;
+  SelectSecondPartOp                   select_second_part_op;
   OffsetT                              num_items;          ///< Total number of input items
 
 
@@ -207,26 +167,23 @@ struct AgentThreeWayPartition
 
   // Constructor
   __device__ __forceinline__
-  AgentThreeWayPartition(
-    TempStorage                 &temp_storage,      ///< Reference to temp_storage
-    InputIteratorT              d_in,               ///< Input data
-    FlagsInputIteratorT         d_flags_in,         ///< Input selection flags (if applicable)
-    SelectedOutputIteratorT     d_selected_out_1,     ///< Output data
-    SelectedOutputIteratorT     d_selected_out_2,     ///< Output data
-    SelectOp1T                  select_op_1,          ///< Selection operator
-    SelectOp2T                  select_op_2,          ///< Selection operator
-    OffsetT                     num_items)          ///< Total number of input items
-    :
-    temp_storage(temp_storage.Alias()),
-    d_in(d_in),
-    d_flags_in(d_flags_in),
-    d_selected_out_1(d_selected_out_1),
-    d_selected_out_2(d_selected_out_2),
-    select_op_1(select_op_1),
-    select_op_2(select_op_2),
-    num_items(num_items)
+  AgentThreeWayPartition(TempStorage &temp_storage,
+                         InputIteratorT d_in,
+                         FirstOutputIteratorT d_first_part_out,
+                         SecondOutputIteratorT d_second_part_out,
+                         UnselectedOutputIteratorT d_unselected_out,
+                         SelectFirstPartOp select_first_part_op,
+                         SelectSecondPartOp select_second_part_op,
+                         OffsetT num_items)
+      : temp_storage(temp_storage.Alias())
+      , d_in(d_in)
+      , d_first_part_out(d_first_part_out)
+      , d_second_part_out(d_second_part_out)
+      , d_unselected_out(d_unselected_out)
+      , select_first_part_op(select_first_part_op)
+      , select_second_part_op(select_second_part_op)
+      , num_items(num_items)
   {}
-
 
   //---------------------------------------------------------------------
   // Utility methods for initializing the selections
@@ -238,7 +195,7 @@ struct AgentThreeWayPartition
   template <bool IS_LAST_TILE>
   __device__ __forceinline__ void Initialize(
     OffsetT                       num_tile_items,
-    OutputT                       (&items)[ITEMS_PER_THREAD],
+    InputT                        (&items)[ITEMS_PER_THREAD],
     OffsetT                       (&large_items_selection_flags)[ITEMS_PER_THREAD],
     OffsetT                       (&small_items_selection_flags)[ITEMS_PER_THREAD])
   {
@@ -251,8 +208,8 @@ struct AgentThreeWayPartition
 
       if (!IS_LAST_TILE || (OffsetT(threadIdx.x * ITEMS_PER_THREAD) + ITEM < num_tile_items))
       {
-        large_items_selection_flags[ITEM] = select_op_1(items[ITEM]);
-        small_items_selection_flags[ITEM] = large_items_selection_flags[ITEM] ? 0 : select_op_2(items[ITEM]);
+        large_items_selection_flags[ITEM] = select_first_part_op(items[ITEM]);
+        small_items_selection_flags[ITEM] = large_items_selection_flags[ITEM] ? 0 : select_second_part_op(items[ITEM]);
       }
     }
   }
@@ -262,7 +219,7 @@ struct AgentThreeWayPartition
    */
   template <bool IS_LAST_TILE>
   __device__ __forceinline__ void Scatter(
-    OutputT         (&items)[ITEMS_PER_THREAD],
+    InputT          (&items)[ITEMS_PER_THREAD],
     OffsetT         (&large_items_selection_flags)[ITEMS_PER_THREAD],
     OffsetT         (&large_items_selection_indices)[ITEMS_PER_THREAD],
     OffsetT         (&small_items_selection_flags)[ITEMS_PER_THREAD],
@@ -303,7 +260,7 @@ struct AgentThreeWayPartition
         {
           // Medium item
           int local_selection_idx = (large_items_selection_indices[ITEM] - num_large_selections_prefix)
-                                    + (small_items_selection_indices[ITEM] - num_small_selections_prefix);
+                                  + (small_items_selection_indices[ITEM] - num_small_selections_prefix);
           local_scatter_offset = small_item_end + item_idx - local_selection_idx;
         }
 
@@ -321,20 +278,21 @@ struct AgentThreeWayPartition
 
       if (!IS_LAST_TILE || (item_idx < num_tile_items))
       {
-        OutputT item = temp_storage.raw_exchange.Alias()[item_idx];
+        InputT item = temp_storage.raw_exchange.Alias()[item_idx];
 
         if (item_idx < large_item_end)
         {
-          d_selected_out_1[num_large_selections_prefix + item_idx] = item;
+          d_first_part_out[num_large_selections_prefix + item_idx] = item;
         }
         else if (item_idx < small_item_end)
         {
-          d_selected_out_2[num_small_selections_prefix + item_idx - large_item_end] = item;
+          d_second_part_out[num_small_selections_prefix + item_idx - large_item_end] = item;
         }
         else
         {
           int rejection_idx = item_idx - small_item_end;
-          d_selected_out_1[num_items - num_rejected_prefix - rejection_idx - 1] = item;
+          // d_first_part_out[num_items - num_rejected_prefix - rejection_idx - 1] = item;
+          d_unselected_out[num_rejected_prefix + rejection_idx] = item;
         }
       }
     }
@@ -358,7 +316,7 @@ struct AgentThreeWayPartition
     OffsetT &large_items,
     OffsetT &small_items)
   {
-    OutputT     items[ITEMS_PER_THREAD];
+    InputT      items[ITEMS_PER_THREAD];
 
     OffsetT     large_items_selection_flags[ITEMS_PER_THREAD];
     OffsetT     large_items_selection_indices[ITEMS_PER_THREAD];
@@ -401,6 +359,8 @@ struct AgentThreeWayPartition
     }
 
     __syncthreads();
+
+    // TODO Test scan pairs!
 
     // Exclusive scan of selection_flags
     BlockScanT(temp_storage.scan_storage.scan)
@@ -453,7 +413,7 @@ struct AgentThreeWayPartition
     OffsetT &num_large_items_selections,
     OffsetT &num_small_items_selections)
   {
-    OutputT     items[ITEMS_PER_THREAD];
+    InputT      items[ITEMS_PER_THREAD];
 
     OffsetT     large_items_selection_flags[ITEMS_PER_THREAD];
     OffsetT     large_items_selection_indices[ITEMS_PER_THREAD];

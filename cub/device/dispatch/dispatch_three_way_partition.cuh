@@ -51,49 +51,51 @@ CUB_NAMESPACE_BEGIN
 template <
   typename            AgentThreeWayPartitionPolicyT,
   typename            InputIteratorT,
-  typename            FlagsInputIteratorT,
-  typename            SelectedOutputIteratorT,
+  typename            FirstOutputIteratorT,
+  typename            SecondOutputIteratorT,
+  typename            UnselectedOutputIteratorT,
   typename            NumSelectedIteratorT,
   typename            ScanTileStateT,
-  typename            SelectOp1T,
-  typename            SelectOp2T,
+  typename            SelectFirstPartOp,
+  typename            SelectSecondPartOp,
   typename            OffsetT>
 __launch_bounds__ (int(AgentThreeWayPartitionPolicyT::BLOCK_THREADS))
 __global__ void DeviceSelectSweep3Kernel(
-  InputIteratorT          d_in,
-  FlagsInputIteratorT     d_flags,
-  SelectedOutputIteratorT d_selected_out_1,
-  SelectedOutputIteratorT d_selected_out_2,
-  NumSelectedIteratorT    d_num_selected_out,
-  ScanTileStateT          tile_status_1,
-  ScanTileStateT          tile_status_2,
-  SelectOp1T              select_op_1,
-  SelectOp2T              select_op_2,
-  OffsetT                 num_items,
-  int                     num_tiles)
+  InputIteratorT             d_in,
+  FirstOutputIteratorT       d_first_part_out,
+  SecondOutputIteratorT      d_second_part_out,
+  UnselectedOutputIteratorT  d_unselected_out,
+  NumSelectedIteratorT       d_num_selected_out,
+  ScanTileStateT             tile_status_1,
+  ScanTileStateT             tile_status_2,
+  SelectFirstPartOp          select_first_part_op,
+  SelectSecondPartOp         select_second_part_op,
+  OffsetT                    num_items,
+  int                        num_tiles)
 {
   // Thread block type for selecting data from input tiles
-  typedef AgentThreeWayPartition<AgentThreeWayPartitionPolicyT,
-                                 InputIteratorT,
-                                 FlagsInputIteratorT,
-                                 SelectedOutputIteratorT,
-                                 SelectOp1T,
-                                 SelectOp2T,
-                                 OffsetT>
-    AgentThreeWayPartitionT;
+  using AgentThreeWayPartitionT =
+    AgentThreeWayPartition<AgentThreeWayPartitionPolicyT,
+                           InputIteratorT,
+                           FirstOutputIteratorT,
+                           SecondOutputIteratorT,
+                           UnselectedOutputIteratorT,
+                           SelectFirstPartOp,
+                           SelectSecondPartOp,
+                           OffsetT>;
 
   // Shared memory for AgentSelectIf
   __shared__ typename AgentThreeWayPartitionT::TempStorage temp_storage;
 
   // Process tiles
   AgentThreeWayPartitionT(temp_storage,
-                 d_in,
-                 d_flags,
-                 d_selected_out_1,
-                 d_selected_out_2,
-                 select_op_1,
-                 select_op_2,
-                 num_items)
+                          d_in,
+                          d_first_part_out,
+                          d_second_part_out,
+                          d_unselected_out,
+                          select_first_part_op,
+                          select_second_part_op,
+                          num_items)
     .ConsumeRange(num_tiles, tile_status_1, tile_status_2, d_num_selected_out);
 }
 
@@ -129,11 +131,12 @@ __global__ void DeviceCompactInit3Kernel(
 
 template <
   typename    InputIteratorT,
-  typename    FlagsInputIteratorT,
-  typename    SelectedOutputIteratorT,
+  typename    FirstOutputIteratorT,
+  typename    SecondOutputIteratorT,
+  typename    UnselectedOutputIteratorT,
   typename    NumSelectedIteratorT,
-  typename    SelectOp1T,
-  typename    SelectOp2T,
+  typename    SelectFirstPartOp,
+  typename    SelectSecondPartOp,
   typename    OffsetT>
 struct DispatchThreeWayPartitionIf
 {
@@ -142,12 +145,7 @@ struct DispatchThreeWayPartitionIf
    ******************************************************************************/
 
   // The output value type
-  typedef typename cub::If<(cub::Equals<typename std::iterator_traits<SelectedOutputIteratorT>::value_type, void>::VALUE),  // OutputT =  (if output iterator's value type is void) ?
-    typename std::iterator_traits<InputIteratorT>::value_type,                                                  // ... then the input iterator's value type,
-    typename std::iterator_traits<SelectedOutputIteratorT>::value_type>::Type OutputT;                          // ... else the output iterator's value type
-
-  // The flag value type
-  typedef typename std::iterator_traits<FlagsInputIteratorT>::value_type FlagT;
+  using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
 
   enum
   {
@@ -167,7 +165,7 @@ struct DispatchThreeWayPartitionIf
   {
     enum {
       NOMINAL_4B_ITEMS_PER_THREAD = 10,
-      ITEMS_PER_THREAD            = CUB_MIN(NOMINAL_4B_ITEMS_PER_THREAD, CUB_MAX(1, (NOMINAL_4B_ITEMS_PER_THREAD * 4 / sizeof(OutputT)))),
+      ITEMS_PER_THREAD            = CUB_MIN(NOMINAL_4B_ITEMS_PER_THREAD, CUB_MAX(1, (NOMINAL_4B_ITEMS_PER_THREAD * 4 / sizeof(InputT)))),
     };
 
     typedef cub::AgentThreeWayPartitionPolicy<128,
@@ -254,12 +252,12 @@ struct DispatchThreeWayPartitionIf
     void*                       d_temp_storage,
     size_t&                     temp_storage_bytes,
     InputIteratorT              d_in,
-    FlagsInputIteratorT         d_flags,
-    SelectedOutputIteratorT     d_selected_out_1,
-    SelectedOutputIteratorT     d_selected_out_2,
+    FirstOutputIteratorT        d_first_part_out,
+    SecondOutputIteratorT       d_second_part_out,
+    UnselectedOutputIteratorT   d_unselected_out,
     NumSelectedIteratorT        d_num_selected_out,
-    SelectOp1T                  select_op_1,
-    SelectOp2T                  select_op_2,
+    SelectFirstPartOp           select_first_part_op,
+    SelectSecondPartOp          select_second_part_op,
     OffsetT                     num_items,
     cudaStream_t                stream,
     bool                        debug_synchronous,
@@ -286,7 +284,8 @@ struct DispatchThreeWayPartitionIf
       // Specify temporary storage allocation requirements
       size_t allocation_sizes[2]; // bytes needed for tile status descriptors
 
-      if (CubDebug(error = ScanTileStateT::AllocationSize(num_tiles, allocation_sizes[0])))
+      if (CubDebug(error = ScanTileStateT::AllocationSize(num_tiles,
+                                                          allocation_sizes[0])))
       {
         break;
       }
@@ -313,12 +312,16 @@ struct DispatchThreeWayPartitionIf
       ScanTileStateT tile_status_1;
       ScanTileStateT tile_status_2;
 
-      if (CubDebug(error = tile_status_1.Init(num_tiles, allocations[0], allocation_sizes[0])))
+      if (CubDebug(error = tile_status_1.Init(num_tiles,
+                                              allocations[0],
+                                              allocation_sizes[0])))
       {
         break;
       }
 
-      if (CubDebug(error = tile_status_2.Init(num_tiles, allocations[1], allocation_sizes[1])))
+      if (CubDebug(error = tile_status_2.Init(num_tiles,
+                                              allocations[1],
+                                              allocation_sizes[1])))
       {
         break;
       }
@@ -375,7 +378,9 @@ struct DispatchThreeWayPartitionIf
 
       // Get max x-dimension of grid
       int max_dim_x;
-      if (CubDebug(error = cudaDeviceGetAttribute(&max_dim_x, cudaDevAttrMaxGridDimX, device_ordinal)))
+      if (CubDebug(error = cudaDeviceGetAttribute(&max_dim_x,
+                                                  cudaDevAttrMaxGridDimX,
+                                                  device_ordinal)))
       {
         break;
       }
@@ -405,14 +410,14 @@ struct DispatchThreeWayPartitionIf
         scan_grid_size, select_if_config.block_threads, 0, stream
       ).doit(select_if_kernel,
              d_in,
-             d_flags,
-             d_selected_out_1,
-             d_selected_out_2,
+             d_first_part_out,
+             d_second_part_out,
+             d_unselected_out,
              d_num_selected_out,
              tile_status_1,
              tile_status_2,
-             select_op_1,
-             select_op_2,
+             select_first_part_op,
+             select_second_part_op,
              num_items,
              num_tiles);
 
@@ -445,17 +450,18 @@ struct DispatchThreeWayPartitionIf
     void*                       d_temp_storage,
     size_t&                     temp_storage_bytes,
     InputIteratorT              d_in,
-    FlagsInputIteratorT         d_flags,
-    SelectedOutputIteratorT     d_selected_out_1,
-    SelectedOutputIteratorT     d_selected_out_2,
+    FirstOutputIteratorT        d_first_part_out,
+    SecondOutputIteratorT       d_second_part_out,
+    UnselectedOutputIteratorT   d_unselected_out,
     NumSelectedIteratorT        d_num_selected_out,
-    SelectOp1T                  select_op_1,
-    SelectOp2T                  select_op_2,
+    SelectFirstPartOp           select_first_part_op,
+    SelectSecondPartOp          select_second_part_op,
     OffsetT                     num_items,
     cudaStream_t                stream,
     bool                        debug_synchronous)
   {
     cudaError error = cudaSuccess;
+
     do
     {
       // Get PTX version
@@ -475,12 +481,12 @@ struct DispatchThreeWayPartitionIf
               d_temp_storage,
               temp_storage_bytes,
               d_in,
-              d_flags,
-              d_selected_out_1,
-              d_selected_out_2,
+              d_first_part_out,
+              d_second_part_out,
+              d_unselected_out,
               d_num_selected_out,
-              select_op_1,
-              select_op_2,
+              select_first_part_op,
+              select_second_part_op,
               num_items,
               stream,
               debug_synchronous,
@@ -488,12 +494,13 @@ struct DispatchThreeWayPartitionIf
               DeviceCompactInit3Kernel<ScanTileStateT, NumSelectedIteratorT>,
               DeviceSelectSweep3Kernel<PtxThreeWayPartitionPolicyT,
                                        InputIteratorT,
-                                       FlagsInputIteratorT,
-                                       SelectedOutputIteratorT,
+                                       FirstOutputIteratorT,
+                                       SecondOutputIteratorT,
+                                       UnselectedOutputIteratorT,
                                        NumSelectedIteratorT,
                                        ScanTileStateT,
-                                       SelectOp1T,
-                                       SelectOp2T,
+                                       SelectFirstPartOp,
+                                       SelectSecondPartOp,
                                        OffsetT>,
               select_if_config)))
       {

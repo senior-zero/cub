@@ -41,6 +41,7 @@
 
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
 #include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/reverse_iterator.h>
 
 #include <type_traits>
 
@@ -891,6 +892,10 @@ struct DispatchSegmentedSort : SelectedPolicy
       OffsetT *d_small_segments_reordering = nullptr;
       OffsetT *d_group_sizes = nullptr;
 
+      auto d_medium_reordering_iterator =
+        THRUST_NS_QUALIFIER::make_reverse_iterator(
+          d_large_and_medium_segments_reordering);
+
       std::size_t three_way_partition_temp_storage_bytes {};
 
       SegmentSizeGreaterThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>
@@ -912,6 +917,7 @@ struct DispatchSegmentedSort : SelectedPolicy
                                  THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
                                  d_large_and_medium_segments_reordering,
                                  d_small_segments_reordering,
+                                 d_medium_reordering_iterator,
                                  d_group_sizes,
                                  num_segments,
                                  large_segments_selector,
@@ -991,12 +997,17 @@ struct DispatchSegmentedSort : SelectedPolicy
       {
         void *d_partition_temp_storage = allocations[0];
 
+        d_medium_reordering_iterator =
+          THRUST_NS_QUALIFIER::make_reverse_iterator(
+            d_large_and_medium_segments_reordering + num_segments);
+
         if (CubDebug(error = cub::DevicePartition::If(
           d_partition_temp_storage,
           three_way_partition_temp_storage_bytes,
           THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
           d_large_and_medium_segments_reordering,
           d_small_segments_reordering,
+          d_medium_reordering_iterator,
           d_group_sizes,
           num_segments,
           large_segments_selector,

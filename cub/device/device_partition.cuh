@@ -258,44 +258,48 @@ struct DevicePartition
     }
 
     template <typename InputIteratorT,
-              typename OutputIteratorT,
+              typename FirstOutputIteratorT,
+              typename SecondOutputIteratorT,
+              typename UnselectedOutputIteratorT,
               typename NumSelectedIteratorT,
-              typename SelectBeginOp,
-              typename SelectEndOp>
+              typename SelectFirstPartOp,
+              typename SelectSecondPartOp>
     static cudaError_t If(
       void*                       d_temp_storage,
       size_t&                     temp_storage_bytes,
       InputIteratorT              d_in,
-      OutputIteratorT             d_begin_and_middle_out,
-      OutputIteratorT             d_end_out,
+      FirstOutputIteratorT        d_first_part_out,
+      SecondOutputIteratorT       d_second_part_out,
+      UnselectedOutputIteratorT   d_unselected_out,
       NumSelectedIteratorT        d_num_selected_out,
       int                         num_items,
-      SelectBeginOp               select_begin_op,
-      SelectEndOp                 select_end_op,
+      SelectFirstPartOp           select_first_part_op,
+      SelectSecondPartOp          select_second_part_op,
       cudaStream_t                stream             = 0,
       bool                        debug_synchronous  = false)
     {
       using OffsetT = int;
-      using FlagIterator = cub::NullType *;
 
-      return DispatchThreeWayPartitionIf<InputIteratorT,
-                                         FlagIterator,
-                                         OutputIteratorT,
-                                         NumSelectedIteratorT,
-                                         SelectBeginOp,
-                                         SelectEndOp,
-                                         OffsetT>::Dispatch(d_temp_storage,
-                                                            temp_storage_bytes,
-                                                            d_in,
-                                                            nullptr,
-                                                            d_begin_and_middle_out,
-                                                            d_end_out,
-                                                            d_num_selected_out,
-                                                            select_begin_op,
-                                                            select_end_op,
-                                                            num_items,
-                                                            stream,
-                                                            debug_synchronous);
+      return DispatchThreeWayPartitionIf<
+        InputIteratorT,
+        FirstOutputIteratorT,
+        SecondOutputIteratorT,
+        UnselectedOutputIteratorT,
+        NumSelectedIteratorT,
+        SelectFirstPartOp,
+        SelectSecondPartOp,
+        OffsetT>::Dispatch(d_temp_storage,
+                           temp_storage_bytes,
+                           d_in,
+                           d_first_part_out,
+                           d_second_part_out,
+                           d_unselected_out,
+                           d_num_selected_out,
+                           select_first_part_op,
+                           select_second_part_op,
+                           num_items,
+                           stream,
+                           debug_synchronous);
     }
 };
 
