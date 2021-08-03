@@ -134,7 +134,7 @@ template <
   typename    NumSelectedIteratorT,
   typename    SelectOp1T,
   typename    SelectOp2T,
-  typename    OffsetT>                        
+  typename    OffsetT>
 struct DispatchThreeWayPartitionIf
 {
   /******************************************************************************
@@ -246,31 +246,27 @@ struct DispatchThreeWayPartitionIf
    * Dispatch entrypoints
    ******************************************************************************/
 
-  /**
-   * Internal dispatch routine for computing a device-wide selection using the
-   * specified kernel functions.
-   */
   template <
-    typename                    ScanInitKernelPtrT,             ///< Function type of cub::DeviceScanInitKernel
-    typename                    SelectIfKernelPtrT>             ///< Function type of cub::SelectIfKernelPtrT
+    typename                    ScanInitKernelPtrT,
+    typename                    SelectIfKernelPtrT>
   CUB_RUNTIME_FUNCTION __forceinline__
   static cudaError_t Dispatch(
-    void*                       d_temp_storage,                 ///< [in] %Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
-    size_t&                     temp_storage_bytes,             ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
-    InputIteratorT              d_in,                           ///< [in] Pointer to the input sequence of data items
-    FlagsInputIteratorT         d_flags,                        ///< [in] Pointer to the input sequence of selection flags (if applicable)
-    SelectedOutputIteratorT     d_selected_out_1,               ///< [in] Pointer to the output sequence of selected data items
-    SelectedOutputIteratorT     d_selected_out_2,               ///< [in] Pointer to the output sequence of selected data items
-    NumSelectedIteratorT        d_num_selected_out,             ///< [in] Pointer to the total number of items selected (i.e., length of \p d_selected_out)
-    SelectOp1T                  select_op_1,                    ///< [in] Selection operator
-    SelectOp2T                  select_op_2,                    ///< [in] Selection operator
-    OffsetT                     num_items,                      ///< [in] Total number of input items (i.e., length of \p d_in)
-    cudaStream_t                stream,                         ///< [in] CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
-    bool                        debug_synchronous,              ///< [in] Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
-    int                         /*ptx_version*/,                ///< [in] PTX version of dispatch kernels
-    ScanInitKernelPtrT          scan_init_kernel,               ///< [in] Kernel function pointer to parameterization of cub::DeviceScanInitKernel
-    SelectIfKernelPtrT          select_if_kernel,               ///< [in] Kernel function pointer to parameterization of cub::DeviceSelectSweepKernel
-    KernelConfig                select_if_config)               ///< [in] Dispatch parameters that match the policy that \p select_if_kernel was compiled for
+    void*                       d_temp_storage,
+    size_t&                     temp_storage_bytes,
+    InputIteratorT              d_in,
+    FlagsInputIteratorT         d_flags,
+    SelectedOutputIteratorT     d_selected_out_1,
+    SelectedOutputIteratorT     d_selected_out_2,
+    NumSelectedIteratorT        d_num_selected_out,
+    SelectOp1T                  select_op_1,
+    SelectOp2T                  select_op_2,
+    OffsetT                     num_items,
+    cudaStream_t                stream,
+    bool                        debug_synchronous,
+    int                         /*ptx_version*/,
+    ScanInitKernelPtrT          scan_init_kernel,
+    SelectIfKernelPtrT          select_if_kernel,
+    KernelConfig                select_if_config)
   {
     cudaError error = cudaSuccess;
 
@@ -278,21 +274,35 @@ struct DispatchThreeWayPartitionIf
     {
       // Get device ordinal
       int device_ordinal;
-      if (CubDebug(error = cudaGetDevice(&device_ordinal))) break;
+      if (CubDebug(error = cudaGetDevice(&device_ordinal)))
+      {
+        break;
+      }
 
       // Number of input tiles
       int tile_size = select_if_config.block_threads * select_if_config.items_per_thread;
       int num_tiles = static_cast<int>(DivideAndRoundUp(num_items, tile_size));
 
       // Specify temporary storage allocation requirements
-      size_t  allocation_sizes[2];
-      if (CubDebug(error = ScanTileStateT::AllocationSize(num_tiles, allocation_sizes[0]))) break;    // bytes needed for tile status descriptors
+      size_t allocation_sizes[2]; // bytes needed for tile status descriptors
+
+      if (CubDebug(error = ScanTileStateT::AllocationSize(num_tiles, allocation_sizes[0])))
+      {
+        break;
+      }
 
       allocation_sizes[1] = allocation_sizes[0];
 
       // Compute allocation pointers into the single storage blob (or compute the necessary size of the blob)
       void* allocations[2] = {};
-      if (CubDebug(error = cub::AliasTemporaries(d_temp_storage, temp_storage_bytes, allocations, allocation_sizes))) break;
+      if (CubDebug(error = cub::AliasTemporaries(d_temp_storage,
+                                                 temp_storage_bytes,
+                                                 allocations,
+                                                 allocation_sizes)))
+      {
+        break;
+      }
+
       if (d_temp_storage == nullptr)
       {
         // Return if the caller is simply requesting the size of the storage allocation
@@ -303,8 +313,15 @@ struct DispatchThreeWayPartitionIf
       ScanTileStateT tile_status_1;
       ScanTileStateT tile_status_2;
 
-      if (CubDebug(error = tile_status_1.Init(num_tiles, allocations[0], allocation_sizes[0]))) break;
-      if (CubDebug(error = tile_status_2.Init(num_tiles, allocations[1], allocation_sizes[1]))) break;
+      if (CubDebug(error = tile_status_1.Init(num_tiles, allocations[0], allocation_sizes[0])))
+      {
+        break;
+      }
+
+      if (CubDebug(error = tile_status_2.Init(num_tiles, allocations[1], allocation_sizes[1])))
+      {
+        break;
+      }
 
       // Log scan_init_kernel configuration
       int init_grid_size = CUB_MAX(1, DivideAndRoundUp(num_tiles, INIT_KERNEL_THREADS));
@@ -400,10 +417,19 @@ struct DispatchThreeWayPartitionIf
              num_tiles);
 
       // Check for failure to launch
-      if (CubDebug(error = cudaPeekAtLastError())) break;
+      if (CubDebug(error = cudaPeekAtLastError()))
+      {
+        break;
+      }
 
       // Sync the stream if specified to flush runtime errors
-      if (debug_synchronous && (CubDebug(error = cub::SyncStream(stream)))) break;
+      if (debug_synchronous)
+      {
+        if (CubDebug(error = cub::SyncStream(stream)))
+        {
+          break;
+        }
+      }
     }
     while (0);
 
@@ -416,18 +442,18 @@ struct DispatchThreeWayPartitionIf
    */
   CUB_RUNTIME_FUNCTION __forceinline__
   static cudaError_t Dispatch(
-    void*                       d_temp_storage,                 ///< [in] %Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
-    size_t&                     temp_storage_bytes,             ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
-    InputIteratorT              d_in,                           ///< [in] Pointer to the input sequence of data items
-    FlagsInputIteratorT         d_flags,                        ///< [in] Pointer to the input sequence of selection flags (if applicable)
-    SelectedOutputIteratorT     d_selected_out_1,               ///< [in] Pointer to the output sequence of selected data items
-    SelectedOutputIteratorT     d_selected_out_2,               ///< [in] Pointer to the output sequence of selected data items
-    NumSelectedIteratorT        d_num_selected_out,             ///< [in] Pointer to the total number of items selected (i.e., length of \p d_selected_out)
-    SelectOp1T                  select_op_1,                    ///< [in] Selection operator
-    SelectOp2T                  select_op_2,                    ///< [in] Selection operator
-    OffsetT                     num_items,                      ///< [in] Total number of input items (i.e., length of \p d_in)
-    cudaStream_t                stream,                         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
-    bool                        debug_synchronous)              ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
+    void*                       d_temp_storage,
+    size_t&                     temp_storage_bytes,
+    InputIteratorT              d_in,
+    FlagsInputIteratorT         d_flags,
+    SelectedOutputIteratorT     d_selected_out_1,
+    SelectedOutputIteratorT     d_selected_out_2,
+    NumSelectedIteratorT        d_num_selected_out,
+    SelectOp1T                  select_op_1,
+    SelectOp2T                  select_op_2,
+    OffsetT                     num_items,
+    cudaStream_t                stream,
+    bool                        debug_synchronous)
   {
     cudaError error = cudaSuccess;
     do
