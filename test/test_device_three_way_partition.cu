@@ -267,6 +267,7 @@ void TestEmptyFirstPart(int num_items)
   auto thrust_result = ThrustPartition(le, ge, in);
 
   AssertEquals(cub_result, thrust_result);
+  AssertEquals(cub_result.num_items_in_first_part, 0);
 }
 
 template <typename T>
@@ -285,6 +286,7 @@ void TestEmptySecondPart(int num_items)
   auto thrust_result = ThrustPartition(ge, le, in);
 
   AssertEquals(cub_result, thrust_result);
+  AssertEquals(cub_result.num_items_in_second_part, 0);
 }
 
 template <typename T>
@@ -302,6 +304,7 @@ void TestEmptyUnselectedPart(int num_items)
   auto thrust_result = ThrustPartition(le, ge, in);
 
   AssertEquals(cub_result, thrust_result);
+  AssertEquals(cub_result.num_unselected_items, 0);
 }
 
 template <typename T>
@@ -317,13 +320,69 @@ void TestUnselectedOnly(int num_items)
   auto thrust_result = ThrustPartition(le, le, in);
 
   AssertEquals(cub_result, thrust_result);
+  AssertEquals(cub_result.num_unselected_items, num_items);
+  AssertEquals(cub_result.num_items_in_first_part, 0);
+  AssertEquals(cub_result.num_items_in_second_part, 0);
 }
 
-template <typename T>
+template <typename Key,
+          typename Value>
+struct Pair
+{
+  Key key;
+  Value value;
+
+  __host__ __device__ Pair()
+      : key(Key{})
+      , value(Value{})
+  {}
+
+  __host__ __device__ Pair(Key key)
+    : key(key)
+    , value(Value{})
+  {}
+
+  __host__ __device__ Pair(Key key, Value value)
+    : key(key)
+    , value(value)
+  {}
+
+  __host__ __device__ bool operator<(const Pair &b) const
+  {
+    return key < b.key;
+  }
+
+  __host__ __device__ bool operator>=(const Pair &b) const
+  {
+    return key >= b.key;
+  }
+};
+
+template <typename Key, typename Value>
+__device__ __host__ bool operator==(
+  const Pair<Key, Value> &lhs,
+  const Pair<Key, Value> &rhs)
+{
+  return lhs.key == rhs.key && lhs.value == lhs.value;
+}
+
+template <typename ValueT>
+struct CountToPair
+{
+  template <typename OffsetT>
+  __device__ __host__ Pair<ValueT, std::uint64_t>operator()(OffsetT id)
+  {
+    return Pair<ValueT, std::uint64_t>(static_cast<ValueT>(id), id);
+  }
+};
+
+template <typename KeyT>
 void TestStability(int num_items)
 {
+  using T = Pair<KeyT, std::uint64_t>;
   thrust::device_vector<T> in(num_items);
-  thrust::sequence(in.begin(), in.end());
+
+  thrust::tabulate(in.begin(), in.end(), CountToPair<KeyT>{});
 
   T first_unselected_val = static_cast<T>(num_items / 3);
   T first_val_of_second_part = static_cast<T>(2 * num_items / 3);
@@ -367,7 +426,6 @@ void Test()
 // TODO
 //      - Iterators
 //      - Empty parts
-//      - Stability / pairs
 int main(int argc, char **argv)
 {
   CommandLineArgs args(argc, argv);
