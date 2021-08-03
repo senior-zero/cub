@@ -163,17 +163,15 @@ struct DispatchThreeWayPartitionIf
   /// SM35
   struct Policy350
   {
-    enum {
-      NOMINAL_4B_ITEMS_PER_THREAD = 10,
-      ITEMS_PER_THREAD            = CUB_MIN(NOMINAL_4B_ITEMS_PER_THREAD, CUB_MAX(1, (NOMINAL_4B_ITEMS_PER_THREAD * 4 / sizeof(InputT)))),
-    };
+    constexpr static int NOMINAL_4B_ITEMS_PER_THREAD = 10;
+    constexpr static int ITEMS_PER_THREAD = Nominal4BItemsToItems<InputT>(10);
 
-    typedef cub::AgentThreeWayPartitionPolicy<128,
-                                              ITEMS_PER_THREAD,
-                                              cub::BLOCK_LOAD_DIRECT,
-                                              cub::LOAD_LDG,
-                                              cub::BLOCK_SCAN_WARP_SCANS>
-      ThreeWayPartitionPolicy;
+    using ThreeWayPartitionPolicy =
+      cub::AgentThreeWayPartitionPolicy<128,
+                                        ITEMS_PER_THREAD,
+                                        cub::BLOCK_LOAD_DIRECT,
+                                        cub::LOAD_LDG,
+                                        cub::BLOCK_SCAN_WARP_SCANS>;
   };
 
   /******************************************************************************
@@ -263,8 +261,8 @@ struct DispatchThreeWayPartitionIf
     bool                        debug_synchronous,
     int                         /*ptx_version*/,
     ScanInitKernelPtrT          scan_init_kernel,
-    SelectIfKernelPtrT          select_if_kernel,
-    KernelConfig                select_if_config)
+    SelectIfKernelPtrT          three_way_partition_kernel,
+    KernelConfig                three_way_partition_config)
   {
     cudaError error = cudaSuccess;
 
@@ -278,7 +276,8 @@ struct DispatchThreeWayPartitionIf
       }
 
       // Number of input tiles
-      int tile_size = select_if_config.block_threads * select_if_config.items_per_thread;
+      int tile_size = three_way_partition_config.block_threads *
+                      three_way_partition_config.items_per_thread;
       int num_tiles = static_cast<int>(DivideAndRoundUp(num_items, tile_size));
 
       // Specify temporary storage allocation requirements
@@ -370,8 +369,8 @@ struct DispatchThreeWayPartitionIf
       int range_select_sm_occupancy;
       if (CubDebug(error = MaxSmOccupancy(
         range_select_sm_occupancy,            // out
-        select_if_kernel,
-        select_if_config.block_threads)))
+        three_way_partition_kernel,
+        three_way_partition_config.block_threads)))
       {
         break;
       }
@@ -399,16 +398,16 @@ struct DispatchThreeWayPartitionIf
                 scan_grid_size.x,
                 scan_grid_size.y,
                 scan_grid_size.z,
-                select_if_config.block_threads,
+                three_way_partition_config.block_threads,
                 (long long)stream,
-                select_if_config.items_per_thread,
+                three_way_partition_config.items_per_thread,
                 range_select_sm_occupancy);
       }
 
       // Invoke select_if_kernel
       thrust::cuda_cub::launcher::triple_chevron(
-        scan_grid_size, select_if_config.block_threads, 0, stream
-      ).doit(select_if_kernel,
+        scan_grid_size, three_way_partition_config.block_threads, 0, stream
+      ).doit(three_way_partition_kernel,
              d_in,
              d_first_part_out,
              d_second_part_out,
