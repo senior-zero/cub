@@ -252,6 +252,74 @@ ThreeWayPartitionResult<T> ThrustPartition(
 }
 
 template <typename T>
+void TestEmptyFirstPart(int num_items)
+{
+  thrust::device_vector<T> in(num_items);
+  thrust::sequence(in.begin(), in.end());
+
+  T first_unselected_val = T{0};
+  T first_val_of_second_part = static_cast<T>(num_items / 2);
+
+  LessThan<T> le(first_unselected_val);
+  GreaterOrEqual<T> ge(first_val_of_second_part);
+
+  auto cub_result = CUBPartition(le, ge, in);
+  auto thrust_result = ThrustPartition(le, ge, in);
+
+  AssertEquals(cub_result, thrust_result);
+}
+
+template <typename T>
+void TestEmptySecondPart(int num_items)
+{
+  thrust::device_vector<T> in(num_items);
+  thrust::sequence(in.begin(), in.end());
+
+  T first_unselected_val = static_cast<T>(num_items / 2);
+  T first_val_of_second_part = T{0}; // empty set for unsigned types
+
+  GreaterOrEqual<T> ge(first_unselected_val);
+  LessThan<T> le(first_val_of_second_part);
+
+  auto cub_result = CUBPartition(ge, le, in);
+  auto thrust_result = ThrustPartition(ge, le, in);
+
+  AssertEquals(cub_result, thrust_result);
+}
+
+template <typename T>
+void TestEmptyUnselectedPart(int num_items)
+{
+  thrust::device_vector<T> in(num_items);
+  thrust::sequence(in.begin(), in.end());
+
+  T first_unselected_val = static_cast<T>(num_items / 2);
+
+  LessThan<T> le(first_unselected_val);
+  GreaterOrEqual<T> ge(first_unselected_val);
+
+  auto cub_result = CUBPartition(le, ge, in);
+  auto thrust_result = ThrustPartition(le, ge, in);
+
+  AssertEquals(cub_result, thrust_result);
+}
+
+template <typename T>
+void TestUnselectedOnly(int num_items)
+{
+  thrust::device_vector<T> in(num_items);
+  thrust::sequence(in.begin(), in.end());
+
+  T first_val_of_second_part = T{0}; // empty set for unsigned types
+  LessThan<T> le(first_val_of_second_part);
+
+  auto cub_result = CUBPartition(le, le, in);
+  auto thrust_result = ThrustPartition(le, le, in);
+
+  AssertEquals(cub_result, thrust_result);
+}
+
+template <typename T>
 void TestStability(int num_items)
 {
   thrust::device_vector<T> in(num_items);
@@ -273,6 +341,10 @@ template <typename T>
 void TestDependent(int num_items)
 {
   TestStability<T>(num_items);
+  TestEmptyFirstPart<T>(num_items);
+  TestEmptySecondPart<T>(num_items);
+  TestEmptyUnselectedPart<T>(num_items);
+  TestUnselectedOnly<T>(num_items);
 }
 
 template <typename T>
@@ -292,7 +364,10 @@ void Test()
   TestDependent<T>();
 }
 
-// TODO Iterators
+// TODO
+//      - Iterators
+//      - Empty parts
+//      - Stability / pairs
 int main(int argc, char **argv)
 {
   CommandLineArgs args(argc, argv);
@@ -303,6 +378,7 @@ int main(int argc, char **argv)
   Test<std::uint8_t>();
   Test<std::uint16_t>();
   Test<std::uint32_t>();
+  Test<std::uint64_t>();
 
   return 0;
 }
