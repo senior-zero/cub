@@ -242,7 +242,7 @@ void TestZeroSegments()
   const KeyT *keys_input = nullptr;
   KeyT *keys_output      = nullptr;
 
-  std::size_t temp_storage_bytes{};
+  std::size_t temp_storage_bytes = 42ul;
   CubDebugExit(cub::DeviceSegmentedSort::SortKeys(nullptr,
                                                   temp_storage_bytes,
                                                   keys_input,
@@ -253,6 +253,8 @@ void TestZeroSegments()
                                                   d_offsets + 1,
                                                   0,
                                                   true));
+
+  AssertEquals(temp_storage_bytes, 0ul);
 
   thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
   std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
@@ -481,11 +483,11 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  Test<std::uint8_t,  std::uint32_t>();
-  Test<std::uint16_t, std::uint32_t>();
+  // Test<std::uint8_t,  std::uint32_t>();
+  // Test<std::uint16_t, std::uint32_t>();
   Test<std::uint32_t, std::uint32_t>();
-  Test<std::uint64_t, std::uint32_t>();
-  Test<std::uint32_t, std::int64_t>();
+  // Test<std::uint64_t, std::uint32_t>();
+  // Test<std::uint32_t, std::int64_t>();
 
   return 0;
 }

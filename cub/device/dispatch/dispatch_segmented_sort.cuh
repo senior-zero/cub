@@ -873,6 +873,12 @@ struct DispatchSegmentedSort : SelectedPolicy
 
     do
     {
+      if (num_items == 0 || num_segments == 0)
+      {
+        temp_storage_bytes = 0;
+        break;
+      }
+
       // TODO Add DoubleBuffer option - is_override_enabled
       const bool reorder_segments = num_segments > 500; // TODO Magick number
 
@@ -1204,16 +1210,6 @@ struct DispatchSegmentedSort : SelectedPolicy
 
     do
     {
-      if (num_items == 0)
-      {
-        break;
-      }
-
-      if (num_segments == 0)
-      {
-        break;
-      }
-
       // Get PTX version
       int ptx_version = 0;
       if (CubDebug(error = PtxVersion(ptx_version)))
