@@ -55,6 +55,21 @@ struct LessThan
 };
 
 template <typename T>
+struct EqualTo
+{
+  T compare;
+
+  explicit __host__ EqualTo(T compare)
+    : compare(compare)
+  {}
+
+  __device__ bool operator()(const T &a) const
+  {
+    return a == compare;
+  }
+};
+
+template <typename T>
 struct GreaterOrEqual
 {
   T compare;
@@ -397,6 +412,157 @@ void TestStability(int num_items)
 }
 
 template <typename T>
+void TestReverseIterator(int num_items)
+{
+  int num_items_in_first_part = num_items / 3;
+  int num_unselected_items = 2 * num_items / 3;
+
+  T first_part_val {0};
+  T second_part_val {1};
+  T unselected_part_val {2};
+
+  thrust::device_vector<T> in(num_items, second_part_val);
+  thrust::fill_n(in.begin(), num_items_in_first_part, first_part_val);
+  thrust::fill_n(in.begin() + num_items_in_first_part,
+                 num_unselected_items,
+                 unselected_part_val);
+
+  thrust::shuffle(in.begin(), in.end(), thrust::default_random_engine{});
+
+  thrust::device_vector<T> first_and_unselected_part(num_items);
+
+  EqualTo<T> first_selector{first_part_val};
+  EqualTo<T> second_selector{second_part_val};
+
+  thrust::device_vector<int> num_selected_out(2);
+
+  std::size_t temp_storage_size {};
+  CubDebugExit(cub::DevicePartition::If(nullptr,
+                                        temp_storage_size,
+                                        in.cbegin(),
+                                        first_and_unselected_part.begin(),
+                                        thrust::make_discard_iterator(),
+                                        first_and_unselected_part.rbegin(),
+                                        num_selected_out.begin(),
+                                        num_items,
+                                        first_selector,
+                                        second_selector,
+                                        0,
+                                        true));
+
+  thrust::device_vector<std::uint8_t> temp_storage(temp_storage_size);
+  std::uint8_t *d_temp_storage = thrust::raw_pointer_cast(temp_storage.data());
+
+  CubDebugExit(cub::DevicePartition::If(d_temp_storage,
+                                        temp_storage_size,
+                                        in.cbegin(),
+                                        first_and_unselected_part.begin(),
+                                        thrust::make_discard_iterator(),
+                                        first_and_unselected_part.rbegin(),
+                                        num_selected_out.begin(),
+                                        num_items,
+                                        first_selector,
+                                        second_selector,
+                                        0,
+                                        true));
+
+  thrust::device_vector<int> h_num_selected_out(num_selected_out);
+
+  AssertEquals(h_num_selected_out[0], num_items_in_first_part);
+
+  AssertEquals(thrust::count(first_and_unselected_part.rbegin(),
+                             first_and_unselected_part.rbegin() +
+                               num_unselected_items,
+                             unselected_part_val),
+               num_unselected_items);
+
+  AssertEquals(thrust::count(first_and_unselected_part.begin(),
+                             first_and_unselected_part.begin() +
+                               num_items_in_first_part,
+                             first_part_val),
+               num_items_in_first_part);
+}
+
+template <typename T>
+void TestSingleOutput(int num_items)
+{
+  int num_items_in_first_part = num_items / 3;
+  int num_unselected_items = 2 * num_items / 3;
+  int num_items_in_second_part = num_items - num_items_in_first_part -
+                                 num_unselected_items;
+
+  T first_part_val{0};
+  T second_part_val{1};
+  T unselected_part_val{2};
+
+  thrust::device_vector<T> in(num_items, second_part_val);
+  thrust::fill_n(in.begin(), num_items_in_first_part, first_part_val);
+  thrust::fill_n(in.begin() + num_items_in_first_part,
+                 num_unselected_items,
+                 unselected_part_val);
+
+  thrust::shuffle(in.begin(), in.end(), thrust::default_random_engine{});
+
+  thrust::device_vector<T> output(num_items);
+
+  EqualTo<T> first_selector{first_part_val};
+  EqualTo<T> second_selector{second_part_val};
+
+  thrust::device_vector<int> num_selected_out(2);
+
+  std::size_t temp_storage_size{};
+  CubDebugExit(cub::DevicePartition::If(nullptr,
+                                        temp_storage_size,
+                                        in.cbegin(),
+                                        output.begin(),
+                                        output.begin() + num_items_in_first_part,
+                                        output.rbegin(),
+                                        num_selected_out.begin(),
+                                        num_items,
+                                        first_selector,
+                                        second_selector,
+                                        0,
+                                        true));
+
+  thrust::device_vector<std::uint8_t> temp_storage(temp_storage_size);
+  std::uint8_t *d_temp_storage = thrust::raw_pointer_cast(temp_storage.data());
+
+  CubDebugExit(cub::DevicePartition::If(d_temp_storage,
+                                        temp_storage_size,
+                                        in.cbegin(),
+                                        output.begin(),
+                                        output.begin() + num_items_in_first_part,
+                                        output.rbegin(),
+                                        num_selected_out.begin(),
+                                        num_items,
+                                        first_selector,
+                                        second_selector,
+                                        0,
+                                        true));
+
+  thrust::device_vector<int> h_num_selected_out(num_selected_out);
+
+  AssertEquals(h_num_selected_out[0], num_items_in_first_part);
+  AssertEquals(h_num_selected_out[1], num_items_in_second_part);
+
+  AssertEquals(thrust::count(output.rbegin(),
+                             output.rbegin() + num_unselected_items,
+                             unselected_part_val),
+               num_unselected_items);
+
+  AssertEquals(thrust::count(output.begin(),
+                             output.begin() + num_items_in_first_part,
+                             first_part_val),
+               num_items_in_first_part);
+
+  AssertEquals(thrust::count(output.begin() + num_items_in_first_part,
+                             output.begin() + num_items_in_first_part +
+                               num_items_in_second_part,
+                             second_part_val),
+               num_items_in_second_part);
+}
+
+template <typename T>
 void TestDependent(int num_items)
 {
   TestStability<T>(num_items);
@@ -404,6 +570,8 @@ void TestDependent(int num_items)
   TestEmptySecondPart<T>(num_items);
   TestEmptyUnselectedPart<T>(num_items);
   TestUnselectedOnly<T>(num_items);
+  TestReverseIterator<T>(num_items);
+  TestSingleOutput<T>(num_items);
 }
 
 template <typename T>
@@ -423,9 +591,6 @@ void Test()
   TestDependent<T>();
 }
 
-// TODO
-//      - Iterators
-//      - Empty parts
 int main(int argc, char **argv)
 {
   CommandLineArgs args(argc, argv);
