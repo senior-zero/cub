@@ -48,6 +48,7 @@ CUB_NAMESPACE_BEGIN
  *****************************************************************************/
 
 
+// TODO Rename kernels
 template <
   typename            AgentThreeWayPartitionPolicyT,
   typename            InputIteratorT,
@@ -66,8 +67,7 @@ __global__ void DeviceSelectSweep3Kernel(
   SecondOutputIteratorT      d_second_part_out,
   UnselectedOutputIteratorT  d_unselected_out,
   NumSelectedIteratorT       d_num_selected_out,
-  ScanTileStateT             tile_status_1,
-  ScanTileStateT             tile_status_2,
+  ScanTileStateT             tile_status,
   SelectFirstPartOp          select_first_part_op,
   SelectSecondPartOp         select_second_part_op,
   OffsetT                    num_items,
@@ -96,7 +96,7 @@ __global__ void DeviceSelectSweep3Kernel(
                           select_first_part_op,
                           select_second_part_op,
                           num_items)
-    .ConsumeRange(num_tiles, tile_status_1, tile_status_2, d_num_selected_out);
+    .ConsumeRange(num_tiles, tile_status, d_num_selected_out);
 }
 
 /**
@@ -106,14 +106,12 @@ template <
   typename                ScanTileStateT,         ///< Tile status interface type
   typename                NumSelectedIteratorT>   ///< Output iterator type for recording the number of items selected
 __global__ void DeviceCompactInit3Kernel(
-  ScanTileStateT          tile_state_1,           ///< [in] Tile status interface
-  ScanTileStateT          tile_state_2,           ///< [in] Tile status interface
+  ScanTileStateT          tile_state,             ///< [in] Tile status interface
   int                     num_tiles,              ///< [in] Number of tiles
   NumSelectedIteratorT    d_num_selected_out)     ///< [out] Pointer to the total number of items selected (i.e., length of \p d_selected_out)
 {
   // Initialize tile status
-  tile_state_1.InitializeStatus(num_tiles);
-  tile_state_2.InitializeStatus(num_tiles);
+  tile_state.InitializeStatus(num_tiles);
 
   // Initialize d_num_selected_out
   if (blockIdx.x == 0)
@@ -153,7 +151,7 @@ struct DispatchThreeWayPartitionIf
   };
 
   // Tile status descriptor interface type
-  typedef cub::ScanTileState<OffsetT> ScanTileStateT;
+  typedef cub::ScanTileState<cub::CubVector<OffsetT, 2>> ScanTileStateT;
 
 
   /******************************************************************************
@@ -280,26 +278,13 @@ struct DispatchThreeWayPartitionIf
                       three_way_partition_config.items_per_thread;
       int num_tiles = static_cast<int>(DivideAndRoundUp(num_items, tile_size));
 
-      // Specify temporary storage allocation requirements
-      size_t allocation_sizes[2]; // bytes needed for tile status descriptors
-
       if (CubDebug(error = ScanTileStateT::AllocationSize(num_tiles,
-                                                          allocation_sizes[0])))
+                                                          temp_storage_bytes)))
       {
         break;
       }
-
-      allocation_sizes[1] = allocation_sizes[0];
 
       // Compute allocation pointers into the single storage blob (or compute the necessary size of the blob)
-      void* allocations[2] = {};
-      if (CubDebug(error = cub::AliasTemporaries(d_temp_storage,
-                                                 temp_storage_bytes,
-                                                 allocations,
-                                                 allocation_sizes)))
-      {
-        break;
-      }
 
       if (d_temp_storage == nullptr)
       {
@@ -314,19 +299,11 @@ struct DispatchThreeWayPartitionIf
       }
 
       // Construct the tile status interface
-      ScanTileStateT tile_status_1;
-      ScanTileStateT tile_status_2;
+      ScanTileStateT tile_status;
 
-      if (CubDebug(error = tile_status_1.Init(num_tiles,
-                                              allocations[0],
-                                              allocation_sizes[0])))
-      {
-        break;
-      }
-
-      if (CubDebug(error = tile_status_2.Init(num_tiles,
-                                              allocations[1],
-                                              allocation_sizes[1])))
+      if (CubDebug(error = tile_status.Init(num_tiles,
+                                            d_temp_storage,
+                                            temp_storage_bytes)))
       {
         break;
       }
@@ -345,8 +322,7 @@ struct DispatchThreeWayPartitionIf
       THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
         init_grid_size, INIT_KERNEL_THREADS, 0, stream
       ).doit(three_way_partition_init_kernel,
-             tile_status_1,
-             tile_status_2,
+             tile_status,
              num_tiles,
              d_num_selected_out);
 
@@ -413,8 +389,7 @@ struct DispatchThreeWayPartitionIf
              d_second_part_out,
              d_unselected_out,
              d_num_selected_out,
-             tile_status_1,
-             tile_status_2,
+             tile_status,
              select_first_part_op,
              select_second_part_op,
              num_items,
