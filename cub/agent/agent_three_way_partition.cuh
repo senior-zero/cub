@@ -68,7 +68,7 @@ struct AgentThreeWayPartitionPolicy
 
 
 template <
-  typename    AgentThreeWayPartitionPolicyT,
+  typename    PolicyT,
   typename    InputIteratorT,
   typename    FirstOutputIteratorT,
   typename    SecondOutputIteratorT,
@@ -89,43 +89,31 @@ struct AgentThreeWayPartition
   typedef cub::ScanTileState<OffsetT> ScanTileStateT;
 
   // Constants
-  enum
-  {
-    USE_SELECT_OP,
-    USE_SELECT_FLAGS,
-    USE_DISCONTINUITY,
+  constexpr static int BLOCK_THREADS = PolicyT::BLOCK_THREADS;
+  constexpr static int ITEMS_PER_THREAD = PolicyT::ITEMS_PER_THREAD;
+  constexpr static int TILE_ITEMS = BLOCK_THREADS * ITEMS_PER_THREAD;
 
-    BLOCK_THREADS           = AgentThreeWayPartitionPolicyT::BLOCK_THREADS,
-    ITEMS_PER_THREAD        = AgentThreeWayPartitionPolicyT::ITEMS_PER_THREAD,
-    TILE_ITEMS              = BLOCK_THREADS * ITEMS_PER_THREAD,
-    TWO_PHASE_SCATTER       = (ITEMS_PER_THREAD > 1),
-
-    SELECT_METHOD           = USE_SELECT_OP
-  };
-
-  // Cache-modified Input iterator wrapper type (for applying cache modifier) for items
-  typedef typename cub::If<cub::IsPointer<InputIteratorT>::VALUE,
-    cub::CacheModifiedInputIterator<AgentThreeWayPartitionPolicyT::LOAD_MODIFIER, InputT, OffsetT>,        // Wrap the native input pointer with CacheModifiedValuesInputIterator
-    InputIteratorT>::Type                                                               // Directly use the supplied input iterator type
-  WrappedInputIteratorT;
+  using WrappedInputIteratorT = typename cub::If<
+    cub::IsPointer<InputIteratorT>::VALUE,
+    cub::CacheModifiedInputIterator<PolicyT::LOAD_MODIFIER, InputT, OffsetT>,
+    InputIteratorT>::Type;
 
   // Parameterized BlockLoad type for input data
-  typedef cub::BlockLoad<InputT,
-    BLOCK_THREADS,
-    ITEMS_PER_THREAD,
-    AgentThreeWayPartitionPolicyT::LOAD_ALGORITHM>
-    BlockLoadT;
+  using BlockLoadT = cub::BlockLoad<InputT,
+                                    BLOCK_THREADS,
+                                    ITEMS_PER_THREAD,
+                                    PolicyT::LOAD_ALGORITHM>;
 
   // Parameterized BlockScan type
-  typedef cub::BlockScan<OffsetT, BLOCK_THREADS, AgentThreeWayPartitionPolicyT::SCAN_ALGORITHM>
-    BlockScanT;
+  using BlockScanT =
+    cub::BlockScan<OffsetT, BLOCK_THREADS, PolicyT::SCAN_ALGORITHM>;
 
   // Callback type for obtaining tile prefix during block scan
-  typedef cub::TilePrefixCallbackOp<OffsetT, cub::Sum, ScanTileStateT>
-    TilePrefixCallbackOpT;
+  using TilePrefixCallbackOpT =
+    cub::TilePrefixCallbackOp<OffsetT, cub::Sum, ScanTileStateT>;
 
   // Item exchange type
-  typedef InputT ItemExchangeT[TILE_ITEMS];
+  using ItemExchangeT = InputT[TILE_ITEMS];
 
   // Shared memory type for this thread block
   union _TempStorage
@@ -354,8 +342,6 @@ struct AgentThreeWayPartition
 
     __syncthreads();
 
-    // TODO Test scan pairs!
-
     // Exclusive scan of selection_flags
     BlockScanT(temp_storage.scan_storage.scan)
       .ExclusiveSum(second_items_selection_flags,
@@ -403,9 +389,8 @@ struct AgentThreeWayPartition
     OffsetT             tile_offset,        ///< Tile offset
     ScanTileStateT&     first_tile_state,   ///< Global tile state descriptor
     ScanTileStateT&     second_tile_state,
-
-    OffsetT &num_first_items_selections,
-    OffsetT &num_second_items_selections)
+    OffsetT&            num_first_items_selections,
+    OffsetT&            num_second_items_selections)
   {
     InputT   items[ITEMS_PER_THREAD];
 
