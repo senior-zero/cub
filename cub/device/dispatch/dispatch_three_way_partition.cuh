@@ -248,7 +248,7 @@ struct DispatchThreeWayPartitionIf
   CUB_RUNTIME_FUNCTION __forceinline__
   static cudaError_t Dispatch(
     void*                       d_temp_storage,
-    size_t&                     temp_storage_bytes,
+    std::size_t&                temp_storage_bytes,
     InputIteratorT              d_in,
     FirstOutputIteratorT        d_first_part_out,
     SecondOutputIteratorT       d_second_part_out,
@@ -307,6 +307,12 @@ struct DispatchThreeWayPartitionIf
         break;
       }
 
+      // Return if empty problem
+      if (num_items == 0)
+      {
+        break;
+      }
+
       // Construct the tile status interface
       ScanTileStateT tile_status_1;
       ScanTileStateT tile_status_2;
@@ -357,12 +363,6 @@ struct DispatchThreeWayPartitionIf
         {
           break;
         }
-      }
-
-      // Return if empty problem
-      if (num_items == 0)
-      {
-        break;
       }
 
       // Get SM occupancy for select_if_kernel
@@ -447,7 +447,7 @@ struct DispatchThreeWayPartitionIf
   CUB_RUNTIME_FUNCTION __forceinline__
   static cudaError_t Dispatch(
     void*                       d_temp_storage,
-    size_t&                     temp_storage_bytes,
+    std::size_t&                temp_storage_bytes,
     InputIteratorT              d_in,
     FirstOutputIteratorT        d_first_part_out,
     SecondOutputIteratorT       d_second_part_out,

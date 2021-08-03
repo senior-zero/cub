@@ -266,7 +266,7 @@ struct DevicePartition
               typename SelectSecondPartOp>
     static cudaError_t If(
       void*                       d_temp_storage,
-      size_t&                     temp_storage_bytes,
+      std::size_t&                temp_storage_bytes,
       InputIteratorT              d_in,
       FirstOutputIteratorT        d_first_part_out,
       SecondOutputIteratorT       d_second_part_out,
