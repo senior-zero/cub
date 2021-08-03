@@ -189,52 +189,46 @@ struct AgentThreeWayPartition
   // Utility methods for initializing the selections
   //---------------------------------------------------------------------
 
-  /**
-   * Initialize selections (specialized for selection operator)
-   */
   template <bool IS_LAST_TILE>
   __device__ __forceinline__ void Initialize(
     OffsetT                       num_tile_items,
     InputT                        (&items)[ITEMS_PER_THREAD],
-    OffsetT                       (&large_items_selection_flags)[ITEMS_PER_THREAD],
-    OffsetT                       (&small_items_selection_flags)[ITEMS_PER_THREAD])
+    OffsetT                       (&first_items_selection_flags)[ITEMS_PER_THREAD],
+    OffsetT                       (&second_items_selection_flags)[ITEMS_PER_THREAD])
   {
 #pragma unroll
     for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
     {
       // Out-of-bounds items are selection_flags
-      large_items_selection_flags[ITEM] = 1;
-      small_items_selection_flags[ITEM] = 1;
+      first_items_selection_flags[ITEM] = 1;
+      second_items_selection_flags[ITEM] = 1;
 
       if (!IS_LAST_TILE || (OffsetT(threadIdx.x * ITEMS_PER_THREAD) + ITEM < num_tile_items))
       {
-        large_items_selection_flags[ITEM] = select_first_part_op(items[ITEM]);
-        small_items_selection_flags[ITEM] = large_items_selection_flags[ITEM] ? 0 : select_second_part_op(items[ITEM]);
+        first_items_selection_flags[ITEM] = select_first_part_op(items[ITEM]);
+        second_items_selection_flags[ITEM] = first_items_selection_flags[ITEM] ? 0 : select_second_part_op(items[ITEM]);
       }
     }
   }
 
-  /**
-   * Scatter flagged items to output offsets (specialized for two-phase scattering)
-   */
   template <bool IS_LAST_TILE>
   __device__ __forceinline__ void Scatter(
     InputT          (&items)[ITEMS_PER_THREAD],
-    OffsetT         (&large_items_selection_flags)[ITEMS_PER_THREAD],
-    OffsetT         (&large_items_selection_indices)[ITEMS_PER_THREAD],
-    OffsetT         (&small_items_selection_flags)[ITEMS_PER_THREAD],
-    OffsetT         (&small_items_selection_indices)[ITEMS_PER_THREAD],
-    int             num_tile_items,                               ///< Number of valid items in this tile
-    int             num_large_tile_selections,                    ///< Number of selections in this tile
-    int             num_small_tile_selections,                    ///< Number of selections in this tile
-    OffsetT         num_large_selections_prefix,                  ///< Total number of selections prior to this tile
-    OffsetT         num_small_selections_prefix,                  ///< Total number of selections prior to this tile
+    OffsetT         (&first_items_selection_flags)[ITEMS_PER_THREAD],
+    OffsetT         (&first_items_selection_indices)[ITEMS_PER_THREAD],
+    OffsetT         (&second_items_selection_flags)[ITEMS_PER_THREAD],
+    OffsetT         (&second_items_selection_indices)[ITEMS_PER_THREAD],
+    int             num_tile_items,
+    int             num_first_tile_selections,
+    int             num_second_tile_selections,
+    OffsetT         num_first_selections_prefix,
+    OffsetT         num_second_selections_prefix,
     OffsetT         num_rejected_prefix)
   {
     __syncthreads();
 
-    int large_item_end = num_large_tile_selections;
-    int small_item_end = large_item_end + num_small_tile_selections;
+    int first_item_end = num_first_tile_selections;
+    int second_item_end = first_item_end + num_second_tile_selections;
 
     // Scatter items to shared memory (rejections first)
 #pragma unroll
@@ -246,22 +240,23 @@ struct AgentThreeWayPartition
       {
         int local_scatter_offset = 0;
 
-        if (large_items_selection_flags[ITEM])
+        if (first_items_selection_flags[ITEM])
         {
-          local_scatter_offset = large_items_selection_indices[ITEM] - num_large_selections_prefix;
+          local_scatter_offset = first_items_selection_indices[ITEM]
+                               - num_first_selections_prefix;
         }
-        else if (small_items_selection_flags[ITEM])
+        else if (second_items_selection_flags[ITEM])
         {
-          local_scatter_offset = large_item_end +
-                                 small_items_selection_indices[ITEM] -
-                                 num_small_selections_prefix;
+          local_scatter_offset = first_item_end +
+                                 second_items_selection_indices[ITEM] -
+                                 num_second_selections_prefix;
         }
         else
         {
           // Medium item
-          int local_selection_idx = (large_items_selection_indices[ITEM] - num_large_selections_prefix)
-                                  + (small_items_selection_indices[ITEM] - num_small_selections_prefix);
-          local_scatter_offset = small_item_end + item_idx - local_selection_idx;
+          int local_selection_idx = (first_items_selection_indices[ITEM] - num_first_selections_prefix)
+                                  + (second_items_selection_indices[ITEM] - num_second_selections_prefix);
+          local_scatter_offset = second_item_end + item_idx - local_selection_idx;
         }
 
         temp_storage.raw_exchange.Alias()[local_scatter_offset] = items[ITEM];
@@ -280,18 +275,17 @@ struct AgentThreeWayPartition
       {
         InputT item = temp_storage.raw_exchange.Alias()[item_idx];
 
-        if (item_idx < large_item_end)
+        if (item_idx < first_item_end)
         {
-          d_first_part_out[num_large_selections_prefix + item_idx] = item;
+          d_first_part_out[num_first_selections_prefix + item_idx] = item;
         }
-        else if (item_idx < small_item_end)
+        else if (item_idx < second_item_end)
         {
-          d_second_part_out[num_small_selections_prefix + item_idx - large_item_end] = item;
+          d_second_part_out[num_second_selections_prefix + item_idx - first_item_end] = item;
         }
         else
         {
-          int rejection_idx = item_idx - small_item_end;
-          // d_first_part_out[num_items - num_rejected_prefix - rejection_idx - 1] = item;
+          int rejection_idx = item_idx - second_item_end;
           d_unselected_out[num_rejected_prefix + rejection_idx] = item;
         }
       }
@@ -311,18 +305,18 @@ struct AgentThreeWayPartition
   __device__ __forceinline__ void ConsumeFirstTile(
     int                 num_tile_items,     ///< Number of input items comprising this tile
     OffsetT             tile_offset,        ///< Tile offset
-    ScanTileStateT&     large_tile_state,   ///< Global tile state descriptor
-    ScanTileStateT&     small_tile_state,   ///< Global tile state descriptor
-    OffsetT &large_items,
-    OffsetT &small_items)
+    ScanTileStateT&     first_tile_state,   ///< Global tile state descriptor
+    ScanTileStateT&     second_tile_state,   ///< Global tile state descriptor
+    OffsetT&            first_items,
+    OffsetT&            second_items)
   {
     InputT      items[ITEMS_PER_THREAD];
 
-    OffsetT     large_items_selection_flags[ITEMS_PER_THREAD];
-    OffsetT     large_items_selection_indices[ITEMS_PER_THREAD];
+    OffsetT     first_items_selection_flags[ITEMS_PER_THREAD];
+    OffsetT     first_items_selection_indices[ITEMS_PER_THREAD];
 
-    OffsetT     small_items_selection_flags[ITEMS_PER_THREAD];
-    OffsetT     small_items_selection_indices[ITEMS_PER_THREAD];
+    OffsetT     second_items_selection_flags[ITEMS_PER_THREAD];
+    OffsetT     second_items_selection_indices[ITEMS_PER_THREAD];
 
     // Load items
     if (IS_LAST_TILE)
@@ -338,23 +332,23 @@ struct AgentThreeWayPartition
     Initialize<IS_LAST_TILE>(
       num_tile_items,
       items,
-      large_items_selection_flags,
-      small_items_selection_flags);
+      first_items_selection_flags,
+      second_items_selection_flags);
 
     __syncthreads();
 
     // Exclusive scan of selection_flags
     BlockScanT(temp_storage.scan_storage.scan)
-      .ExclusiveSum(large_items_selection_flags,
-                    large_items_selection_indices,
-                    large_items);
+      .ExclusiveSum(first_items_selection_flags,
+                    first_items_selection_indices,
+                    first_items);
 
     if (threadIdx.x == 0)
     {
       // Update tile status if this is not the last tile
       if (!IS_LAST_TILE)
       {
-        large_tile_state.SetInclusive(0, large_items);
+        first_tile_state.SetInclusive(0, first_items);
       }
     }
 
@@ -364,36 +358,36 @@ struct AgentThreeWayPartition
 
     // Exclusive scan of selection_flags
     BlockScanT(temp_storage.scan_storage.scan)
-      .ExclusiveSum(small_items_selection_flags,
-                    small_items_selection_indices,
-                    small_items);
+      .ExclusiveSum(second_items_selection_flags,
+                    second_items_selection_indices,
+                    second_items);
 
     if (threadIdx.x == 0)
     {
       // Update tile status if this is not the last tile
       if (!IS_LAST_TILE)
       {
-        small_tile_state.SetInclusive(0, small_items);
+        second_tile_state.SetInclusive(0, second_items);
       }
     }
 
     // Discount any out-of-bounds selections
     if (IS_LAST_TILE)
     {
-      large_items -= (TILE_ITEMS - num_tile_items);
-      small_items -= (TILE_ITEMS - num_tile_items);
+      first_items -= (TILE_ITEMS - num_tile_items);
+      second_items -= (TILE_ITEMS - num_tile_items);
     }
 
     // Scatter flagged items
     Scatter<IS_LAST_TILE>(
       items,
-      large_items_selection_flags,
-      large_items_selection_indices,
-      small_items_selection_flags,
-      small_items_selection_indices,
+      first_items_selection_flags,
+      first_items_selection_indices,
+      second_items_selection_flags,
+      second_items_selection_indices,
       num_tile_items,
-      large_items,
-      small_items,
+      first_items,
+      second_items,
       // all the prefixes equal to 0 because it's the first tile
       0, 0, 0);
   }
@@ -407,80 +401,85 @@ struct AgentThreeWayPartition
     int                 num_tile_items,     ///< Number of input items comprising this tile
     int                 tile_idx,           ///< Tile index
     OffsetT             tile_offset,        ///< Tile offset
-    ScanTileStateT&     large_tile_state,   ///< Global tile state descriptor
-    ScanTileStateT&     small_tile_state,
+    ScanTileStateT&     first_tile_state,   ///< Global tile state descriptor
+    ScanTileStateT&     second_tile_state,
 
-    OffsetT &num_large_items_selections,
-    OffsetT &num_small_items_selections)
+    OffsetT &num_first_items_selections,
+    OffsetT &num_second_items_selections)
   {
-    InputT      items[ITEMS_PER_THREAD];
+    InputT   items[ITEMS_PER_THREAD];
 
-    OffsetT     large_items_selection_flags[ITEMS_PER_THREAD];
-    OffsetT     large_items_selection_indices[ITEMS_PER_THREAD];
+    OffsetT  first_items_selection_flags[ITEMS_PER_THREAD];
+    OffsetT  first_items_selection_indices[ITEMS_PER_THREAD];
 
-    OffsetT     small_items_selection_flags[ITEMS_PER_THREAD];
-    OffsetT     small_items_selection_indices[ITEMS_PER_THREAD];
+    OffsetT  second_items_selection_flags[ITEMS_PER_THREAD];
+    OffsetT  second_items_selection_indices[ITEMS_PER_THREAD];
 
     // Load items
     if (IS_LAST_TILE)
+    {
       BlockLoadT(temp_storage.load_items).Load(d_in + tile_offset, items, num_tile_items);
+    }
     else
+    {
       BlockLoadT(temp_storage.load_items).Load(d_in + tile_offset, items);
+    }
 
     // Initialize selection_flags
     Initialize<IS_LAST_TILE>(
       num_tile_items,
       items,
-      large_items_selection_flags,
-      small_items_selection_flags);
+      first_items_selection_flags,
+      second_items_selection_flags);
 
     __syncthreads();
 
     // Exclusive scan of values and selection_flags
-    TilePrefixCallbackOpT large_prefix_op(large_tile_state, temp_storage.scan_storage.prefix, cub::Sum(), tile_idx);
-    BlockScanT(temp_storage.scan_storage.scan).ExclusiveSum(large_items_selection_flags, large_items_selection_indices, large_prefix_op);
+    TilePrefixCallbackOpT first_prefix_op(first_tile_state, temp_storage.scan_storage.prefix, cub::Sum(), tile_idx);
+    BlockScanT(temp_storage.scan_storage.scan).ExclusiveSum(first_items_selection_flags, first_items_selection_indices, first_prefix_op);
 
-    num_large_items_selections                  = large_prefix_op.GetInclusivePrefix();
-    OffsetT num_large_items_in_tile_selections  = large_prefix_op.GetBlockAggregate();
-    OffsetT num_large_items_selections_prefix   = large_prefix_op.GetExclusivePrefix();
+    num_first_items_selections                  = first_prefix_op.GetInclusivePrefix();
+    OffsetT num_first_items_in_tile_selections  = first_prefix_op.GetBlockAggregate();
+    OffsetT num_first_items_selections_prefix   = first_prefix_op.GetExclusivePrefix();
 
     __syncthreads();
 
-    TilePrefixCallbackOpT small_prefix_op(small_tile_state, temp_storage.scan_storage.prefix, cub::Sum(), tile_idx);
-    BlockScanT(temp_storage.scan_storage.scan).ExclusiveSum(small_items_selection_flags, small_items_selection_indices, small_prefix_op);
+    TilePrefixCallbackOpT second_prefix_op(second_tile_state, temp_storage.scan_storage.prefix, cub::Sum(), tile_idx);
+    BlockScanT(temp_storage.scan_storage.scan).ExclusiveSum(second_items_selection_flags, second_items_selection_indices, second_prefix_op);
 
-    num_small_items_selections                  = small_prefix_op.GetInclusivePrefix();
-    OffsetT num_small_items_in_tile_selections  = small_prefix_op.GetBlockAggregate();
-    OffsetT num_small_items_selections_prefix   = small_prefix_op.GetExclusivePrefix();
+    num_second_items_selections                  = second_prefix_op.GetInclusivePrefix();
+    OffsetT num_second_items_in_tile_selections  = second_prefix_op.GetBlockAggregate();
+    OffsetT num_second_items_selections_prefix   = second_prefix_op.GetExclusivePrefix();
 
     OffsetT num_rejected_prefix = (tile_idx * TILE_ITEMS)
-                                  - num_large_items_selections_prefix
-                                  - num_small_items_selections_prefix;
+                                  - num_first_items_selections_prefix
+                                  - num_second_items_selections_prefix;
 
     // Discount any out-of-bounds selections. There are exactly
     // TILE_ITEMS - num_tile_items elements like that because we
     // marked them as selected in Initialize method.
     if (IS_LAST_TILE)
     {
-      int num_discount                    = TILE_ITEMS - num_tile_items;
-      num_large_items_selections         -= num_discount;
-      num_large_items_in_tile_selections -= num_discount;
-      num_small_items_selections         -= num_discount;
-      num_small_items_in_tile_selections -= num_discount;
+      const int num_discount = TILE_ITEMS - num_tile_items;
+
+      num_first_items_selections          -= num_discount;
+      num_first_items_in_tile_selections  -= num_discount;
+      num_second_items_selections         -= num_discount;
+      num_second_items_in_tile_selections -= num_discount;
     }
 
     // Scatter flagged items
     Scatter<IS_LAST_TILE>(
       items,
-      large_items_selection_flags,
-      large_items_selection_indices,
-      small_items_selection_flags,
-      small_items_selection_indices,
+      first_items_selection_flags,
+      first_items_selection_indices,
+      second_items_selection_flags,
+      second_items_selection_indices,
       num_tile_items,
-      num_large_items_in_tile_selections,
-      num_small_items_in_tile_selections,
-      num_large_items_selections_prefix,
-      num_small_items_selections_prefix,
+      num_first_items_in_tile_selections,
+      num_second_items_in_tile_selections,
+      num_first_items_selections_prefix,
+      num_second_items_selections_prefix,
       num_rejected_prefix);
   }
 
@@ -490,33 +489,32 @@ struct AgentThreeWayPartition
    */
   template <bool IS_LAST_TILE>
   __device__ __forceinline__ void ConsumeTile(
-    int                 num_tile_items,     ///< Number of input items comprising this tile
-    int                 tile_idx,           ///< Tile index
-    OffsetT             tile_offset,        ///< Tile offset
-    ScanTileStateT&     large_tile_state,   ///< Global tile state descriptor
-    ScanTileStateT&     small_tile_state,
-
-    OffsetT &large_items,
-    OffsetT &small_items)
+    int                 num_tile_items,
+    int                 tile_idx,
+    OffsetT             tile_offset,
+    ScanTileStateT&     first_tile_state,
+    ScanTileStateT&     second_tile_state,
+    OffsetT&            first_items,
+    OffsetT&            second_items)
   {
     if (tile_idx == 0)
     {
       ConsumeFirstTile<IS_LAST_TILE>(num_tile_items,
                                      tile_offset,
-                                     large_tile_state,
-                                     small_tile_state,
-                                     large_items,
-                                     small_items);
+                                     first_tile_state,
+                                     second_tile_state,
+                                     first_items,
+                                     second_items);
     }
     else
     {
       ConsumeSubsequentTile<IS_LAST_TILE>(num_tile_items,
                                           tile_idx,
                                           tile_offset,
-                                          large_tile_state,
-                                          small_tile_state,
-                                          large_items,
-                                          small_items);
+                                          first_tile_state,
+                                          second_tile_state,
+                                          first_items,
+                                          second_items);
     }
   }
 
@@ -527,16 +525,16 @@ struct AgentThreeWayPartition
   template <typename NumSelectedIteratorT>        ///< Output iterator type for recording number of items selection_flags
   __device__ __forceinline__ void ConsumeRange(
     int                     num_tiles,          ///< Total number of input tiles
-    ScanTileStateT&         large_tile_state,   ///< Global tile state descriptor
-    ScanTileStateT&         small_tile_state,   ///< Global tile state descriptor
+    ScanTileStateT&         first_tile_state,   ///< Global tile state descriptor
+    ScanTileStateT&         second_tile_state,   ///< Global tile state descriptor
     NumSelectedIteratorT    d_num_selected_out) ///< Output total number selection_flags
   {
     // Blocks are launched in increasing order, so just assign one tile per block
     int     tile_idx    = static_cast<int>((blockIdx.x * gridDim.y) + blockIdx.y);  // Current tile index
     OffsetT tile_offset = tile_idx * TILE_ITEMS;                                    // Global offset for the current tile
 
-    OffsetT num_large_selections;
-    OffsetT num_small_selections;
+    OffsetT num_first_selections;
+    OffsetT num_second_selections;
 
     if (tile_idx < num_tiles - 1)
     {
@@ -544,10 +542,10 @@ struct AgentThreeWayPartition
       ConsumeTile<false>(TILE_ITEMS,
                          tile_idx,
                          tile_offset,
-                         large_tile_state,
-                         small_tile_state,
-                         num_large_selections,
-                         num_small_selections);
+                         first_tile_state,
+                         second_tile_state,
+                         num_first_selections,
+                         num_second_selections);
     }
     else
     {
@@ -557,16 +555,16 @@ struct AgentThreeWayPartition
       ConsumeTile<true>(num_remaining,
                         tile_idx,
                         tile_offset,
-                        large_tile_state,
-                        small_tile_state,
-                        num_large_selections,
-                        num_small_selections);
+                        first_tile_state,
+                        second_tile_state,
+                        num_first_selections,
+                        num_second_selections);
 
       if (threadIdx.x == 0)
       {
         // Output the total number of items selection_flags
-        d_num_selected_out[0] = num_large_selections;
-        d_num_selected_out[1] = num_small_selections;
+        d_num_selected_out[0] = num_first_selections;
+        d_num_selected_out[1] = num_second_selections;
       }
     }
   }
