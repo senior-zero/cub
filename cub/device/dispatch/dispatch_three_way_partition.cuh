@@ -260,7 +260,7 @@ struct DispatchThreeWayPartitionIf
     cudaStream_t                stream,
     bool                        debug_synchronous,
     int                         /*ptx_version*/,
-    ScanInitKernelPtrT          scan_init_kernel,
+    ScanInitKernelPtrT          three_way_partition_init_kernel,
     SelectIfKernelPtrT          three_way_partition_kernel,
     KernelConfig                three_way_partition_config)
   {
@@ -331,20 +331,20 @@ struct DispatchThreeWayPartitionIf
         break;
       }
 
-      // Log scan_init_kernel configuration
+      // Log three_way_partition_init_kernel configuration
       int init_grid_size = CUB_MAX(1, DivideAndRoundUp(num_tiles, INIT_KERNEL_THREADS));
       if (debug_synchronous)
       {
-        _CubLog("Invoking scan_init_kernel<<<%d, %d, 0, %lld>>>()\n",
+        _CubLog("Invoking three_way_partition_init_kernel<<<%d, %d, 0, %lld>>>()\n",
                 init_grid_size,
                 INIT_KERNEL_THREADS,
                 (long long)stream);
       }
 
-      // Invoke scan_init_kernel to initialize tile descriptors
+      // Invoke three_way_partition_init_kernel to initialize tile descriptors
       THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
         init_grid_size, INIT_KERNEL_THREADS, 0, stream
-      ).doit(scan_init_kernel,
+      ).doit(three_way_partition_init_kernel,
              tile_status_1,
              tile_status_2,
              num_tiles,
@@ -365,16 +365,6 @@ struct DispatchThreeWayPartitionIf
         }
       }
 
-      // Get SM occupancy for select_if_kernel
-      int range_select_sm_occupancy;
-      if (CubDebug(error = MaxSmOccupancy(
-        range_select_sm_occupancy,            // out
-        three_way_partition_kernel,
-        three_way_partition_config.block_threads)))
-      {
-        break;
-      }
-
       // Get max x-dimension of grid
       int max_dim_x;
       if (CubDebug(error = cudaDeviceGetAttribute(&max_dim_x,
@@ -393,7 +383,17 @@ struct DispatchThreeWayPartitionIf
       // Log select_if_kernel configuration
       if (debug_synchronous)
       {
-        _CubLog("Invoking select_if_kernel<<<{%d,%d,%d}, %d, 0, %lld>>>(), %d "
+        // Get SM occupancy for select_if_kernel
+        int range_select_sm_occupancy;
+        if (CubDebug(error = MaxSmOccupancy(
+          range_select_sm_occupancy,            // out
+          three_way_partition_kernel,
+          three_way_partition_config.block_threads)))
+        {
+          break;
+        }
+
+        _CubLog("Invoking three_way_partition_kernel<<<{%d,%d,%d}, %d, 0, %lld>>>(), %d "
                 "items per thread, %d SM occupancy\n",
                 scan_grid_size.x,
                 scan_grid_size.y,
