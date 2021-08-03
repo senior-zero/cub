@@ -48,38 +48,29 @@ CUB_NAMESPACE_BEGIN
  *****************************************************************************/
 
 
-/**
- * Select kernel entry point (multi-block)
- *
- * Performs functor-based selection if SelectOpT functor type != NullType
- * Otherwise performs flag-based selection if FlagsInputIterator's value type != NullType
- * Otherwise performs discontinuity selection (keep unique)
- */
 template <
   typename            AgentThreeWayPartitionPolicyT,
-  typename            InputIteratorT,             ///< Random-access input iterator type for reading input items
-  typename            FlagsInputIteratorT,        ///< Random-access input iterator type for reading selection flags (NullType* if a selection functor or discontinuity flagging is to be used for selection)
-  typename            SelectedOutputIteratorT,    ///< Random-access output iterator type for writing selected items
-  typename            NumSelectedIteratorT,       ///< Output iterator type for recording the number of items selected
-  typename            ScanTileStateT,             ///< Tile status interface type
-  typename            SelectOp1T,                 ///< Selection operator type (NullType if selection flags or discontinuity flagging is to be used for selection)
-  typename            SelectOp2T,                 ///< Selection operator type (NullType if selection flags or discontinuity flagging is to be used for selection)
-  typename            EqualityOpT,                ///< Equality operator type (NullType if selection functor or selection flags is to be used for selection)
-  typename            OffsetT>                    ///< Signed integer type for global offsets
+  typename            InputIteratorT,
+  typename            FlagsInputIteratorT,
+  typename            SelectedOutputIteratorT,
+  typename            NumSelectedIteratorT,
+  typename            ScanTileStateT,
+  typename            SelectOp1T,
+  typename            SelectOp2T,
+  typename            OffsetT>
 __launch_bounds__ (int(AgentThreeWayPartitionPolicyT::BLOCK_THREADS))
 __global__ void DeviceSelectSweep3Kernel(
-  InputIteratorT          d_in,                   ///< [in] Pointer to the input sequence of data items
-  FlagsInputIteratorT     d_flags,                ///< [in] Pointer to the input sequence of selection flags (if applicable)
-  SelectedOutputIteratorT d_selected_out_1,       ///< [out] Pointer to the output sequence of selected data items
-  SelectedOutputIteratorT d_selected_out_2,       ///< [out] Pointer to the output sequence of selected data items
-  NumSelectedIteratorT    d_num_selected_out,     ///< [out] Pointer to the total number of items selected (i.e., length of \p d_selected_out)
-  ScanTileStateT          tile_status_1,          ///< [in] Tile status interface
-  ScanTileStateT          tile_status_2,          ///< [in] Tile status interface
-  SelectOp1T              select_op_1,            ///< [in] Selection operator
-  SelectOp2T              select_op_2,            ///< [in] Selection operator
-  EqualityOpT             equality_op,            ///< [in] Equality operator
-  OffsetT                 num_items,              ///< [in] Total number of input items (i.e., length of \p d_in)
-  int                     num_tiles)              ///< [in] Total number of tiles for the entire problem
+  InputIteratorT          d_in,
+  FlagsInputIteratorT     d_flags,
+  SelectedOutputIteratorT d_selected_out_1,
+  SelectedOutputIteratorT d_selected_out_2,
+  NumSelectedIteratorT    d_num_selected_out,
+  ScanTileStateT          tile_status_1,
+  ScanTileStateT          tile_status_2,
+  SelectOp1T              select_op_1,
+  SelectOp2T              select_op_2,
+  OffsetT                 num_items,
+  int                     num_tiles)
 {
   // Thread block type for selecting data from input tiles
   typedef AgentThreeWayPartition<AgentThreeWayPartitionPolicyT,
@@ -88,7 +79,6 @@ __global__ void DeviceSelectSweep3Kernel(
                                  SelectedOutputIteratorT,
                                  SelectOp1T,
                                  SelectOp2T,
-                                 EqualityOpT,
                                  OffsetT>
     AgentThreeWayPartitionT;
 
@@ -103,7 +93,6 @@ __global__ void DeviceSelectSweep3Kernel(
                  d_selected_out_2,
                  select_op_1,
                  select_op_2,
-                 equality_op,
                  num_items)
     .ConsumeRange(num_tiles, tile_status_1, tile_status_2, d_num_selected_out);
 }
@@ -138,18 +127,14 @@ __global__ void DeviceCompactInit3Kernel(
  * Dispatch
  ******************************************************************************/
 
-/**
- * Utility class for dispatching the appropriately-tuned kernels for DeviceSelect
- */
 template <
-  typename    InputIteratorT,                 ///< Random-access input iterator type for reading input items
-  typename    FlagsInputIteratorT,            ///< Random-access input iterator type for reading selection flags (NullType* if a selection functor or discontinuity flagging is to be used for selection)
-  typename    SelectedOutputIteratorT,        ///< Random-access output iterator type for writing selected items
-  typename    NumSelectedIteratorT,           ///< Output iterator type for recording the number of items selected
-  typename    SelectOp1T,                     ///< Selection operator type (NullType if selection flags or discontinuity flagging is to be used for selection)
-  typename    SelectOp2T,                     ///< Selection operator type (NullType if selection flags or discontinuity flagging is to be used for selection)
-  typename    EqualityOpT,                    ///< Equality operator type (NullType if selection functor or selection flags is to be used for selection)
-  typename    OffsetT>                        ///< Signed integer type for global offsets
+  typename    InputIteratorT,
+  typename    FlagsInputIteratorT,
+  typename    SelectedOutputIteratorT,
+  typename    NumSelectedIteratorT,
+  typename    SelectOp1T,
+  typename    SelectOp2T,
+  typename    OffsetT>                        
 struct DispatchThreeWayPartitionIf
 {
   /******************************************************************************
@@ -279,7 +264,6 @@ struct DispatchThreeWayPartitionIf
     NumSelectedIteratorT        d_num_selected_out,             ///< [in] Pointer to the total number of items selected (i.e., length of \p d_selected_out)
     SelectOp1T                  select_op_1,                    ///< [in] Selection operator
     SelectOp2T                  select_op_2,                    ///< [in] Selection operator
-    EqualityOpT                 equality_op,                    ///< [in] Equality operator
     OffsetT                     num_items,                      ///< [in] Total number of input items (i.e., length of \p d_in)
     cudaStream_t                stream,                         ///< [in] CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
     bool                        debug_synchronous,              ///< [in] Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
@@ -324,7 +308,13 @@ struct DispatchThreeWayPartitionIf
 
       // Log scan_init_kernel configuration
       int init_grid_size = CUB_MAX(1, DivideAndRoundUp(num_tiles, INIT_KERNEL_THREADS));
-      if (debug_synchronous) _CubLog("Invoking scan_init_kernel<<<%d, %d, 0, %lld>>>()\n", init_grid_size, INIT_KERNEL_THREADS, (long long) stream);
+      if (debug_synchronous)
+      {
+        _CubLog("Invoking scan_init_kernel<<<%d, %d, 0, %lld>>>()\n",
+                init_grid_size,
+                INIT_KERNEL_THREADS,
+                (long long)stream);
+      }
 
       // Invoke scan_init_kernel to initialize tile descriptors
       THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
@@ -336,10 +326,19 @@ struct DispatchThreeWayPartitionIf
              d_num_selected_out);
 
       // Check for failure to launch
-      if (CubDebug(error = cudaPeekAtLastError())) break;
+      if (CubDebug(error = cudaPeekAtLastError()))
+      {
+        break;
+      }
 
       // Sync the stream if specified to flush runtime errors
-      if (debug_synchronous && (CubDebug(error = cub::SyncStream(stream)))) break;
+      if (debug_synchronous)
+      {
+        if (CubDebug(error = cub::SyncStream(stream)))
+        {
+          break;
+        }
+      }
 
       // Return if empty problem
       if (num_items == 0)
@@ -352,11 +351,17 @@ struct DispatchThreeWayPartitionIf
       if (CubDebug(error = MaxSmOccupancy(
         range_select_sm_occupancy,            // out
         select_if_kernel,
-        select_if_config.block_threads))) break;
+        select_if_config.block_threads)))
+      {
+        break;
+      }
 
       // Get max x-dimension of grid
       int max_dim_x;
-      if (CubDebug(error = cudaDeviceGetAttribute(&max_dim_x, cudaDevAttrMaxGridDimX, device_ordinal))) break;;
+      if (CubDebug(error = cudaDeviceGetAttribute(&max_dim_x, cudaDevAttrMaxGridDimX, device_ordinal)))
+      {
+        break;
+      }
 
       // Get grid size for scanning tiles
       dim3 scan_grid_size;
@@ -365,8 +370,18 @@ struct DispatchThreeWayPartitionIf
       scan_grid_size.x = CUB_MIN(num_tiles, max_dim_x);
 
       // Log select_if_kernel configuration
-      if (debug_synchronous) _CubLog("Invoking select_if_kernel<<<{%d,%d,%d}, %d, 0, %lld>>>(), %d items per thread, %d SM occupancy\n",
-                                     scan_grid_size.x, scan_grid_size.y, scan_grid_size.z, select_if_config.block_threads, (long long) stream, select_if_config.items_per_thread, range_select_sm_occupancy);
+      if (debug_synchronous)
+      {
+        _CubLog("Invoking select_if_kernel<<<{%d,%d,%d}, %d, 0, %lld>>>(), %d "
+                "items per thread, %d SM occupancy\n",
+                scan_grid_size.x,
+                scan_grid_size.y,
+                scan_grid_size.z,
+                select_if_config.block_threads,
+                (long long)stream,
+                select_if_config.items_per_thread,
+                range_select_sm_occupancy);
+      }
 
       // Invoke select_if_kernel
       thrust::cuda_cub::launcher::triple_chevron(
@@ -381,7 +396,6 @@ struct DispatchThreeWayPartitionIf
              tile_status_2,
              select_op_1,
              select_op_2,
-             equality_op,
              num_items,
              num_tiles);
 
@@ -411,7 +425,6 @@ struct DispatchThreeWayPartitionIf
     NumSelectedIteratorT        d_num_selected_out,             ///< [in] Pointer to the total number of items selected (i.e., length of \p d_selected_out)
     SelectOp1T                  select_op_1,                    ///< [in] Selection operator
     SelectOp2T                  select_op_2,                    ///< [in] Selection operator
-    EqualityOpT                 equality_op,                    ///< [in] Equality operator
     OffsetT                     num_items,                      ///< [in] Total number of input items (i.e., length of \p d_in)
     cudaStream_t                stream,                         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
     bool                        debug_synchronous)              ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
@@ -421,41 +434,45 @@ struct DispatchThreeWayPartitionIf
     {
       // Get PTX version
       int ptx_version = 0;
-      if (CubDebug(error = cub::PtxVersion(ptx_version))) break;
+      if (CubDebug(error = cub::PtxVersion(ptx_version)))
+      {
+        break;
+      }
 
       // Get kernel kernel dispatch configurations
       KernelConfig select_if_config;
       InitConfigs(ptx_version, select_if_config);
 
       // Dispatch
-      if (CubDebug(error = Dispatch(
-        d_temp_storage,
-        temp_storage_bytes,
-        d_in,
-        d_flags,
-        d_selected_out_1,
-        d_selected_out_2,
-        d_num_selected_out,
-        select_op_1,
-        select_op_2,
-        equality_op,
-        num_items,
-        stream,
-        debug_synchronous,
-        ptx_version,
-        DeviceCompactInit3Kernel<ScanTileStateT, NumSelectedIteratorT>,
-        DeviceSelectSweep3Kernel<PtxThreeWayPartitionPolicyT,
-        InputIteratorT,
-        FlagsInputIteratorT,
-        SelectedOutputIteratorT,
-        NumSelectedIteratorT,
-        ScanTileStateT,
-        SelectOp1T,
-        SelectOp2T,
-        EqualityOpT,
-        OffsetT>,
-        select_if_config)))
+      if (CubDebug(
+            error = Dispatch(
+              d_temp_storage,
+              temp_storage_bytes,
+              d_in,
+              d_flags,
+              d_selected_out_1,
+              d_selected_out_2,
+              d_num_selected_out,
+              select_op_1,
+              select_op_2,
+              num_items,
+              stream,
+              debug_synchronous,
+              ptx_version,
+              DeviceCompactInit3Kernel<ScanTileStateT, NumSelectedIteratorT>,
+              DeviceSelectSweep3Kernel<PtxThreeWayPartitionPolicyT,
+                                       InputIteratorT,
+                                       FlagsInputIteratorT,
+                                       SelectedOutputIteratorT,
+                                       NumSelectedIteratorT,
+                                       ScanTileStateT,
+                                       SelectOp1T,
+                                       SelectOp2T,
+                                       OffsetT>,
+              select_if_config)))
+      {
         break;
+      }
     } while (0);
 
     return error;

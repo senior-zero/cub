@@ -263,21 +263,20 @@ struct DevicePartition
               typename SelectBeginOp,
               typename SelectEndOp>
     static cudaError_t If(
-      void*                       d_temp_storage,                 ///< [in] %Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
-      size_t&                     temp_storage_bytes,             ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
-      InputIteratorT              d_in,                           ///< [in] Pointer to the input sequence of data items
-      OutputIteratorT             d_begin_and_middle_out,         ///< [out] Pointer to the output sequence of partitioned data items
-      OutputIteratorT             d_end_out,                      ///< [out] Pointer to the output sequence of partitioned data items
-      NumSelectedIteratorT        d_num_selected_out,             ///< [out] Pointer to the output total number of items selected (i.e., the offset of the unselected partition)
-      int                         num_items,                      ///< [in] Total number of items to select from
-      SelectBeginOp               select_begin_op,                ///< [in] Unary selection operator
-      SelectEndOp                 select_end_op,                  ///< [in] Unary selection operator
-      cudaStream_t                stream             = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within.  Default is stream<sub>0</sub>.
-      bool                        debug_synchronous  = false)     ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  May cause significant slowdown.  Default is \p false.
+      void*                       d_temp_storage,
+      size_t&                     temp_storage_bytes,
+      InputIteratorT              d_in,
+      OutputIteratorT             d_begin_and_middle_out,
+      OutputIteratorT             d_end_out,
+      NumSelectedIteratorT        d_num_selected_out,
+      int                         num_items,
+      SelectBeginOp               select_begin_op,
+      SelectEndOp                 select_end_op,
+      cudaStream_t                stream             = 0,
+      bool                        debug_synchronous  = false)
     {
-      using OffsetT = int;                  // Signed integer type for global offsets
-      using FlagIterator = cub::NullType *; // FlagT iterator type (not used)
-      using EqualityOp = cub::NullType;     // Equality operator (not used)
+      using OffsetT = int;
+      using FlagIterator = cub::NullType *;
 
       return DispatchThreeWayPartitionIf<InputIteratorT,
                                          FlagIterator,
@@ -285,7 +284,6 @@ struct DevicePartition
                                          NumSelectedIteratorT,
                                          SelectBeginOp,
                                          SelectEndOp,
-                                         EqualityOp,
                                          OffsetT>::Dispatch(d_temp_storage,
                                                             temp_storage_bytes,
                                                             d_in,
@@ -295,7 +293,6 @@ struct DevicePartition
                                                             d_num_selected_out,
                                                             select_begin_op,
                                                             select_end_op,
-                                                            EqualityOp(),
                                                             num_items,
                                                             stream,
                                                             debug_synchronous);

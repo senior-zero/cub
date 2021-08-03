@@ -89,7 +89,6 @@ template <
   typename    SelectedOutputIteratorT,        ///< Random-access input iterator type for selection_flags items
   typename    SelectOp1T,                     ///< Selection operator type (NullType if selections or discontinuity flagging is to be used for selection)
   typename    SelectOp2T,                     ///< Selection operator type (NullType if selections or discontinuity flagging is to be used for selection)
-  typename    EqualityOpT,                    ///< Equality operator type (NullType if selection functor or selections is to be used for selection)
   typename    OffsetT>                        ///< Signed integer type for global offsets
 struct AgentThreeWayPartition
 {
@@ -197,7 +196,6 @@ struct AgentThreeWayPartition
   SelectedOutputIteratorT              d_selected_out_1;   ///< Unique output items
   SelectedOutputIteratorT              d_selected_out_2;   ///< Unique output items
   WrappedFlagsInputIteratorT           d_flags_in;         ///< Input selection flags (if applicable)
-  cub::InequalityWrapper<EqualityOpT>  inequality_op;      ///< T inequality operator
   SelectOp1T                           select_op_1;        ///< Selection operator
   SelectOp2T                           select_op_2;        ///< Selection operator
   OffsetT                              num_items;          ///< Total number of input items
@@ -217,7 +215,6 @@ struct AgentThreeWayPartition
     SelectedOutputIteratorT     d_selected_out_2,     ///< Output data
     SelectOp1T                  select_op_1,          ///< Selection operator
     SelectOp2T                  select_op_2,          ///< Selection operator
-    EqualityOpT                 equality_op,        ///< Equality operator
     OffsetT                     num_items)          ///< Total number of input items
     :
     temp_storage(temp_storage.Alias()),
@@ -227,7 +224,6 @@ struct AgentThreeWayPartition
     d_selected_out_2(d_selected_out_2),
     select_op_1(select_op_1),
     select_op_2(select_op_2),
-    inequality_op(equality_op),
     num_items(num_items)
   {}
 
