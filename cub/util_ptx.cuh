@@ -431,6 +431,30 @@ __device__ __forceinline__ unsigned int WarpId()
 }
 
 /**
+ *
+ * @tparam LOGICAL_WARP_THREADS Must be a power-of-two (less or equal to 32)
+ * @param warp_id
+ * @return
+ */
+template <int LOGICAL_WARP_THREADS,
+          int PTX_ARCH>
+__device__ __forceinline__ unsigned int WarpMask(unsigned int warp_id)
+{
+  constexpr bool IS_ARCH_WARP = LOGICAL_WARP_THREADS ==
+                                CUB_WARP_THREADS(PTX_ARCH);
+
+  unsigned int member_mask =
+    0xffffffffu >> (CUB_WARP_THREADS(PTX_ARCH) - LOGICAL_WARP_THREADS);
+
+  if (!IS_ARCH_WARP)
+  {
+    member_mask = member_mask << (warp_id * LOGICAL_WARP_THREADS);
+  }
+
+  return member_mask;
+}
+
+/**
  * \brief Returns the warp lane mask of all lanes less than the calling thread
  */
 __device__ __forceinline__ unsigned int LaneMaskLt()

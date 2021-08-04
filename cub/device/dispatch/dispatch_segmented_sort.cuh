@@ -37,6 +37,7 @@
 #include "../../agent/agent_segmented_sort.cuh"
 #include "../../agent/agent_segmented_radix_sort.cuh"
 #include "../../block/block_merge_sort.cuh"
+#include "../../warp/warp_merge_sort.cuh"
 #include "../../thread/thread_sort.cuh"
 
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
@@ -181,18 +182,16 @@ template <bool IS_DESCENDING,
           int items_per_thread,
           int threads_per_segment,
           typename KeyT,
-          typename ValueT>
+          typename ValueT,
+          typename WarpMergeSortT =
+            WarpMergeSort<KeyT, ValueT, items_per_thread, threads_per_segment>>
 __device__ void
 sub_warp_merge_sort(const KeyT *keys_input,
                     KeyT *keys_output,
                     const ValueT *values_input,
                     ValueT *values_output,
                     int segment_size,
-                    KeyT *keys_cache,
-                    ValueT *values_cache) // T *cache = block_cache + (tid /
-                                          // threads_per_segment) *
-                                          // threads_per_segment *
-                                          // items_per_thread;
+                    typename WarpMergeSortT::TempStorage &temp_storage)
 {
   static constexpr bool KEYS_ONLY = cub::Equals<ValueT, cub::NullType>::VALUE;
 
@@ -208,18 +207,16 @@ sub_warp_merge_sort(const KeyT *keys_input,
     }
   };
 
-  int tid = static_cast<int>(threadIdx.x);
-
   if (segment_size == 0)
   {
     return;
   }
 
-  int lane_id = tid % threads_per_segment;
+  WarpMergeSortT warp_merge_sort(temp_storage);
 
   if (segment_size == 1)
   {
-    if (lane_id == 0)
+    if (warp_merge_sort.lane_id == 0)
     {
       keys_output[0] = keys_input[0];
 
@@ -233,7 +230,7 @@ sub_warp_merge_sort(const KeyT *keys_input,
   }
   else if (segment_size == 2)
   {
-    if (lane_id == 0)
+    if (warp_merge_sort.lane_id == 0)
     {
       KeyT lhs = keys_input[0];
       KeyT rhs = keys_input[1];
@@ -268,147 +265,43 @@ sub_warp_merge_sort(const KeyT *keys_input,
   KeyT keys[items_per_thread];
   ValueT values[items_per_thread];
 
-  int indices[items_per_thread];
-
-  int group_mask = static_cast<int>(gen_mask<threads_per_segment>());
-
-  sub_warp_load<items_per_thread, threads_per_segment>(lane_id,
+  sub_warp_load<items_per_thread, threads_per_segment>(warp_merge_sort.lane_id,
                                                        segment_size,
-                                                       group_mask,
+                                                       warp_merge_sort.member_mask,
                                                        keys_input,
                                                        keys,
-                                                       keys_cache);
+                                                       temp_storage.Alias().keys);
 
   if (!KEYS_ONLY)
   {
-    sub_warp_load<items_per_thread, threads_per_segment>(lane_id,
+    sub_warp_load<items_per_thread, threads_per_segment>(warp_merge_sort.lane_id,
                                                          segment_size,
-                                                         group_mask,
+                                                         warp_merge_sort.member_mask,
                                                          values_input,
                                                          values,
-                                                         values_cache);
+                                                         temp_storage.Alias().items);
   }
 
   // 2) Sort
 
-  KeyT max_key = keys_input[0];
+  KeyT oob_default = keys_input[0];
+  warp_merge_sort.Sort(keys, values, binary_op, segment_size, oob_default);
 
-#pragma unroll
-  for (int item = 1; item < items_per_thread; ++item)
-  {
-    if (items_per_thread * lane_id + item < segment_size)
-    {
-      max_key = max_key < keys[item] ? keys[item] : max_key;
-    }
-    else
-    {
-      keys[item] = max_key;
-    }
-  }
-
-  if (lane_id * items_per_thread < segment_size)
-  {
-    StableOddEvenSort(keys, values, binary_op);
-  }
-
-  if (segment_size > items_per_thread)
-  {
-#pragma unroll
-    for (int target_merged_threads_number = 2;
-         target_merged_threads_number <= threads_per_segment;
-         target_merged_threads_number *= 2)
-    {
-      int merged_threads_number = target_merged_threads_number / 2;
-      int mask                  = target_merged_threads_number - 1;
-
-      WARP_SYNC(group_mask);
-
-      for (int item = 0; item < items_per_thread; item++)
-      {
-        keys_cache[lane_id * items_per_thread + item] = keys[item];
-      }
-      WARP_SYNC(group_mask);
-
-      int first_thread_idx_in_thread_group_being_merged = ~mask & lane_id;
-      int start                                         = items_per_thread *
-                  first_thread_idx_in_thread_group_being_merged;
-      int size = items_per_thread * merged_threads_number;
-
-      int thread_idx_in_thread_group_being_merged = mask & lane_id;
-
-      int diag =
-        min(segment_size,
-            items_per_thread * thread_idx_in_thread_group_being_merged);
-
-      int keys1_beg = min(segment_size, start);
-      int keys1_end = min(segment_size, keys1_beg + size);
-      int keys2_beg = keys1_end;
-      int keys2_end = min(segment_size, keys2_beg + size);
-
-      int keys1_count = keys1_end - keys1_beg;
-      int keys2_count = keys2_end - keys2_beg;
-
-      int partition_diag = MergePath<KeyT>(&keys_cache[keys1_beg],
-                                            &keys_cache[keys2_beg],
-                                            keys1_count,
-                                            keys2_count,
-                                            diag,
-                                            binary_op);
-
-      int keys1_beg_loc   = keys1_beg + partition_diag;
-      int keys1_end_loc   = keys1_end;
-      int keys2_beg_loc   = keys2_beg + diag - partition_diag;
-      int keys2_end_loc   = keys2_end;
-      int keys1_count_loc = keys1_end_loc - keys1_beg_loc;
-      int keys2_count_loc = keys2_end_loc - keys2_beg_loc;
-
-      SerialMerge(&keys_cache[0],
-                  keys1_beg_loc,
-                  keys2_beg_loc,
-                  keys1_count_loc,
-                  keys2_count_loc,
-                  keys,
-                  indices,
-                  binary_op);
-
-      if (!KEYS_ONLY)
-      {
-        WARP_SYNC(group_mask);
-
-#pragma unroll
-        for (int item = 0; item < items_per_thread; item++)
-        {
-          int idx           = items_per_thread * lane_id + item;
-          values_cache[idx] = values[item];
-        }
-        WARP_SYNC(group_mask);
-
-        // gather items from shmem
-        //
-#pragma unroll
-        for (int item = 0; item < items_per_thread; item++)
-        {
-          values[item] = values_cache[indices[item]];
-        }
-      }
-    }
-  }
-
-  sub_warp_store<items_per_thread, threads_per_segment>(lane_id,
+  sub_warp_store<items_per_thread, threads_per_segment>(warp_merge_sort.lane_id,
                                                         segment_size,
-                                                        group_mask,
+                                                        warp_merge_sort.member_mask,
                                                         keys_output,
                                                         keys,
-                                                        keys_cache);
+                                                        temp_storage.Alias().keys);
 
   if (!KEYS_ONLY)
   {
-    sub_warp_store<items_per_thread, threads_per_segment>(lane_id,
+    sub_warp_store<items_per_thread, threads_per_segment>(warp_merge_sort.lane_id,
                                                           segment_size,
-                                                          group_mask,
+                                                          warp_merge_sort.member_mask,
                                                           values_output,
                                                           values,
-                                                          values_cache);
+                                                          temp_storage.Alias().items);
   }
 }
 
@@ -454,13 +347,16 @@ __global__ void DeviceSegmentedSortFallbackKernel(
   constexpr int sub_warp_sort_threshold = items_per_medium_segment *
                                           threads_per_medium_segment;
 
+  using WarpMergeSortT = WarpMergeSort<KeyT,
+                                       ValueT,
+                                       items_per_medium_segment,
+                                       threads_per_medium_segment>;
+
   __shared__ union
   {
     typename AgentSegmentedRadixSortT::TempStorage block_sort;
     typename WarpReduceT::TempStorage warp_reduce;
-
-    KeyT medium_tile_keys_cache[sub_warp_sort_threshold + 1];
-    ValueT medium_tile_values_cache[sub_warp_sort_threshold + 1];
+    typename WarpMergeSortT::TempStorage medium_warp_sort;
   } temp_storage;
 
   AgentSegmentedRadixSortT agent(segment_begin,
@@ -487,8 +383,7 @@ __global__ void DeviceSegmentedSortFallbackKernel(
                                   d_values_in_origin + segment_begin,
                                   d_values_out_origin + segment_begin,
                                   num_items,
-                                  temp_storage.medium_tile_keys_cache,
-                                  temp_storage.medium_tile_values_cache);
+                                  temp_storage.medium_warp_sort);
     }
   }
   else if (num_items < small_tile_size)
@@ -562,20 +457,27 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
   constexpr int items_per_thread = SegmentedPolicyT::ITEMS_PER_THREAD;
   constexpr int threads_per_medium_segment = SegmentedPolicyT::THREADS_PER_MEDIUM_SEGMENT;
   constexpr int threads_per_small_segment = SegmentedPolicyT::THREADS_PER_SMALL_SEGMENT;
-  constexpr int medium_segment_max_size = SegmentedPolicyT::MEDIUM_SEGMENT_MAX_SIZE;
-  constexpr int small_segment_max_size = SegmentedPolicyT::SMALL_SEGMENT_MAX_SIZE;
+
+  constexpr auto segments_per_medium_block =
+    static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_MEDIUM_BLOCK);
+
+  constexpr auto segments_per_small_block =
+    static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_SMALL_BLOCK);
+
+  using MediumWarpMergeSortT =
+    WarpMergeSort<KeyT, ValueT, items_per_thread, threads_per_medium_segment>;
+
+  using SmallWarpMergeSortT =
+    WarpMergeSort<KeyT, ValueT, items_per_thread, threads_per_small_segment>;
 
   __shared__ union
   {
-    KeyT block_keys_cache[items_per_thread * SegmentedPolicyT::BLOCK_THREADS + 1];
-    ValueT block_values_cache[items_per_thread * SegmentedPolicyT::BLOCK_THREADS + 1];
+    typename MediumWarpMergeSortT::TempStorage medium[segments_per_medium_block];
+    typename SmallWarpMergeSortT::TempStorage small[segments_per_small_block];
   } temp_storage;
 
   if (bid < medium_blocks)
   {
-    constexpr OffsetT segments_per_medium_block =
-      static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_MEDIUM_BLOCK);
-
     const OffsetT sid_within_block = tid / threads_per_medium_segment;
     const OffsetT reordered_segment_id = bid * segments_per_medium_block + sid_within_block;
 
@@ -588,23 +490,17 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
       OffsetT segment_end   = d_end_offsets[segment_id];
       OffsetT num_items     = segment_end - segment_begin;
 
-      const int group_offset = sid_within_block * medium_segment_max_size;
-
       sub_warp_merge_sort<IS_DESCENDING, items_per_thread, threads_per_medium_segment, KeyT, ValueT>(
         d_keys_in_origin + segment_begin,
         d_keys_out_orig + segment_begin,
         d_values_in_origin + segment_begin,
         d_values_out_origin + segment_begin,
         num_items,
-        temp_storage.block_keys_cache + group_offset,
-        temp_storage.block_values_cache + group_offset);
+        temp_storage.medium[sid_within_block]);
     }
   }
   else
   {
-    constexpr OffsetT segments_per_small_block =
-      static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_SMALL_BLOCK);
-
     const OffsetT sid_within_block = tid / threads_per_small_segment;
     const OffsetT reordered_segment_id = (bid - medium_blocks) * segments_per_small_block + sid_within_block;
 
@@ -617,16 +513,13 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
       OffsetT segment_end   = d_end_offsets[segment_id];
       OffsetT num_items     = segment_end - segment_begin;
 
-      const int group_offset = sid_within_block * small_segment_max_size;
-
       sub_warp_merge_sort<IS_DESCENDING, items_per_thread, threads_per_small_segment, KeyT, ValueT>(
         d_keys_in_origin + segment_begin,
         d_keys_out_orig + segment_begin,
         d_values_in_origin + segment_begin,
         d_values_out_origin + segment_begin,
         num_items,
-        temp_storage.block_keys_cache + group_offset,
-        temp_storage.block_values_cache + group_offset);
+        temp_storage.small[sid_within_block]);
     }
   }
 }
