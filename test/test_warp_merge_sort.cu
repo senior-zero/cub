@@ -492,7 +492,7 @@ void Test(thrust::default_random_engine &rng)
   thrust::host_vector<ValueType> h_values(max_segments * max_segment_size);
 
 
-  for (unsigned int valid_segments = 1; valid_segments < max_segments; valid_segments++)
+  for (unsigned int valid_segments = 1; valid_segments < max_segments; valid_segments += 3)
   {
     thrust::shuffle(h_segment_sizes.begin(), h_segment_sizes.end(), rng);
     thrust::copy(h_segment_sizes.begin(), h_segment_sizes.end(), d_segment_sizes.begin());
@@ -539,8 +539,6 @@ void Test(thrust::default_random_engine &rng)
 {
   Test<32,  ThreadsInWarp, ItemsPerThread, Stable>(rng);
   Test<64,  ThreadsInWarp, ItemsPerThread, Stable>(rng);
-  Test<128, ThreadsInWarp, ItemsPerThread, Stable>(rng);
-  Test<512, ThreadsInWarp, ItemsPerThread, Stable>(rng);
 }
 
 template <unsigned int ItemsPerThread,
@@ -558,10 +556,9 @@ void Test(thrust::default_random_engine &rng)
 template <unsigned int ItemsPerThread>
 void Test(thrust::default_random_engine &rng)
 {
-  constexpr bool stable = false;
+  // Check TestStability for stable = true
   constexpr bool unstable = false;
 
-  Test<ItemsPerThread, stable>(rng);
   Test<ItemsPerThread, unstable>(rng);
 }
 
