@@ -184,7 +184,7 @@ template <bool IS_DESCENDING,
           typename KeyT,
           typename ValueT,
           typename WarpMergeSortT =
-            WarpMergeSort<KeyT, ValueT, items_per_thread, threads_per_segment>>
+            WarpMergeSort<KeyT, items_per_thread, threads_per_segment, ValueT>>
 __device__ void
 sub_warp_merge_sort(const KeyT *keys_input,
                     KeyT *keys_output,
@@ -348,9 +348,9 @@ __global__ void DeviceSegmentedSortFallbackKernel(
                                           threads_per_medium_segment;
 
   using WarpMergeSortT = WarpMergeSort<KeyT,
-                                       ValueT,
                                        items_per_medium_segment,
-                                       threads_per_medium_segment>;
+                                       threads_per_medium_segment,
+                                       ValueT>;
 
   __shared__ union
   {
@@ -465,10 +465,10 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
     static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_SMALL_BLOCK);
 
   using MediumWarpMergeSortT =
-    WarpMergeSort<KeyT, ValueT, items_per_thread, threads_per_medium_segment>;
+    WarpMergeSort<KeyT, items_per_thread, threads_per_medium_segment, ValueT>;
 
   using SmallWarpMergeSortT =
-    WarpMergeSort<KeyT, ValueT, items_per_thread, threads_per_small_segment>;
+    WarpMergeSort<KeyT, items_per_thread, threads_per_small_segment, ValueT>;
 
   __shared__ union
   {

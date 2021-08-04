@@ -48,9 +48,9 @@ CUB_NAMESPACE_BEGIN
  */
 template <
   typename    KeyT,
-  typename    ValueT,
   int         ITEMS_PER_THREAD,
   int         LOGICAL_WARP_THREADS    = CUB_PTX_WARP_THREADS,
+  typename    ValueT                  = NullType,
   int         PTX_ARCH                = CUB_PTX_ARCH>
 class WarpMergeSort
     : public BlockMergeSortStrategy<
@@ -58,11 +58,11 @@ class WarpMergeSort
         ValueT,
         LOGICAL_WARP_THREADS,
         ITEMS_PER_THREAD,
-        WarpMergeSort<KeyT, ValueT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, PTX_ARCH>>
+        WarpMergeSort<KeyT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, ValueT, PTX_ARCH>>
 {
 private:
   constexpr static bool IS_ARCH_WARP = LOGICAL_WARP_THREADS == CUB_WARP_THREADS(PTX_ARCH);
-  constexpr static bool KEYS_ONLY = cub::Equals<ValueT, cub::NullType>::VALUE;
+  constexpr static bool KEYS_ONLY = cub::Equals<ValueT, NullType>::VALUE;
   constexpr static int TILE_SIZE = ITEMS_PER_THREAD * LOGICAL_WARP_THREADS;
 
   using BlockMergeSortStrategyT = BlockMergeSortStrategy<KeyT,
