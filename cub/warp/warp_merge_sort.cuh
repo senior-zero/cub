@@ -79,9 +79,10 @@ public:
 
   __device__ __forceinline__
   WarpMergeSort(typename BlockMergeSortStrategyT::TempStorage &temp_storage)
-      : BlockMergeSortStrategyT(
-          temp_storage,
-          IS_ARCH_WARP ? LaneId() : LaneId() % LOGICAL_WARP_THREADS)
+      : BlockMergeSortStrategyT(temp_storage,
+                                IS_ARCH_WARP
+                                  ? LaneId()
+                                  : (LaneId() % LOGICAL_WARP_THREADS))
       , warp_id(IS_ARCH_WARP ? 0 : (LaneId() / LOGICAL_WARP_THREADS))
       , member_mask(WarpMask<LOGICAL_WARP_THREADS, PTX_ARCH>(warp_id))
   {

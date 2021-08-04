@@ -139,6 +139,13 @@ private:
   /// Shared storage reference
   _TempStorage &temp_storage;
 
+  /// Internal storage allocator
+  __device__ __forceinline__ _TempStorage& PrivateStorage()
+  {
+    __shared__ _TempStorage private_storage;
+    return private_storage;
+  }
+
 public:
   const unsigned int linear_tid;
 
@@ -146,6 +153,11 @@ public:
   struct TempStorage : Uninitialized<_TempStorage> {};
 
   BlockMergeSortStrategy() = delete;
+  __device__ __forceinline__ BlockMergeSortStrategy(unsigned int linear_tid)
+      : temp_storage(PrivateStorage())
+      , linear_tid(linear_tid)
+  {}
+
   __device__ __forceinline__ BlockMergeSortStrategy(TempStorage &temp_storage,
                                                     unsigned int linear_tid)
       : temp_storage(temp_storage.Alias())
@@ -547,372 +559,49 @@ template <
   int       BLOCK_DIM_Y       = 1,
   int       BLOCK_DIM_Z       = 1>
 class BlockMergeSort
+    : public BlockMergeSortStrategy<KeyT,
+                                    ValueT,
+                                    BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
+                                    ITEMS_PER_THREAD,
+                                    BlockMergeSort<KeyT,
+                                                   BLOCK_DIM_X,
+                                                   ITEMS_PER_THREAD,
+                                                   ValueT,
+                                                   BLOCK_DIM_Y,
+                                                   BLOCK_DIM_Z>>
 {
 private:
-
   // The thread block size in threads
   static constexpr int BLOCK_THREADS = BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z;
   static constexpr int ITEMS_PER_TILE = ITEMS_PER_THREAD * BLOCK_THREADS;
 
-  // Whether or not there are values to be trucked along with keys
-  static constexpr bool KEYS_ONLY = Equals<ValueT, NullType>::VALUE;
-
-  /// Shared memory type required by this thread block
-  union _TempStorage
-  {
-    KeyT keys_shared[ITEMS_PER_TILE + 1];
-    ValueT items_shared[ITEMS_PER_TILE + 1];
-  }; // union TempStorage
-
-  /// Internal storage allocator
-  __device__ __forceinline__ _TempStorage& PrivateStorage()
-  {
-    __shared__ _TempStorage private_storage;
-    return private_storage;
-  }
-
-  /// Shared storage reference
-  _TempStorage &temp_storage;
-
-  /// Linear thread-id
-  unsigned int linear_tid;
+  using BlockMergeSortStrategyT =
+    BlockMergeSortStrategy<KeyT,
+                           ValueT,
+                           BLOCK_THREADS,
+                           ITEMS_PER_THREAD,
+                           BlockMergeSort>;
 
 public:
-
-  /// \smemstorage{BlockMergeSort}
-  struct TempStorage : Uninitialized<_TempStorage> {};
-
   __device__ __forceinline__ BlockMergeSort()
-      : temp_storage(PrivateStorage())
-      , linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+      : BlockMergeSortStrategyT(
+          RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
   {}
 
-  __device__ __forceinline__ BlockMergeSort(TempStorage &temp_storage)
-      : temp_storage(temp_storage.Alias())
-      , linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+  __device__ __forceinline__
+  BlockMergeSort(typename BlockMergeSortStrategyT::TempStorage &temp_storage)
+      : BlockMergeSortStrategyT(
+          temp_storage,
+          RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
   {}
 
-public:
-
-  /**
-   * \brief Sorts items partitioned across a CUDA thread block using a merge sorting method.
-   *
-   * \par
-   * - Sort is not guaranteed to be stable. That is, suppose that i and j are
-   *   equivalent: neither one is less than the other. It is not guaranteed
-   *   that the relative order of these two elements will be preserved by sort.
-   *
-   * \tparam CompareOp functor type having member <tt>bool operator()(KeyT lhs, KeyT rhs)</tt>
-   *         CompareOp is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
-   */
-  template <typename CompareOp>
-  __device__ __forceinline__ void
-  Sort(KeyT (&keys)[ITEMS_PER_THREAD], ///< [in-out] Keys to sort
-       CompareOp compare_op)           ///< [in] Comparison function object which returns
-                                       ///< true if the first argument is ordered before
-                                       ///< the second
+private:
+  __device__ __forceinline__ void SyncImplementation() const
   {
-    ValueT items[ITEMS_PER_THREAD];
-    Sort<CompareOp, false>(keys, items, compare_op, ITEMS_PER_TILE, keys[0]);
+    CTA_SYNC();
   }
 
-  /**
-   * \brief Sorts items partitioned across a CUDA thread block using a merge sorting method.
-   *
-   * \par
-   * - Sort is not guaranteed to be stable. That is, suppose that i and j are
-   *   equivalent: neither one is less than the other. It is not guaranteed
-   *   that the relative order of these two elements will be preserved by sort.
-   * - The value of \p oob_default is assigned to all elements that are out of
-   *   \p valid_items boundaries. It's expected that \p oob_default is ordered
-   *   after any value in the \p valid_items boundaries. The algorithm always
-   *   sorts a fixed amount of elements, which is equal to ITEMS_PER_THREAD * BLOCK_THREADS.
-   *   If there is a value that is ordered after \p oob_default, it won't be
-   *   placed within \p valid_items boundaries.
-   *
-   * \tparam CompareOp functor type having member <tt>bool operator()(KeyT lhs, KeyT rhs)</tt>
-   *         CompareOp is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
-   */
-  template <typename CompareOp>
-  __device__ __forceinline__ void
-  Sort(KeyT (&keys)[ITEMS_PER_THREAD], ///< [in-out] Keys to sort
-       CompareOp compare_op,           ///< [in] Comparison function object which returns true if the first argument is ordered before the second
-       int valid_items,                ///< [in] Number of valid items to sort
-       KeyT oob_default)               ///< [in] Default value to assign out-of-bound items
-  {
-    ValueT items[ITEMS_PER_THREAD];
-    Sort<CompareOp, true>(keys, items, compare_op, valid_items, oob_default);
-  }
-
-  /**
-   * \brief Sorts items partitioned across a CUDA thread block using a merge sorting method.
-   *
-   * \par
-   * - Sort is not guaranteed to be stable. That is, suppose that i and j are
-   *   equivalent: neither one is less than the other. It is not guaranteed
-   *   that the relative order of these two elements will be preserved by sort.
-   *
-   * \tparam CompareOp functor type having member <tt>bool operator()(KeyT lhs, KeyT rhs)</tt>
-   *         CompareOp is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
-   */
-  template <typename CompareOp>
-  __device__ __forceinline__ void
-  Sort(KeyT (&keys)[ITEMS_PER_THREAD],     ///< [in-out] Keys to sort
-       ValueT (&items)[ITEMS_PER_THREAD],  ///< [in-out] Values to sort
-       CompareOp compare_op)               ///< [in] Comparison function object which returns true if the first argument is ordered before the second
-  {
-    Sort<CompareOp, false>(keys, items, compare_op, ITEMS_PER_TILE, keys[0]);
-  }
-
-  /**
-   * \brief Sorts items partitioned across a CUDA thread block using a merge sorting method.
-   *
-   * \par
-   * - Sort is not guaranteed to be stable. That is, suppose that i and j are
-   *   equivalent: neither one is less than the other. It is not guaranteed
-   *   that the relative order of these two elements will be preserved by sort.
-   * - The value of \p oob_default is assigned to all elements that are out of
-   *   \p valid_items boundaries. It's expected that \p oob_default is ordered
-   *   after any value in the \p valid_items boundaries. The algorithm always
-   *   sorts a fixed amount of elements, which is equal to ITEMS_PER_THREAD * BLOCK_THREADS.
-   *   If there is a value that is ordered after \p oob_default, it won't be
-   *   placed within \p valid_items boundaries.
-   *
-   * \tparam CompareOp functor type having member <tt>bool operator()(KeyT lhs, KeyT rhs)</tt>
-   *         CompareOp is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
-   * \tparam IS_LAST_TILE True if valid_items isn't equal to the ITEMS_PER_TILE
-   */
-  template <typename CompareOp,
-            bool IS_LAST_TILE = true>
-  __device__ __forceinline__ void
-  Sort(KeyT (&keys)[ITEMS_PER_THREAD],     ///< [in-out] Keys to sort
-       ValueT (&items)[ITEMS_PER_THREAD],  ///< [in-out] Values to sort
-       CompareOp compare_op,               ///< [in] Comparison function object which returns true if the first argument is ordered before the second
-       int valid_items,                    ///< [in] Number of valid items to sort
-       KeyT oob_default)                   ///< [in] Default value to assign out-of-bound items
-  {
-    if (IS_LAST_TILE)
-    {
-      // if last tile, find valid max_key
-      // and fill the remaining keys with it
-      //
-      KeyT max_key = oob_default;
-#pragma unroll
-      for (int item = 1; item < ITEMS_PER_THREAD; ++item)
-      {
-        if (ITEMS_PER_THREAD * linear_tid + item < valid_items)
-        {
-          max_key = compare_op(max_key, keys[item]) ? keys[item] : max_key;
-        }
-        else
-        {
-          keys[item] = max_key;
-        }
-      }
-    }
-
-    // if first element of thread is in input range, stable sort items
-    //
-    if (!IS_LAST_TILE || ITEMS_PER_THREAD * linear_tid < valid_items)
-    {
-      StableOddEvenSort(keys, items, compare_op);
-    }
-
-    // each thread has sorted keys
-    // merge sort keys in shared memory
-    //
-#pragma unroll
-    for (int target_merged_threads_number = 2;
-         target_merged_threads_number <= BLOCK_THREADS;
-         target_merged_threads_number *= 2)
-    {
-      int merged_threads_number = target_merged_threads_number / 2;
-      int mask = target_merged_threads_number - 1;
-
-      CTA_SYNC();
-
-      // store keys in shmem
-      //
-#pragma unroll
-      for (int item = 0; item < ITEMS_PER_THREAD; ++item)
-      {
-        int idx                       = ITEMS_PER_THREAD * linear_tid + item;
-        temp_storage.keys_shared[idx] = keys[item];
-      }
-
-      CTA_SYNC();
-
-      int indices[ITEMS_PER_THREAD];
-
-      int first_thread_idx_in_thread_group_being_merged = ~mask & linear_tid;
-      int start = ITEMS_PER_THREAD * first_thread_idx_in_thread_group_being_merged;
-      int size  = ITEMS_PER_THREAD * merged_threads_number;
-
-      int thread_idx_in_thread_group_being_merged = mask & linear_tid;
-
-      int diag =
-        (cub::min)(valid_items,
-                   ITEMS_PER_THREAD * thread_idx_in_thread_group_being_merged);
-
-      int keys1_beg = (cub::min)(valid_items, start);
-      int keys1_end = (cub::min)(valid_items, keys1_beg + size);
-      int keys2_beg = keys1_end;
-      int keys2_end = (cub::min)(valid_items, keys2_beg + size);
-
-      int keys1_count = keys1_end - keys1_beg;
-      int keys2_count = keys2_end - keys2_beg;
-
-      int partition_diag = MergePath<KeyT>(&temp_storage.keys_shared[keys1_beg],
-                                           &temp_storage.keys_shared[keys2_beg],
-                                           keys1_count,
-                                           keys2_count,
-                                           diag,
-                                           compare_op);
-
-      int keys1_beg_loc   = keys1_beg + partition_diag;
-      int keys1_end_loc   = keys1_end;
-      int keys2_beg_loc   = keys2_beg + diag - partition_diag;
-      int keys2_end_loc   = keys2_end;
-      int keys1_count_loc = keys1_end_loc - keys1_beg_loc;
-      int keys2_count_loc = keys2_end_loc - keys2_beg_loc;
-      SerialMerge(&temp_storage.keys_shared[0],
-                  keys1_beg_loc,
-                  keys2_beg_loc,
-                  keys1_count_loc,
-                  keys2_count_loc,
-                  keys,
-                  indices,
-                  compare_op);
-
-      if (!KEYS_ONLY)
-      {
-        CTA_SYNC();
-
-        // store keys in shmem
-        //
-#pragma unroll
-        for (int item = 0; item < ITEMS_PER_THREAD; ++item)
-        {
-          int idx = ITEMS_PER_THREAD * linear_tid + item;
-          temp_storage.items_shared[idx] = items[item];
-        }
-
-        CTA_SYNC();
-
-        // gather items from shmem
-        //
-#pragma unroll
-        for (int item = 0; item < ITEMS_PER_THREAD; ++item)
-        {
-          items[item] = temp_storage.items_shared[indices[item]];
-        }
-      }
-    }
-  } // func block_merge_sort
-
-  /**
-   * \brief Sorts items partitioned across a CUDA thread block using a merge sorting method.
-   *
-   * \par
-   * - StableSort is stable: it preserves the relative ordering of equivalent
-   *   elements. That is, if x and y are elements such that x precedes y,
-   *   and if the two elements are equivalent (neither x < y nor y < x) then
-   *   a postcondition of stable_sort is that x still precedes y.
-   *
-   * \tparam CompareOp functor type having member <tt>bool operator()(KeyT lhs, KeyT rhs)</tt>
-   *         CompareOp is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
-   */
-  template <typename CompareOp>
-  __device__ __forceinline__ void
-  StableSort(KeyT (&keys)[ITEMS_PER_THREAD],   ///< [in-out] Keys to sort
-             CompareOp compare_op)             ///< [in] Comparison function object which returns true if the first argument is ordered before the second
-  {
-    Sort(keys, compare_op);
-  }
-
-  /**
-   * \brief Sorts items partitioned across a CUDA thread block using a merge sorting method.
-   *
-   * \par
-   * - StableSort is stable: it preserves the relative ordering of equivalent
-   *   elements. That is, if x and y are elements such that x precedes y,
-   *   and if the two elements are equivalent (neither x < y nor y < x) then
-   *   a postcondition of stable_sort is that x still precedes y.
-   *
-   * \tparam CompareOp functor type having member <tt>bool operator()(KeyT lhs, KeyT rhs)</tt>
-   *         CompareOp is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
-   */
-  template <typename CompareOp>
-  __device__ __forceinline__ void
-  StableSort(KeyT (&keys)[ITEMS_PER_THREAD],    ///< [in-out] Keys to sort
-             ValueT (&items)[ITEMS_PER_THREAD], ///< [in-out] Values to sort
-             CompareOp compare_op)              ///< [in] Comparison function object which returns true if the first argument is ordered before the second
-  {
-    Sort(keys, items, compare_op);
-  }
-
-  /**
-   * \brief Sorts items partitioned across a CUDA thread block using a merge sorting method.
-   *
-   * \par
-   * - StableSort is stable: it preserves the relative ordering of equivalent
-   *   elements. That is, if x and y are elements such that x precedes y,
-   *   and if the two elements are equivalent (neither x < y nor y < x) then
-   *   a postcondition of stable_sort is that x still precedes y.
-   * - The value of \p oob_default is assigned to all elements that are out of
-   *   \p valid_items boundaries. It's expected that \p oob_default is ordered
-   *   after any value in the \p valid_items boundaries. The algorithm always
-   *   sorts a fixed amount of elements, which is equal to ITEMS_PER_THREAD * BLOCK_THREADS.
-   *   If there is a value that is ordered after \p oob_default, it won't be
-   *   placed within \p valid_items boundaries.
-   *
-   * \tparam CompareOp functor type having member <tt>bool operator()(KeyT lhs, KeyT rhs)</tt>
-   *         CompareOp is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
-   */
-  template <typename CompareOp>
-  __device__ __forceinline__ void
-  StableSort(KeyT (&keys)[ITEMS_PER_THREAD],  ///< [in-out] Keys to sort
-             CompareOp compare_op,            ///< [in] Comparison function object which returns true if the first argument is ordered before the second
-             int valid_items,                 ///< [in] Number of valid items to sort
-             KeyT oob_default)                ///< [in] Default value to assign out-of-bound items
-  {
-    Sort(keys, compare_op, valid_items, oob_default);
-  }
-
-  /**
-   * \brief Sorts items partitioned across a CUDA thread block using a merge sorting method.
-   *
-   * \par
-   * - StableSort is stable: it preserves the relative ordering of equivalent
-   *   elements. That is, if x and y are elements such that x precedes y,
-   *   and if the two elements are equivalent (neither x < y nor y < x) then
-   *   a postcondition of stable_sort is that x still precedes y.
-   * - The value of \p oob_default is assigned to all elements that are out of
-   *   \p valid_items boundaries. It's expected that \p oob_default is ordered
-   *   after any value in the \p valid_items boundaries. The algorithm always
-   *   sorts a fixed amount of elements, which is equal to ITEMS_PER_THREAD * BLOCK_THREADS.
-   *   If there is a value that is ordered after \p oob_default, it won't be
-   *   placed within \p valid_items boundaries.
-   *
-   * \tparam CompareOp functor type having member <tt>bool operator()(KeyT lhs, KeyT rhs)</tt>
-   *         CompareOp is a model of <a href="https://en.cppreference.com/w/cpp/concepts/strict_weak_order">Strict Weak Ordering</a>.
-   * \tparam IS_LAST_TILE True if valid_items isn't equal to the ITEMS_PER_TILE
-   */
-  template <typename CompareOp,
-            bool IS_LAST_TILE = true>
-  __device__ __forceinline__ void
-  StableSort(KeyT (&keys)[ITEMS_PER_THREAD],     ///< [in-out] Keys to sort
-             ValueT (&items)[ITEMS_PER_THREAD],  ///< [in-out] Values to sort
-             CompareOp compare_op,               ///< [in] Comparison function object which returns true if the first argument is ordered before the second
-             int valid_items,                    ///< [in] Number of valid items to sort
-             KeyT oob_default)                   ///< [in] Default value to assign out-of-bound items
-  {
-    Sort<CompareOp, IS_LAST_TILE>(keys,
-                                  items,
-                                  compare_op,
-                                  valid_items,
-                                  oob_default);
-  }
+  friend BlockMergeSortStrategyT;
 };
 
 CUB_NAMESPACE_END
