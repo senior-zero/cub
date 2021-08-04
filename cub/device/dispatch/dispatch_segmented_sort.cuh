@@ -216,7 +216,7 @@ sub_warp_merge_sort(const KeyT *keys_input,
 
   if (segment_size == 1)
   {
-    if (warp_merge_sort.lane_id == 0)
+    if (warp_merge_sort.linear_tid == 0)
     {
       keys_output[0] = keys_input[0];
 
@@ -230,7 +230,7 @@ sub_warp_merge_sort(const KeyT *keys_input,
   }
   else if (segment_size == 2)
   {
-    if (warp_merge_sort.lane_id == 0)
+    if (warp_merge_sort.linear_tid == 0)
     {
       KeyT lhs = keys_input[0];
       KeyT rhs = keys_input[1];
@@ -265,21 +265,21 @@ sub_warp_merge_sort(const KeyT *keys_input,
   KeyT keys[items_per_thread];
   ValueT values[items_per_thread];
 
-  sub_warp_load<items_per_thread, threads_per_segment>(warp_merge_sort.lane_id,
+  sub_warp_load<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
                                                        segment_size,
                                                        warp_merge_sort.member_mask,
                                                        keys_input,
                                                        keys,
-                                                       temp_storage.Alias().keys);
+                                                       temp_storage.Alias().keys_shared);
 
   if (!KEYS_ONLY)
   {
-    sub_warp_load<items_per_thread, threads_per_segment>(warp_merge_sort.lane_id,
+    sub_warp_load<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
                                                          segment_size,
                                                          warp_merge_sort.member_mask,
                                                          values_input,
                                                          values,
-                                                         temp_storage.Alias().items);
+                                                         temp_storage.Alias().items_shared);
   }
 
   // 2) Sort
@@ -287,21 +287,21 @@ sub_warp_merge_sort(const KeyT *keys_input,
   KeyT oob_default = keys_input[0];
   warp_merge_sort.Sort(keys, values, binary_op, segment_size, oob_default);
 
-  sub_warp_store<items_per_thread, threads_per_segment>(warp_merge_sort.lane_id,
+  sub_warp_store<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
                                                         segment_size,
                                                         warp_merge_sort.member_mask,
                                                         keys_output,
                                                         keys,
-                                                        temp_storage.Alias().keys);
+                                                        temp_storage.Alias().keys_shared);
 
   if (!KEYS_ONLY)
   {
-    sub_warp_store<items_per_thread, threads_per_segment>(warp_merge_sort.lane_id,
+    sub_warp_store<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
                                                           segment_size,
                                                           warp_merge_sort.member_mask,
                                                           values_output,
                                                           values,
-                                                          temp_storage.Alias().items);
+                                                          temp_storage.Alias().items_shared);
   }
 }
 

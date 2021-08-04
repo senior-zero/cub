@@ -53,158 +53,47 @@ template <
   int         LOGICAL_WARP_THREADS    = CUB_PTX_WARP_THREADS,
   int         PTX_ARCH                = CUB_PTX_ARCH>
 class WarpMergeSort
+    : public BlockMergeSortStrategy<
+        KeyT,
+        ValueT,
+        LOGICAL_WARP_THREADS,
+        ITEMS_PER_THREAD,
+        WarpMergeSort<KeyT, ValueT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, PTX_ARCH>>
 {
 private:
-  static_assert(PowerOfTwo<LOGICAL_WARP_THREADS>::VALUE,
-                "LOGICAL_WARP_THREADS must be a power of two");
-
   constexpr static bool IS_ARCH_WARP = LOGICAL_WARP_THREADS == CUB_WARP_THREADS(PTX_ARCH);
   constexpr static bool KEYS_ONLY = cub::Equals<ValueT, cub::NullType>::VALUE;
   constexpr static int TILE_SIZE = ITEMS_PER_THREAD * LOGICAL_WARP_THREADS;
 
-  union _TempStorage
-  {
-    KeyT keys[TILE_SIZE + 1];
-    ValueT items[TILE_SIZE + 1];
-  };
-
-  _TempStorage &temp_storage;
+  using BlockMergeSortStrategyT = BlockMergeSortStrategy<KeyT,
+                                                         ValueT,
+                                                         LOGICAL_WARP_THREADS,
+                                                         ITEMS_PER_THREAD,
+                                                         WarpMergeSort>;
 
 public:
-  const unsigned int lane_id;
   const unsigned int warp_id;
   const unsigned int member_mask;
 
-  struct TempStorage : Uninitialized<_TempStorage> {};
-
   WarpMergeSort() = delete;
 
-  __device__ __forceinline__ WarpMergeSort(TempStorage &temp_storage)
-      : temp_storage(temp_storage.Alias())
-      , lane_id(IS_ARCH_WARP ? LaneId() : LaneId() % LOGICAL_WARP_THREADS)
+  __device__ __forceinline__
+  WarpMergeSort(typename BlockMergeSortStrategyT::TempStorage &temp_storage)
+      : BlockMergeSortStrategyT(
+          temp_storage,
+          IS_ARCH_WARP ? LaneId() : LaneId() % LOGICAL_WARP_THREADS)
       , warp_id(IS_ARCH_WARP ? 0 : (LaneId() / LOGICAL_WARP_THREADS))
       , member_mask(WarpMask<LOGICAL_WARP_THREADS, PTX_ARCH>(warp_id))
   {
   }
 
-  template <typename CompareOp>
-  __device__ __forceinline__ void
-  Sort(KeyT (&keys)[ITEMS_PER_THREAD],     ///< [in-out] Keys to sort
-       ValueT (&items)[ITEMS_PER_THREAD],  ///< [in-out] Values to sort
-       CompareOp compare_op,               ///< [in] Comparison function object which returns true if the first argument is ordered before the second
-       int valid_items,                    ///< [in] Number of valid items to sort
-       KeyT oob_default)                   ///< [in] Default value to assign out-of-bound items
+private:
+  __device__ __forceinline__ void SyncImplementation() const
   {
-    if (valid_items < 2)
-    {
-      return;
-    }
-
-    int indices[ITEMS_PER_THREAD];
-
-    KeyT max_key = oob_default;
-
-    #pragma unroll
-    for (int item = 1; item < ITEMS_PER_THREAD; ++item)
-    {
-      if (ITEMS_PER_THREAD * lane_id + item < valid_items)
-      {
-        max_key = compare_op(max_key, keys[item]) ? keys[item] : max_key;
-      }
-      else
-      {
-        keys[item] = max_key;
-      }
-    }
-
-    if (lane_id * ITEMS_PER_THREAD < valid_items)
-    {
-      StableOddEvenSort(keys, items, compare_op);
-    }
-
-    if (valid_items > ITEMS_PER_THREAD)
-    {
-      #pragma unroll
-      for (int target_merged_threads_number = 2;
-           target_merged_threads_number <= LOGICAL_WARP_THREADS;
-           target_merged_threads_number *= 2)
-      {
-        int merged_threads_number = target_merged_threads_number / 2;
-        int mask                  = target_merged_threads_number - 1;
-
-        WARP_SYNC(member_mask);
-
-        for (int item = 0; item < ITEMS_PER_THREAD; item++)
-        {
-          temp_storage.keys[lane_id * ITEMS_PER_THREAD + item] = keys[item];
-        }
-        WARP_SYNC(member_mask);
-
-        int first_thread_idx_in_thread_group_being_merged = ~mask & lane_id;
-        int size = ITEMS_PER_THREAD * merged_threads_number;
-        int start = ITEMS_PER_THREAD *
-                    first_thread_idx_in_thread_group_being_merged;
-
-        int thread_idx_in_thread_group_being_merged = mask & lane_id;
-
-        int diag = (cub::min)(valid_items,
-                              ITEMS_PER_THREAD *
-                                thread_idx_in_thread_group_being_merged);
-
-        int keys1_beg = (cub::min)(valid_items, start);
-        int keys1_end = (cub::min)(valid_items, keys1_beg + size);
-        int keys2_beg = keys1_end;
-        int keys2_end = (cub::min)(valid_items, keys2_beg + size);
-
-        int keys1_count = keys1_end - keys1_beg;
-        int keys2_count = keys2_end - keys2_beg;
-
-        int partition_diag = MergePath<KeyT>(&temp_storage.keys[keys1_beg],
-                                             &temp_storage.keys[keys2_beg],
-                                             keys1_count,
-                                             keys2_count,
-                                             diag,
-                                             compare_op);
-
-        int keys1_beg_loc   = keys1_beg + partition_diag;
-        int keys1_end_loc   = keys1_end;
-        int keys2_beg_loc   = keys2_beg + diag - partition_diag;
-        int keys2_end_loc   = keys2_end;
-        int keys1_count_loc = keys1_end_loc - keys1_beg_loc;
-        int keys2_count_loc = keys2_end_loc - keys2_beg_loc;
-
-        SerialMerge(&temp_storage.keys[0],
-                    keys1_beg_loc,
-                    keys2_beg_loc,
-                    keys1_count_loc,
-                    keys2_count_loc,
-                    keys,
-                    indices,
-                    compare_op);
-
-        if (!KEYS_ONLY)
-        {
-          WARP_SYNC(member_mask);
-
-          #pragma unroll
-          for (int item = 0; item < ITEMS_PER_THREAD; item++)
-          {
-            int idx                  = ITEMS_PER_THREAD * lane_id + item;
-            temp_storage.items[idx] = items[item];
-          }
-          WARP_SYNC(member_mask);
-
-          // gather items from shmem
-          //
-          #pragma unroll
-          for (int item = 0; item < ITEMS_PER_THREAD; item++)
-          {
-            items[item] = temp_storage.items[indices[item]];
-          }
-        }
-      }
-    }
+    WARP_SYNC(member_mask);
   }
+
+  friend BlockMergeSortStrategyT;
 };
 
 /** @} */       // end group WarpModule
