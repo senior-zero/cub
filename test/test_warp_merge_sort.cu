@@ -201,6 +201,120 @@ void WarpMergeSortTest(
   CubDebugExit(cudaDeviceSynchronize());
 }
 
+template <typename KeyType,
+          typename ValueType,
+          unsigned int ThreadsInBlock,
+          unsigned int ThreadsInWarp,
+          unsigned int ItemsPerThread,
+          bool Stable = false>
+__global__ void WarpMergeSortTestKernel(unsigned int valid_segments,
+                                        KeyType *keys,
+                                        ValueType *values,
+                                        const unsigned int *segment_sizes)
+{
+  using WarpMergeSortT =
+    cub::WarpMergeSort<KeyType, ItemsPerThread, ThreadsInWarp, ValueType>;
+
+  constexpr unsigned int WarpsInBlock = ThreadsInBlock / ThreadsInWarp;
+  const unsigned int segment_id       = threadIdx.x / ThreadsInWarp;
+
+  if (segment_id >= valid_segments)
+  {
+    // Test case of partially finished CTA
+    return;
+  }
+
+  __shared__ typename WarpMergeSortT::TempStorage temp_storage[WarpsInBlock];
+  WarpMergeSortT warp_sort(temp_storage[segment_id]);
+
+  KeyType thread_keys[ItemsPerThread];
+  ValueType thread_values[ItemsPerThread];
+
+  const unsigned int thread_offset = ThreadsInWarp * ItemsPerThread *
+                                       segment_id +
+                                     warp_sort.linear_tid * ItemsPerThread;
+  const unsigned int valid_items = segment_sizes[segment_id];
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    const unsigned int idx = thread_offset + item;
+    thread_keys[item]      = item < valid_items ? keys[idx] : KeyType();
+    thread_values[item]    = item < valid_items ? values[idx] : ValueType();
+  }
+  WARP_SYNC(warp_sort.member_mask);
+
+  // Tests below use sequence to fill the data.
+  // Therefore the following value should be greater than any that
+  // is present in the input data.
+  const KeyType oob_default =
+    static_cast<std::uint64_t>(ThreadsInBlock * ItemsPerThread + 1);
+
+  if (Stable)
+  {
+    if (valid_items == ThreadsInBlock * ItemsPerThread)
+    {
+      warp_sort.StableSort(thread_keys, thread_values, CustomLess());
+    }
+    else
+    {
+      warp_sort.StableSort(thread_keys,
+                           thread_values,
+                           CustomLess(),
+                           valid_items,
+                           oob_default);
+    }
+  }
+  else
+  {
+    if (valid_items == ThreadsInBlock * ItemsPerThread)
+    {
+      warp_sort.Sort(thread_keys, thread_values, CustomLess());
+    }
+    else
+    {
+      warp_sort.Sort(thread_keys,
+                     thread_values,
+                     CustomLess(),
+                     valid_items,
+                     oob_default);
+    }
+  }
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    const unsigned int idx = thread_offset + item;
+
+    if (item >= valid_items)
+      break;
+
+    keys[idx] = thread_keys[item];
+    values[idx] = thread_values[item];
+  }
+}
+
+template <typename KeyType,
+          typename ValueType,
+          unsigned int ThreadsInBlock,
+          unsigned int ThreadsInWarp,
+          unsigned int ItemsPerThread,
+          bool Stable>
+void WarpMergeSortTest(unsigned int valid_segments,
+                       KeyType *keys,
+                       ValueType *values,
+                       const unsigned int *segment_sizes)
+{
+  WarpMergeSortTestKernel<KeyType,
+                          ValueType,
+                          ThreadsInBlock,
+                          ThreadsInWarp,
+                          ItemsPerThread,
+                          Stable>
+    <<<1, ThreadsInBlock>>>(valid_segments, keys, values, segment_sizes);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
 template <typename DataType,
           unsigned int ThreadsInWarp,
           unsigned int ItemsPerThread>
@@ -277,6 +391,76 @@ void Test(unsigned int valid_segments,
   AssertTrue(check);
 }
 
+template <typename SourceType,
+          typename DestType>
+struct Cast
+{
+  __device__ __host__ DestType operator()(const SourceType val)
+  {
+    return static_cast<DestType>(val);
+  }
+};
+
+template <
+  typename KeyType,
+  typename ValueType,
+  unsigned int ThreadsInBlock,
+  unsigned int ThreadsInWarp,
+  unsigned int ItemsPerThread,
+  bool Stable>
+void Test(unsigned int valid_segments,
+          thrust::default_random_engine &rng,
+          thrust::device_vector<KeyType> &d_keys,
+          thrust::host_vector<KeyType> &h_keys,
+          thrust::device_vector<ValueType> &d_values,
+          thrust::host_vector<ValueType> &h_values,
+          const thrust::host_vector<unsigned int> &h_segment_sizes,
+          const thrust::device_vector<unsigned int> &d_segment_sizes)
+{
+  thrust::fill(d_keys.begin(), d_keys.end(), KeyType{});
+  thrust::fill(d_values.begin(), d_values.end(), ValueType{});
+
+  constexpr unsigned int max_segment_size = ThreadsInWarp * ItemsPerThread;
+
+  for (unsigned int segment_id = 0; segment_id < valid_segments; segment_id++)
+  {
+    const unsigned int segment_offset = max_segment_size * segment_id;
+    const unsigned int segment_size = h_segment_sizes[segment_id];
+    auto segment_begin = d_keys.begin() + segment_offset;
+    auto segment_end = segment_begin + segment_size;
+
+    thrust::sequence(segment_begin, segment_end);
+    thrust::shuffle(segment_begin, segment_end, rng);
+    thrust::transform(segment_begin,
+                      segment_end,
+                      d_values.begin() + segment_offset,
+                      Cast<KeyType, ValueType>{});
+  }
+
+  WarpMergeSortTest<KeyType,
+                    ValueType,
+                    ThreadsInBlock,
+                    ThreadsInWarp,
+                    ItemsPerThread,
+                    Stable>(valid_segments,
+                            thrust::raw_pointer_cast(d_keys.data()),
+                            thrust::raw_pointer_cast(d_values.data()),
+                            thrust::raw_pointer_cast(d_segment_sizes.data()));
+
+  const bool keys_ok =
+    CheckResult<KeyType, ThreadsInWarp, ItemsPerThread>(valid_segments,
+                                                        d_keys,
+                                                        h_keys,
+                                                        h_segment_sizes);
+  const bool values_ok =
+    CheckResult<ValueType, ThreadsInWarp, ItemsPerThread>(valid_segments,
+                                                          d_values,
+                                                          h_values,
+                                                          h_segment_sizes);
+  AssertTrue(keys_ok);
+  AssertTrue(values_ok);
+}
+
 template <
   typename KeyType,
   typename ValueType,
@@ -318,6 +502,16 @@ void Test(thrust::default_random_engine &rng)
       rng,
       d_keys,
       h_keys,
+      h_segment_sizes,
+      d_segment_sizes);
+
+    Test<KeyType, ValueType, ThreadsInBlock, ThreadsInWarp, ItemsPerThread, Stable>(
+      valid_segments,
+      rng,
+      d_keys,
+      h_keys,
+      d_values,
+      h_values,
       h_segment_sizes,
       d_segment_sizes);
   }
