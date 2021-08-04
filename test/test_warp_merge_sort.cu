@@ -558,8 +558,11 @@ void Test(thrust::default_random_engine &rng)
 template <unsigned int ItemsPerThread>
 void Test(thrust::default_random_engine &rng)
 {
-  Test<ItemsPerThread, false>(rng);
-  Test<ItemsPerThread, true>(rng);
+  constexpr bool stable = false;
+  constexpr bool unstable = false;
+
+  Test<ItemsPerThread, stable>(rng);
+  Test<ItemsPerThread, unstable>(rng);
 }
 
 struct CountToType
@@ -581,29 +584,40 @@ struct CountComparator
   }
 };
 
-// TODO
-/*
+template <unsigned int ThreadsInWarp>
 void TestStability()
 {
   constexpr unsigned int items_per_thread = 10;
   constexpr unsigned int threads_per_block = 128;
-  constexpr unsigned int elements = items_per_thread * threads_per_block;
+  constexpr unsigned int valid_segments = 1;
+  constexpr unsigned int elements = items_per_thread * ThreadsInWarp;
   constexpr bool stable = true;
 
   thrust::device_vector<CustomType> d_keys(elements);
   thrust::device_vector<std::uint64_t> d_counts(elements);
-  thrust::sequence(d_counts.begin(), d_counts.end());
-  thrust::transform(d_counts.begin(), d_counts.end(), d_keys.begin(), CountToType{});
+  thrust::sequence(d_counts.begin(),
+                   d_counts.end(),
+                   std::uint64_t{},
+                   std::uint64_t{128});
+  thrust::transform(d_counts.begin(),
+                    d_counts.end(),
+                    d_keys.begin(),
+                    CountToType{});
+
+  thrust::device_vector<unsigned int> d_segment_sizes(valid_segments, elements);
 
   // Sort keys
-  BlockMergeSortTest<CustomType, items_per_thread, threads_per_block, stable>(
-    thrust::raw_pointer_cast(d_keys.data()),
-    elements);
+  WarpMergeSortTest<CustomType,
+                    threads_per_block,
+                    ThreadsInWarp,
+                    items_per_thread,
+                    stable>(valid_segments,
+                            thrust::raw_pointer_cast(d_keys.data()),
+                            thrust::raw_pointer_cast(d_segment_sizes.data()));
 
   // Check counts
   AssertTrue(thrust::is_sorted(d_keys.begin(), d_keys.end(), CountComparator{}));
 }
- */
 
 int main(int argc, char** argv)
 {
@@ -617,7 +631,8 @@ int main(int argc, char** argv)
   Test<2>(rng);
   Test<7>(rng);
 
-  // TestStability();
+  TestStability<4>();
+  TestStability<32>();
 
   return 0;
 }
