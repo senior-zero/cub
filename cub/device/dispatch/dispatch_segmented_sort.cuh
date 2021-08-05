@@ -235,7 +235,7 @@ sub_warp_merge_sort(const KeyT *keys_input,
       KeyT lhs = keys_input[0];
       KeyT rhs = keys_input[1];
 
-      if (lhs < rhs)
+      if (binary_op(lhs, rhs))
       {
         keys_output[0] = lhs;
         keys_output[1] = rhs;
