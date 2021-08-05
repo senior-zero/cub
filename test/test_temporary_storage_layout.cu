@@ -118,11 +118,55 @@ void TestGrow()
 }
 
 template <int StorageSlots>
+void TestDoubleGrow()
+{
+  using target_type = std::uint64_t;
+  constexpr std::size_t target_elements_number = 42;
+
+  cub::TemporaryStorageLayout<StorageSlots> preset_layout;
+  std::unique_ptr<cub::TemporaryStorageArray<target_type>> preset_arrays[StorageSlots];
+
+  for (int slot_id = 0; slot_id < StorageSlots; slot_id++)
+  {
+    preset_arrays[slot_id].reset(
+        new cub::TemporaryStorageArray<target_type>(
+            preset_layout.GetSlot(slot_id)->template GetAlias<target_type>(
+                2 * target_elements_number)));
+  }
+
+  cub::TemporaryStorageLayout<StorageSlots> postset_layout;
+  std::unique_ptr<cub::TemporaryStorageArray<target_type>> postset_arrays[StorageSlots];
+
+  for (int slot_id = 0; slot_id < StorageSlots; slot_id++)
+  {
+    postset_arrays[slot_id].reset(
+        new cub::TemporaryStorageArray<target_type>(
+            postset_layout.GetSlot(slot_id)->template GetAlias<target_type>(target_elements_number)));
+    postset_arrays[slot_id]->Grow(2 * target_elements_number);
+  }
+
+  AssertEquals(preset_layout.GetSize(), postset_layout.GetSize());
+
+  const std::size_t tmp_storage_bytes = preset_layout.GetSize();
+  std::unique_ptr<std::uint8_t[]> temp_storage(
+      new std::uint8_t[tmp_storage_bytes]);
+
+  preset_layout.MapToBuffer(temp_storage.get(), tmp_storage_bytes);
+  postset_layout.MapToBuffer(temp_storage.get(), tmp_storage_bytes);
+
+  for (int slot_id = 0; slot_id < StorageSlots; slot_id++)
+  {
+    AssertEquals(postset_arrays[slot_id]->Get(), preset_arrays[slot_id]->Get());
+  }
+}
+
+template <int StorageSlots>
 void Test()
 {
   TestEmptyStorage<StorageSlots>();
   TestPartiallyFilledStorage<StorageSlots>();
   TestGrow<StorageSlots>();
+  TestDoubleGrow<StorageSlots>();
 }
 
 int main()
