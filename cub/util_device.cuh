@@ -40,11 +40,11 @@
 #include "util_namespace.cuh"
 #include "util_macro.cuh"
 
-#if CUB_CPP_DIALECT >= 2011 // C++11 and later.
 #include <atomic>
 #include <array>
 #include <cassert>
-#endif
+#include <vector>
+#include <memory>
 
 CUB_NAMESPACE_BEGIN
 
@@ -105,6 +105,145 @@ cudaError_t AliasTemporaries(
     return cudaSuccess;
 }
 
+class TemporaryStorageBase
+{
+public:
+  TemporaryStorageBase(void *&pointer)
+      : pointer(pointer)
+  {}
+
+  std::size_t size{};
+  void *&pointer;
+};
+
+template <typename T>
+class TemporaryStorageArray
+{
+  TemporaryStorageBase *base{};
+
+public:
+  TemporaryStorageArray() = delete;
+
+  explicit TemporaryStorageArray(TemporaryStorageBase *base)
+      : base(base)
+  {}
+
+  TemporaryStorageArray(TemporaryStorageBase *base, std::size_t elements)
+      : base(base)
+  {
+    SetSize(elements);
+  }
+
+  void SetSize(std::size_t elements) { base->size = elements * sizeof(T); }
+
+  T *Get() const
+  {
+    if (base->size == 0)
+    {
+      return nullptr;
+    }
+
+    return reinterpret_cast<T*>(base->pointer);
+  }
+};
+
+class TemporaryStorageLayoutSlot
+{
+  void *slot_pointer{};
+  std::vector<std::unique_ptr<TemporaryStorageBase>> arrays;
+
+public:
+  TemporaryStorageLayoutSlot() = default;
+
+  std::size_t GetBytesRequired() const
+  {
+    std::size_t bytes_required{};
+
+    for (const auto &array : arrays)
+    {
+      bytes_required = std::max(bytes_required, array->size);
+    }
+
+    return bytes_required;
+  }
+
+  void SetStorage(void *ptr) { slot_pointer = ptr; }
+
+  template <typename T>
+  TemporaryStorageArray<T> GetAlias()
+  {
+    arrays.emplace_back(new TemporaryStorageBase(slot_pointer));
+    return TemporaryStorageArray<T>(arrays.back().get());
+  }
+
+  template <typename T>
+  TemporaryStorageArray<T> GetAlias(std::size_t elements)
+  {
+    arrays.emplace_back(new TemporaryStorageBase(slot_pointer));
+    return TemporaryStorageArray<T>(arrays.back().get(), elements);
+  }
+};
+
+template <int SlotsCount>
+class TemporaryStorageLayout
+{
+  std::size_t last_slot{};
+  std::array<TemporaryStorageLayoutSlot, SlotsCount> slots;
+
+  std::size_t sizes[SlotsCount];
+  void* pointers[SlotsCount];
+
+public:
+  TemporaryStorageLayout() = default;
+
+  TemporaryStorageLayoutSlot *NextSlot()
+  {
+    if (last_slot < SlotsCount)
+    {
+      return &slots[last_slot++];
+    }
+
+    return nullptr;
+  }
+
+  cudaError_t MapRequirements(void *d_temp_storage,
+                              std::size_t &temp_storage_bytes)
+  {
+    cudaError_t error = cudaSuccess;
+
+    for (std::size_t slot_id = 0; slot_id < slots.size(); slot_id++)
+    {
+      const std::size_t slot_size = slots[slot_id].GetBytesRequired();
+      sizes[slot_id] = slot_size;
+      pointers[slot_id] = nullptr;
+    }
+
+    if ((error = AliasTemporaries(d_temp_storage,
+                                  temp_storage_bytes,
+                                  pointers,
+                                  sizes)))
+    {
+      return error;
+    }
+
+    if (d_temp_storage == nullptr)
+    {
+      if (temp_storage_bytes == 0)
+      {
+        temp_storage_bytes = 1;
+      }
+
+      return error;
+    }
+
+    for (std::size_t slot_id = 0; slot_id < slots.size(); slot_id++)
+    {
+      slots[slot_id].SetStorage(pointers[slot_id]);
+    }
+
+    return error;
+  }
+};
 
 /**
  * \brief Empty kernel for querying PTX manifest metadata (e.g., version) for the current device
