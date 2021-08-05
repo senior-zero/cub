@@ -49,23 +49,6 @@
 CUB_NAMESPACE_BEGIN
 
 
-// TODO There should be function like that in CUB already, look it up
-template <int threads_per_segment>
-__device__ __forceinline__ unsigned int gen_mask()
-{
-  const unsigned int group_id = LaneId() / threads_per_segment;
-  const unsigned int group_mask = (1 << threads_per_segment) - 1;
-  const unsigned int final_mask = group_mask << (group_id * threads_per_segment);
-
-  return final_mask;
-}
-
-template <>
-__device__ __forceinline__ unsigned int gen_mask<32>()
-{
-  return 0xFFFFFFFF;
-}
-
 template <int items_per_thread,
   int threads_per_segment,
   typename T>
@@ -613,7 +596,7 @@ __global__ void DeviceSegmentedSortKernelWithReorderingLarge(
         current_bit += pass_bits;
       }
     }
-        }
+}
 
 template <typename T,
   typename BeginOffsetIteratorT,
@@ -776,18 +759,41 @@ struct DispatchSegmentedSort : SelectedPolicy
       // TODO Add DoubleBuffer option - is_override_enabled
       const bool reorder_segments = num_segments > 500; // TODO Magick number
 
-      std::size_t tmp_keys_storage_bytes = num_items * sizeof(KeyT);
-      std::size_t tmp_values_storage_bytes = KEYS_ONLY
-                                           ? std::size_t{}
-                                           : num_items * sizeof(ValueT);
+      TemporaryStorage::Layout<5> temporary_storage_layout;
 
-      OffsetT *d_large_and_medium_segments_reordering = nullptr;
-      OffsetT *d_small_segments_reordering = nullptr;
-      OffsetT *d_group_sizes = nullptr;
+      auto keys_slot = temporary_storage_layout.GetSlot(0);
+      auto values_slot = temporary_storage_layout.GetSlot(1);
 
-      auto d_medium_reordering_iterator =
+      auto keys_allocation = keys_slot->GetAlias<KeyT>(num_items);
+      auto values_allocation = values_slot->GetAlias<ValueT>();
+
+      if (!KEYS_ONLY)
+      {
+        values_allocation.Grow(num_items);
+      }
+
+      auto large_and_medium_reordering_slot = temporary_storage_layout.GetSlot(2);
+      auto small_reordering_slot = temporary_storage_layout.GetSlot(3);
+      auto group_sizes_slot = temporary_storage_layout.GetSlot(4);
+
+      auto large_and_medium_segments_reordering = large_and_medium_reordering_slot->GetAlias<OffsetT>();
+      auto small_segments_reordering = small_reordering_slot->GetAlias<OffsetT>();
+      auto group_sizes = group_sizes_slot->GetAlias<OffsetT>();
+
+      // Partition selects large and small groups.
+      // The middle group is not selected.
+      constexpr std::size_t num_selected_groups = 2;
+
+      if (reorder_segments)
+      {
+        large_and_medium_segments_reordering.Grow(num_segments);
+        small_segments_reordering.Grow(num_segments);
+        group_sizes.Grow(num_selected_groups);
+      }
+
+      auto medium_reordering_iterator =
         THRUST_NS_QUALIFIER::make_reverse_iterator(
-          d_large_and_medium_segments_reordering);
+          large_and_medium_segments_reordering.Get());
 
       std::size_t three_way_partition_temp_storage_bytes {};
 
@@ -803,75 +809,38 @@ struct DispatchSegmentedSort : SelectedPolicy
           d_begin_offsets,
           d_end_offsets);
 
+      auto device_partition_temp_storage = keys_slot->GetAlias<std::uint8_t>();
       if (reorder_segments)
       {
         cub::DevicePartition::If(nullptr,
                                  three_way_partition_temp_storage_bytes,
                                  THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
-                                 d_large_and_medium_segments_reordering,
-                                 d_small_segments_reordering,
-                                 d_medium_reordering_iterator,
-                                 d_group_sizes,
+                                 large_and_medium_segments_reordering.Get(),
+                                 small_segments_reordering.Get(),
+                                 medium_reordering_iterator,
+                                 group_sizes.Get(),
                                  num_segments,
                                  large_segments_selector,
                                  small_segments_selector,
                                  stream,
                                  debug_synchronous);
-      }
-
-      std::size_t large_and_medium_segments_reordering_bytes =
-        reorder_segments ? sizeof(OffsetT) * num_segments : 0;
-
-      std::size_t small_segments_reordering_bytes =
-        reorder_segments ? sizeof(OffsetT) * num_segments : 0;
-
-      std::size_t keys_and_partitioning_union =
-        std::max(tmp_keys_storage_bytes,
-                 three_way_partition_temp_storage_bytes);
-
-      // Partition selects large and small groups.
-      // The middle group is not selected.
-      constexpr std::size_t num_selected_groups = 2;
-      std::size_t group_sizes_bytes = reorder_segments
-                                    ? sizeof(OffsetT) * num_selected_groups
-                                    : 0ul;
-
-      std::size_t allocation_sizes[5] = {
-        keys_and_partitioning_union,
-        tmp_values_storage_bytes,
-        large_and_medium_segments_reordering_bytes,
-        small_segments_reordering_bytes,
-        group_sizes_bytes
-      };
-
-      void *allocations[5] =
-        {nullptr, nullptr, nullptr, nullptr, nullptr};
-
-      if (CubDebug(error = AliasTemporaries(d_temp_storage,
-                                            temp_storage_bytes,
-                                            allocations,
-                                            allocation_sizes)))
-      {
-        break;
+        device_partition_temp_storage.Grow(three_way_partition_temp_storage_bytes);
       }
 
       if (d_temp_storage == nullptr)
       {
-        if (temp_storage_bytes == 0)
-        {
-          temp_storage_bytes = 1;
-        }
+        temp_storage_bytes = temporary_storage_layout.GetSize();
 
         // Return if the caller is simply requesting the size of the storage allocation
         break;
       }
 
-      d_large_and_medium_segments_reordering = reinterpret_cast<OffsetT*>(allocations[2]);
-      d_small_segments_reordering = reinterpret_cast<OffsetT*>(allocations[3]);
-      d_group_sizes = reinterpret_cast<OffsetT*>(allocations[4]);
-
-      KeyT *d_keys_allocation = reinterpret_cast<KeyT*>(allocations[0]);
-      ValueT *d_values_allocation = reinterpret_cast<ValueT*>(allocations[1]);
+      if (CubDebug(
+            error = temporary_storage_layout.MapToBuffer(d_temp_storage,
+                                                         temp_storage_bytes)))
+      {
+        break;
+      }
 
       const int radix_bits          = LargeSegmentPolicyT::RADIX_BITS;
       const int num_bits            = sizeof(KeyT) * 8;
@@ -879,29 +848,27 @@ struct DispatchSegmentedSort : SelectedPolicy
       const bool is_num_passes_odd  = num_passes & 1;
 
       cub::DeviceDoubleBuffer<KeyT> d_keys_remaining_passes(
-        is_num_passes_odd ? d_keys_out: d_keys_allocation,
-        is_num_passes_odd ? d_keys_allocation : d_keys_out);
+        is_num_passes_odd ? d_keys_out: keys_allocation.Get(),
+        is_num_passes_odd ? keys_allocation.Get() : d_keys_out);
 
       cub::DeviceDoubleBuffer<ValueT> d_values_remaining_passes(
-        is_num_passes_odd ? d_values_out: d_values_allocation,
-        is_num_passes_odd ? d_values_allocation : d_values_out);
+        is_num_passes_odd ? d_values_out: values_allocation.Get(),
+        is_num_passes_odd ? values_allocation.Get() : d_values_out);
 
       if (reorder_segments)
       {
-        void *d_partition_temp_storage = allocations[0];
-
-        d_medium_reordering_iterator =
+        medium_reordering_iterator =
           THRUST_NS_QUALIFIER::make_reverse_iterator(
-            d_large_and_medium_segments_reordering + num_segments);
+            large_and_medium_segments_reordering.Get() + num_segments);
 
         if (CubDebug(error = cub::DevicePartition::If(
-          d_partition_temp_storage,
+          device_partition_temp_storage.Get(),
           three_way_partition_temp_storage_bytes,
           THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
-          d_large_and_medium_segments_reordering,
-          d_small_segments_reordering,
-          d_medium_reordering_iterator,
-          d_group_sizes,
+          large_and_medium_segments_reordering.Get(),
+          small_segments_reordering.Get(),
+          medium_reordering_iterator,
+          group_sizes.Get(),
           num_segments,
           large_segments_selector,
           small_segments_selector,
@@ -913,8 +880,8 @@ struct DispatchSegmentedSort : SelectedPolicy
 
         OffsetT h_group_sizes[num_selected_groups];
         if (CubDebug(error = cudaMemcpy(h_group_sizes,
-                                        d_group_sizes,
-                                        group_sizes_bytes,
+                                        group_sizes.Get(),
+                                        num_selected_groups * sizeof(OffsetT),
                                         cudaMemcpyDeviceToHost)))
         {
           break;
@@ -951,7 +918,7 @@ struct DispatchSegmentedSort : SelectedPolicy
                     BeginOffsetIteratorT,
                     EndOffsetIteratorT,
                     OffsetT>,
-                  d_large_and_medium_segments_reordering,
+                  large_and_medium_segments_reordering.Get(),
                   d_keys_in,
                   d_keys_out,
                   d_keys_remaining_passes,
@@ -1024,8 +991,8 @@ struct DispatchSegmentedSort : SelectedPolicy
                   small_segments,
                   medium_segments,
                   medium_blocks,
-                  d_small_segments_reordering,
-                  d_large_and_medium_segments_reordering + num_segments -
+                  small_segments_reordering.Get(),
+                  large_and_medium_segments_reordering.Get() + num_segments -
                     medium_segments,
                   d_keys_in,
                   d_keys_out,
