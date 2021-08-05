@@ -221,6 +221,8 @@ public:
   {
     cudaError_t error = cudaSuccess;
 
+    PrepareInterface();
+
     if ((error = AliasTemporaries(d_temp_storage,
                                   temp_storage_bytes,
                                   pointers,
