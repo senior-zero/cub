@@ -353,7 +353,8 @@ void TestZeroSegments()
                                                   true));
 }
 
-template <typename KeyT, typename OffsetT>
+template <typename KeyT,
+          typename OffsetT>
 void TestZeroSegmentsDescending()
 {
   const OffsetT *d_offsets = nullptr;
@@ -387,6 +388,96 @@ void TestZeroSegmentsDescending()
                                                             d_offsets + 1,
                                                             0,
                                                             true));
+}
+
+template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
+void TestZeroSegmentsPairs()
+{
+  const OffsetT *d_offsets = nullptr;
+  const KeyT *keys_input   = nullptr;
+  KeyT *keys_output        = nullptr;
+
+  const ValueT *values_input = nullptr;
+  ValueT *values_output      = nullptr;
+
+  std::size_t temp_storage_bytes = 42ul;
+  CubDebugExit(cub::DeviceSegmentedSort::SortPairs(nullptr,
+                                                   temp_storage_bytes,
+                                                   keys_input,
+                                                   keys_output,
+                                                   values_input,
+                                                   values_output,
+                                                   OffsetT{},
+                                                   OffsetT{},
+                                                   d_offsets,
+                                                   d_offsets + 1,
+                                                   0,
+                                                   true));
+
+  AssertEquals(temp_storage_bytes, 0ul);
+
+  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
+  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
+
+  CubDebugExit(cub::DeviceSegmentedSort::SortPairs(d_tmp_storage,
+                                                   temp_storage_bytes,
+                                                   keys_input,
+                                                   keys_output,
+                                                   values_input,
+                                                   values_output,
+                                                   OffsetT{},
+                                                   OffsetT{},
+                                                   d_offsets,
+                                                   d_offsets + 1,
+                                                   0,
+                                                   true));
+}
+
+template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
+void TestZeroSegmentsDescendingPairs()
+{
+  const OffsetT *d_offsets = nullptr;
+  const KeyT *keys_input   = nullptr;
+  KeyT *keys_output        = nullptr;
+
+  const ValueT *values_input = nullptr;
+  ValueT *values_output      = nullptr;
+
+  std::size_t temp_storage_bytes = 42ul;
+  CubDebugExit(cub::DeviceSegmentedSort::SortPairsDescending(nullptr,
+                                                             temp_storage_bytes,
+                                                             keys_input,
+                                                             keys_output,
+                                                             values_input,
+                                                             values_output,
+                                                             OffsetT{},
+                                                             OffsetT{},
+                                                             d_offsets,
+                                                             d_offsets + 1,
+                                                             0,
+                                                             true));
+
+  AssertEquals(temp_storage_bytes, 0ul);
+
+  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
+  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
+
+  CubDebugExit(cub::DeviceSegmentedSort::SortPairsDescending(d_tmp_storage,
+                                                             temp_storage_bytes,
+                                                             keys_input,
+                                                             keys_output,
+                                                             values_input,
+                                                             values_output,
+                                                             OffsetT{},
+                                                             OffsetT{},
+                                                             d_offsets,
+                                                             d_offsets + 1,
+                                                             0,
+                                                             true));
 }
 
 template <typename KeyT,
@@ -570,6 +661,15 @@ void IndependentTest()
 }
 
 template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
+void IndependentTestPairs()
+{
+  TestZeroSegmentsPairs<KeyT, ValueT, OffsetT>();
+  TestZeroSegmentsDescendingPairs<KeyT, ValueT, OffsetT>();
+}
+
+template <typename KeyT,
           typename OffsetT>
 void DependentTest(OffsetT segments)
 {
@@ -724,9 +824,33 @@ void Test()
 
   const bool basic = false;
   EdgePatternsTest<KeyT, OffsetT>(basic);
-  
+
   const bool descending = true;
   EdgePatternsTest<KeyT, OffsetT>(descending);
+}
+
+template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
+void TestPairs()
+{
+  IndependentTestPairs<KeyT, ValueT, OffsetT>();
+  // DependentTest<KeyT, OffsetT>();
+
+  // const bool basic = false;
+  // EdgePatternsTest<KeyT, OffsetT>(basic);
+
+  // const bool descending = true;
+  // EdgePatternsTest<KeyT, OffsetT>(descending);
+}
+
+template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
+void TestKeysAndPairs()
+{
+  Test<KeyT, OffsetT>();
+  TestPairs<KeyT, ValueT, OffsetT>();
 }
 
 // TODO Test SortKeys
@@ -741,9 +865,11 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
+  TestKeysAndPairs<std::uint8_t, std::uint8_t, std::uint32_t>();
+
   // Test<std::uint8_t,  std::uint32_t>();
   // Test<std::uint16_t, std::uint32_t>();
-  Test<std::uint32_t, std::uint32_t>();
+  // Test<std::uint32_t, std::uint32_t>();
   // Test<std::uint64_t, std::uint32_t>();
   // Test<std::uint32_t, std::int64_t>();
 

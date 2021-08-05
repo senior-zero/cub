@@ -133,11 +133,11 @@ struct DeviceSegmentedSort
   {
     constexpr bool is_descending = false;
     using DispatchT = DispatchSegmentedSort<is_descending,
-      KeyT,
-      cub::NullType,
-      OffsetT,
-      BeginOffsetIteratorT,
-      EndOffsetIteratorT>;
+                                            KeyT,
+                                            ValueT,
+                                            OffsetT,
+                                            BeginOffsetIteratorT,
+                                            EndOffsetIteratorT>;
 
     return DispatchT::Dispatch(d_temp_storage,
                                temp_storage_bytes,
@@ -175,7 +175,7 @@ struct DeviceSegmentedSort
     constexpr bool is_descending = true;
     using DispatchT = DispatchSegmentedSort<is_descending,
                                             KeyT,
-                                            cub::NullType,
+                                            ValueT,
                                             OffsetT,
                                             BeginOffsetIteratorT,
                                             EndOffsetIteratorT>;
