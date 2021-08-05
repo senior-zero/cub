@@ -222,7 +222,7 @@ sub_warp_merge_sort(const KeyT *keys_input,
 
       if (!KEYS_ONLY)
       {
-        values_output[0] = values_input[1];
+        values_output[0] = values_input[0];
       }
     }
 
@@ -779,7 +779,7 @@ struct DispatchSegmentedSort : SelectedPolicy
       std::size_t tmp_keys_storage_bytes = num_items * sizeof(KeyT);
       std::size_t tmp_values_storage_bytes = KEYS_ONLY
                                            ? std::size_t{}
-                                           : num_items * sizeof(KeyT);
+                                           : num_items * sizeof(ValueT);
 
       OffsetT *d_large_and_medium_segments_reordering = nullptr;
       OffsetT *d_small_segments_reordering = nullptr;
