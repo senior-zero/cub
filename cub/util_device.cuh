@@ -103,25 +103,27 @@ cudaError_t AliasTemporaries(
     return cudaSuccess;
 }
 
+namespace TemporaryStorage
+{
+
 template <typename T>
-class TemporaryStorageArray
+class Array
 {
   void *&slot_pointer;
   std::size_t &slot_bytes;
-  std::size_t elements {};
+  std::size_t elements{};
 
 public:
-  TemporaryStorageArray() = delete;
+  Array() = delete;
 
-  explicit TemporaryStorageArray(void *&slot_pointer,
-                                 std::size_t &slot_bytes)
+  explicit Array(void *&slot_pointer, std::size_t &slot_bytes)
       : slot_pointer(slot_pointer)
       , slot_bytes(slot_bytes)
   {}
 
-  explicit TemporaryStorageArray(void *&slot_pointer,
-                                 std::size_t &slot_bytes,
-                                 std::size_t elements)
+  explicit Array(void *&slot_pointer,
+                 std::size_t &slot_bytes,
+                 std::size_t elements)
       : slot_pointer(slot_pointer)
       , slot_bytes(slot_bytes)
       , elements(elements)
@@ -142,7 +144,7 @@ public:
       return nullptr;
     }
 
-    return reinterpret_cast<T*>(slot_pointer);
+    return reinterpret_cast<T *>(slot_pointer);
   }
 
 private:
@@ -152,46 +154,43 @@ private:
   }
 };
 
-class TemporaryStorageLayoutSlot
+class Slot
 {
-  std::size_t size {};
+  std::size_t size{};
   void *pointer{};
 
 public:
-  TemporaryStorageLayoutSlot() = default;
+  Slot() = default;
 
-  std::size_t GetBytesRequired() const
-  {
-    return size;
-  }
+  std::size_t GetBytesRequired() const { return size; }
 
   void SetStorage(void *ptr) { pointer = ptr; }
 
   template <typename T>
-  TemporaryStorageArray<T> GetAlias()
+  Array<T> GetAlias()
   {
-    return TemporaryStorageArray<T>(pointer, size);
+    return Array<T>(pointer, size);
   }
 
   template <typename T>
-  TemporaryStorageArray<T> GetAlias(std::size_t elements)
+  Array<T> GetAlias(std::size_t elements)
   {
-    return TemporaryStorageArray<T>(pointer, size, elements);
+    return Array<T>(pointer, size, elements);
   }
 };
 
 template <int SlotsCount>
-class TemporaryStorageLayout
+class Layout
 {
-  std::array<TemporaryStorageLayoutSlot, SlotsCount> slots;
+  std::array<Slot, SlotsCount> slots;
 
   std::size_t sizes[SlotsCount];
-  void* pointers[SlotsCount];
+  void *pointers[SlotsCount];
 
 public:
-  TemporaryStorageLayout() = default;
+  Layout() = default;
 
-  TemporaryStorageLayoutSlot *GetSlot(int slot_id)
+  Slot *GetSlot(int slot_id)
   {
     if (slot_id < SlotsCount)
     {
@@ -207,11 +206,8 @@ public:
 
     // AliasTemporaries can return error only in mapping stage,
     // so it's safe to ignore it here.
-    std::size_t temp_storage_bytes {};
-    AliasTemporaries(nullptr,
-                     temp_storage_bytes,
-                     pointers,
-                     sizes);
+    std::size_t temp_storage_bytes{};
+    AliasTemporaries(nullptr, temp_storage_bytes, pointers, sizes);
 
     if (temp_storage_bytes == 0)
     {
@@ -221,8 +217,7 @@ public:
     return temp_storage_bytes;
   }
 
-  cudaError_t MapToBuffer(void *d_temp_storage,
-                          std::size_t temp_storage_bytes)
+  cudaError_t MapToBuffer(void *d_temp_storage, std::size_t temp_storage_bytes)
   {
     cudaError_t error = cudaSuccess;
 
@@ -248,11 +243,14 @@ private:
     for (std::size_t slot_id = 0; slot_id < slots.size(); slot_id++)
     {
       const std::size_t slot_size = slots[slot_id].GetBytesRequired();
-      sizes[slot_id] = slot_size;
+
+      sizes[slot_id]    = slot_size;
       pointers[slot_id] = nullptr;
     }
   }
 };
+
+} // namespace TemporaryStorage
 
 /**
  * \brief Empty kernel for querying PTX manifest metadata (e.g., version) for the current device

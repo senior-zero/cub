@@ -22,7 +22,7 @@ std::size_t GetActualZero()
 template <int StorageSlots>
 void TestEmptyStorage()
 {
-  cub::TemporaryStorageLayout<StorageSlots> temporary_storage;
+  cub::TemporaryStorage::Layout<StorageSlots> temporary_storage;
   AssertEquals(temporary_storage.GetSize(), GetActualZero());
 }
 
@@ -34,9 +34,9 @@ void TestPartiallyFilledStorage()
   constexpr std::size_t full_slot_elements = target_elements * sizeof(target_type);
   constexpr std::size_t empty_slot_elements {};
 
-  cub::TemporaryStorageLayout<StorageSlots> temporary_storage;
+  cub::TemporaryStorage::Layout<StorageSlots> temporary_storage;
 
-  std::unique_ptr<cub::TemporaryStorageArray<target_type>> arrays[StorageSlots];
+  std::unique_ptr<cub::TemporaryStorage::Array<target_type>> arrays[StorageSlots];
   std::size_t sizes[StorageSlots] {};
 
   for (int slot_id = 0; slot_id < StorageSlots; slot_id++)
@@ -47,7 +47,7 @@ void TestPartiallyFilledStorage()
                                ? full_slot_elements
                                : empty_slot_elements;
     sizes[slot_id] = elements * sizeof(target_type);
-    arrays[slot_id].reset(new cub::TemporaryStorageArray<target_type>(
+    arrays[slot_id].reset(new cub::TemporaryStorage::Array<target_type>(
       slot->template GetAlias<target_type>(elements)));
   }
 
@@ -80,24 +80,24 @@ void TestGrow()
   using target_type = std::uint64_t;
   constexpr std::size_t target_elements_number = 42;
 
-  cub::TemporaryStorageLayout<StorageSlots> preset_layout;
-  std::unique_ptr<cub::TemporaryStorageArray<target_type>> preset_arrays[StorageSlots];
+  cub::TemporaryStorage::Layout<StorageSlots> preset_layout;
+  std::unique_ptr<cub::TemporaryStorage::Array<target_type>> preset_arrays[StorageSlots];
 
   for (int slot_id = 0; slot_id < StorageSlots; slot_id++)
   {
     preset_arrays[slot_id].reset(
-        new cub::TemporaryStorageArray<target_type>(
+        new cub::TemporaryStorage::Array<target_type>(
             preset_layout.GetSlot(slot_id)->template GetAlias<target_type>(
               target_elements_number)));
   }
 
-  cub::TemporaryStorageLayout<StorageSlots> postset_layout;
-  std::unique_ptr<cub::TemporaryStorageArray<target_type>> postset_arrays[StorageSlots];
+  cub::TemporaryStorage::Layout<StorageSlots> postset_layout;
+  std::unique_ptr<cub::TemporaryStorage::Array<target_type>> postset_arrays[StorageSlots];
 
   for (int slot_id = 0; slot_id < StorageSlots; slot_id++)
   {
     postset_arrays[slot_id].reset(
-        new cub::TemporaryStorageArray<target_type>(
+        new cub::TemporaryStorage::Array<target_type>(
             postset_layout.GetSlot(slot_id)->template GetAlias<target_type>()));
     postset_arrays[slot_id]->Grow(target_elements_number);
   }
@@ -123,24 +123,24 @@ void TestDoubleGrow()
   using target_type = std::uint64_t;
   constexpr std::size_t target_elements_number = 42;
 
-  cub::TemporaryStorageLayout<StorageSlots> preset_layout;
-  std::unique_ptr<cub::TemporaryStorageArray<target_type>> preset_arrays[StorageSlots];
+  cub::TemporaryStorage::Layout<StorageSlots> preset_layout;
+  std::unique_ptr<cub::TemporaryStorage::Array<target_type>> preset_arrays[StorageSlots];
 
   for (int slot_id = 0; slot_id < StorageSlots; slot_id++)
   {
     preset_arrays[slot_id].reset(
-        new cub::TemporaryStorageArray<target_type>(
+        new cub::TemporaryStorage::Array<target_type>(
             preset_layout.GetSlot(slot_id)->template GetAlias<target_type>(
                 2 * target_elements_number)));
   }
 
-  cub::TemporaryStorageLayout<StorageSlots> postset_layout;
-  std::unique_ptr<cub::TemporaryStorageArray<target_type>> postset_arrays[StorageSlots];
+  cub::TemporaryStorage::Layout<StorageSlots> postset_layout;
+  std::unique_ptr<cub::TemporaryStorage::Array<target_type>> postset_arrays[StorageSlots];
 
   for (int slot_id = 0; slot_id < StorageSlots; slot_id++)
   {
     postset_arrays[slot_id].reset(
-        new cub::TemporaryStorageArray<target_type>(
+        new cub::TemporaryStorage::Array<target_type>(
             postset_layout.GetSlot(slot_id)->template GetAlias<target_type>(target_elements_number)));
     postset_arrays[slot_id]->Grow(2 * target_elements_number);
   }
