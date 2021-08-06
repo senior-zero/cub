@@ -1601,7 +1601,7 @@ Input<KeyT, OffsetT, ValueT> GenRandomInput(OffsetT max_items,
 
   for (std::size_t segment_id = 0; segment_id < segments_num; segment_id++)
   {
-    const OffsetT segment_size_raw = RandomValue(max_items / 4);
+    const OffsetT segment_size_raw = RandomValue(max_items / 100);
     const OffsetT segment_size = segment_size_raw > OffsetT{0} ? segment_size_raw
                                                                : OffsetT{0};
 
