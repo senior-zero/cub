@@ -698,6 +698,16 @@ struct DispatchSegmentedSort : SelectedPolicy
 {
   static constexpr int KEYS_ONLY = Equals<ValueT, NullType>::VALUE;
 
+  using LargeSegmentsSelectorT =
+    SegmentSizeGreaterThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>;
+
+  using SmallSegmentsSelectorT =
+    SegmentSizeLessThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>;
+
+  // Partition selects large and small groups.
+  // The middle group is unselected.
+  constexpr static std::size_t num_selected_groups = 2;
+
   void *d_temp_storage;
   std::size_t &temp_storage_bytes;
   const KeyT *d_keys_in;
@@ -756,6 +766,10 @@ struct DispatchSegmentedSort : SelectedPolicy
         break;
       }
 
+      //------------------------------------------------------------------------
+      // Prepare temporary storage layout
+      //------------------------------------------------------------------------
+
       // TODO Add DoubleBuffer option - is_override_enabled
       const bool reorder_segments = num_segments > 500; // TODO Magick number
 
@@ -763,6 +777,9 @@ struct DispatchSegmentedSort : SelectedPolicy
 
       auto keys_slot = temporary_storage_layout.GetSlot(0);
       auto values_slot = temporary_storage_layout.GetSlot(1);
+      auto large_and_medium_reordering_slot = temporary_storage_layout.GetSlot(2);
+      auto small_reordering_slot = temporary_storage_layout.GetSlot(3);
+      auto group_sizes_slot = temporary_storage_layout.GetSlot(4);
 
       auto keys_allocation = keys_slot->GetAlias<KeyT>(num_items);
       auto values_allocation = values_slot->GetAlias<ValueT>();
@@ -772,31 +789,21 @@ struct DispatchSegmentedSort : SelectedPolicy
         values_allocation.Grow(num_items);
       }
 
-      auto large_and_medium_reordering_slot = temporary_storage_layout.GetSlot(2);
-      auto small_reordering_slot = temporary_storage_layout.GetSlot(3);
-      auto group_sizes_slot = temporary_storage_layout.GetSlot(4);
-
       auto large_and_medium_segments_reordering = large_and_medium_reordering_slot->GetAlias<OffsetT>();
       auto small_segments_reordering = small_reordering_slot->GetAlias<OffsetT>();
       auto group_sizes = group_sizes_slot->GetAlias<OffsetT>();
 
-      // Partition selects large and small groups.
-      // The middle group is not selected.
-      constexpr std::size_t num_selected_groups = 2;
-
       std::size_t three_way_partition_temp_storage_bytes {};
 
-      SegmentSizeGreaterThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>
-        large_segments_selector(
-          SmallAndMediumPolicyT::MEDIUM_SEGMENT_MAX_SIZE,
-          d_begin_offsets,
-          d_end_offsets);
+      LargeSegmentsSelectorT large_segments_selector(
+        SmallAndMediumPolicyT::MEDIUM_SEGMENT_MAX_SIZE,
+        d_begin_offsets,
+        d_end_offsets);
 
-      SegmentSizeLessThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>
-        small_segments_selector(
-          SmallAndMediumPolicyT::SMALL_SEGMENT_MAX_SIZE + 1,
-          d_begin_offsets,
-          d_end_offsets);
+      SmallSegmentsSelectorT small_segments_selector(
+        SmallAndMediumPolicyT::SMALL_SEGMENT_MAX_SIZE + 1,
+        d_begin_offsets,
+        d_end_offsets);
 
       auto device_partition_temp_storage = keys_slot->GetAlias<std::uint8_t>();
       if (reorder_segments)
@@ -809,19 +816,22 @@ struct DispatchSegmentedSort : SelectedPolicy
           THRUST_NS_QUALIFIER::make_reverse_iterator(
             large_and_medium_segments_reordering.Get());
 
-        cub::DevicePartition::If(nullptr,
-                                 three_way_partition_temp_storage_bytes,
-                                 THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
-                                 large_and_medium_segments_reordering.Get(),
-                                 small_segments_reordering.Get(),
-                                 medium_reordering_iterator,
-                                 group_sizes.Get(),
-                                 num_segments,
-                                 large_segments_selector,
-                                 small_segments_selector,
-                                 stream,
-                                 debug_synchronous);
-        device_partition_temp_storage.Grow(three_way_partition_temp_storage_bytes);
+        cub::DevicePartition::If(
+          nullptr,
+          three_way_partition_temp_storage_bytes,
+          THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
+          large_and_medium_segments_reordering.Get(),
+          small_segments_reordering.Get(),
+          medium_reordering_iterator,
+          group_sizes.Get(),
+          num_segments,
+          large_segments_selector,
+          small_segments_selector,
+          stream,
+          debug_synchronous);
+
+        device_partition_temp_storage.Grow(
+          three_way_partition_temp_storage_bytes);
       }
 
       if (d_temp_storage == nullptr)
@@ -839,219 +849,47 @@ struct DispatchSegmentedSort : SelectedPolicy
         break;
       }
 
+      //------------------------------------------------------------------------
+      // Sort
+      //------------------------------------------------------------------------
+
       const int radix_bits          = LargeSegmentPolicyT::RADIX_BITS;
       const int num_bits            = sizeof(KeyT) * 8;
       const int num_passes          = (num_bits + radix_bits - 1) / radix_bits;
       const bool is_num_passes_odd  = num_passes & 1;
 
       cub::DeviceDoubleBuffer<KeyT> d_keys_remaining_passes(
-        is_num_passes_odd ? d_keys_out: keys_allocation.Get(),
-        is_num_passes_odd ? keys_allocation.Get() : d_keys_out);
+        keys_allocation.Get(),
+        d_keys_out);
 
       cub::DeviceDoubleBuffer<ValueT> d_values_remaining_passes(
-        is_num_passes_odd ? d_values_out: values_allocation.Get(),
-        is_num_passes_odd ? values_allocation.Get() : d_values_out);
+        values_allocation.Get(),
+        d_values_out);
+
+      if (is_num_passes_odd)
+      {
+        d_keys_remaining_passes.Swap();
+        d_values_remaining_passes.Swap();
+      }
 
       if (reorder_segments)
       {
-        auto medium_reordering_iterator =
-          THRUST_NS_QUALIFIER::make_reverse_iterator(
-            large_and_medium_segments_reordering.Get() + num_segments);
-
-        if (CubDebug(error = cub::DevicePartition::If(
-          device_partition_temp_storage.Get(),
+        error = SortWithReordering<LargeSegmentPolicyT, SmallAndMediumPolicyT>(
           three_way_partition_temp_storage_bytes,
-          THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
-          large_and_medium_segments_reordering.Get(),
-          small_segments_reordering.Get(),
-          medium_reordering_iterator,
-          group_sizes.Get(),
-          num_segments,
+          d_keys_remaining_passes,
+          d_values_remaining_passes,
           large_segments_selector,
           small_segments_selector,
-          stream,
-          debug_synchronous)))
-        {
-          break;
-        }
-
-        OffsetT h_group_sizes[num_selected_groups];
-        if (CubDebug(error = cudaMemcpy(h_group_sizes,
-                                        group_sizes.Get(),
-                                        num_selected_groups * sizeof(OffsetT),
-                                        cudaMemcpyDeviceToHost)))
-        {
-          break;
-        }
-
-        const OffsetT large_segments = h_group_sizes[0];
-
-        if (large_segments > 0)
-        {
-          const OffsetT blocks_in_grid = large_segments; // One CTA per segment
-
-          // TODO cudaGraph
-          if (debug_synchronous)
-          {
-            _CubLog("Invoking "
-                    "DeviceSegmentedSortKernelWithReorderingLarge<<<"
-                    "%d, %d, 0, %lld>>>(), %d items per thread\n",
-                    static_cast<int>(blocks_in_grid),
-                    SmallAndMediumPolicyT::BLOCK_THREADS,
-                    (long long)stream,
-                    SmallAndMediumPolicyT::ITEMS_PER_THREAD);
-          }
-
-          THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
-            blocks_in_grid,
-            LargeSegmentPolicyT::BLOCK_THREADS,
-            0,
-            stream)
-            .doit(DeviceSegmentedSortKernelWithReorderingLarge<
-                    IS_DESCENDING,
-                    LargeSegmentPolicyT,
-                    KeyT,
-                    ValueT,
-                    BeginOffsetIteratorT,
-                    EndOffsetIteratorT,
-                    OffsetT>,
-                  large_and_medium_segments_reordering.Get(),
-                  d_keys_in,
-                  d_keys_out,
-                  d_keys_remaining_passes,
-                  d_values_in,
-                  d_values_out,
-                  d_values_remaining_passes,
-                  d_begin_offsets,
-                  d_end_offsets);
-
-          // Check for failure to launch
-          if (CubDebug(error = cudaPeekAtLastError()))
-          {
-            break;
-          }
-
-          // Sync the stream if specified to flush runtime errors
-          if (debug_synchronous)
-          {
-            if (CubDebug(error = SyncStream(stream)))
-            {
-              break;
-            }
-          }
-        }
-
-        const OffsetT small_segments = h_group_sizes[1];
-        const OffsetT medium_segments = num_segments -
-                                        (large_segments + small_segments);
-
-        const OffsetT small_blocks =
-          (small_segments +
-           ActivePolicyT::SmallAndMediumPolicy::SEGMENTS_PER_SMALL_BLOCK - 1) /
-          ActivePolicyT::SmallAndMediumPolicy::SEGMENTS_PER_SMALL_BLOCK;
-
-        const OffsetT medium_blocks =
-          (medium_segments +
-           ActivePolicyT::SmallAndMediumPolicy::SEGMENTS_PER_MEDIUM_BLOCK - 1) /
-          ActivePolicyT::SmallAndMediumPolicy::SEGMENTS_PER_MEDIUM_BLOCK;
-
-        const OffsetT small_and_medium_blocks_in_grid = small_blocks +
-                                                        medium_blocks;
-
-        if (small_and_medium_blocks_in_grid)
-        {
-          if (debug_synchronous)
-          {
-            _CubLog("Invoking "
-                    "DeviceSegmentedSortKernelWithReorderingSmall<<<"
-                    "%d, %d, 0, %lld>>>(), %d items per thread\n",
-                    static_cast<int>(small_and_medium_blocks_in_grid),
-                    SmallAndMediumPolicyT::BLOCK_THREADS,
-                    (long long)stream,
-                    SmallAndMediumPolicyT::ITEMS_PER_THREAD);
-          }
-
-          // TODO cudaGraph
-          THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
-            small_and_medium_blocks_in_grid,
-            SmallAndMediumPolicyT::BLOCK_THREADS,
-            0,
-            stream)
-            .doit(DeviceSegmentedSortKernelWithReorderingSmall<
-                    IS_DESCENDING,
-                    SmallAndMediumPolicyT,
-                    KeyT,
-                    ValueT,
-                    BeginOffsetIteratorT,
-                    EndOffsetIteratorT,
-                    OffsetT>,
-                  small_segments,
-                  medium_segments,
-                  medium_blocks,
-                  small_segments_reordering.Get(),
-                  large_and_medium_segments_reordering.Get() + num_segments -
-                    medium_segments,
-                  d_keys_in,
-                  d_keys_out,
-                  d_values_in,
-                  d_values_out,
-                  d_begin_offsets,
-                  d_end_offsets);
-        }
+          device_partition_temp_storage,
+          large_and_medium_segments_reordering,
+          small_segments_reordering,
+          group_sizes);
       }
       else
       {
-        const unsigned int blocks_in_grid = num_segments;
-        const unsigned int threads_in_block =
-          LargeSegmentPolicyT::BLOCK_THREADS;
-
-        // Log kernel configuration
-        if (debug_synchronous)
-        {
-          _CubLog("Invoking DeviceSegmentedSortFallbackKernel<<<%d, %d, "
-                  "0, %lld>>>(), %d items per thread, bit_grain %d\n",
-                  blocks_in_grid,
-                  threads_in_block,
-                  (long long)stream,
-                  LargeSegmentPolicyT::ITEMS_PER_THREAD,
-                  LargeSegmentPolicyT::RADIX_BITS);
-        }
-
-        // Invoke fallback kernel
-        THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(blocks_in_grid,
-                                                                threads_in_block,
-                                                                0,
-                                                                stream)
-          .doit(DeviceSegmentedSortFallbackKernel<IS_DESCENDING,
-                                                  LargeSegmentPolicyT,
-                                                  KeyT,
-                                                  ValueT,
-                                                  BeginOffsetIteratorT,
-                                                  EndOffsetIteratorT,
-                                                  OffsetT>,
-                d_keys_in,
-                d_keys_out,
-                d_keys_remaining_passes,
-                d_values_in,
-                d_values_out,
-                d_values_remaining_passes,
-                d_begin_offsets,
-                d_end_offsets);
-      }
-
-      // Check for failure to launch
-      if (CubDebug(error = cudaPeekAtLastError()))
-      {
-        break;
-      }
-
-      // Sync the stream if specified to flush runtime errors
-      if (debug_synchronous)
-      {
-        if (CubDebug(error = SyncStream(stream)))
-        {
-          break;
-        }
+        error =
+          SortWithoutReordering<LargeSegmentPolicyT>(d_keys_remaining_passes,
+                                                     d_values_remaining_passes);
       }
     } while (false);
 
@@ -1105,6 +943,244 @@ struct DispatchSegmentedSort : SelectedPolicy
         break;
       }
     } while (false);
+
+    return error;
+  }
+
+private:
+  template <typename LargeSegmentPolicyT,
+            typename SmallAndMediumPolicyT>
+  CUB_RUNTIME_FUNCTION __forceinline__ cudaError_t SortWithReordering(
+    std::size_t three_way_partition_temp_storage_bytes,
+    cub::DeviceDoubleBuffer<KeyT> &d_keys_remaining_passes,
+    cub::DeviceDoubleBuffer<ValueT> &d_values_remaining_passes,
+    LargeSegmentsSelectorT &large_segments_selector,
+    SmallSegmentsSelectorT &small_segments_selector,
+    TemporaryStorage::Array<std::uint8_t> &device_partition_temp_storage,
+    TemporaryStorage::Array<OffsetT> &large_and_medium_segments_reordering,
+    TemporaryStorage::Array<OffsetT> &small_segments_reordering,
+    TemporaryStorage::Array<OffsetT> &group_sizes)
+  {
+    cudaError_t error = cudaSuccess;
+
+    auto medium_reordering_iterator =
+      THRUST_NS_QUALIFIER::make_reverse_iterator(
+        large_and_medium_segments_reordering.Get() + num_segments);
+
+    if (CubDebug(error = cub::DevicePartition::If(
+      device_partition_temp_storage.Get(),
+      three_way_partition_temp_storage_bytes,
+      THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
+      large_and_medium_segments_reordering.Get(),
+      small_segments_reordering.Get(),
+      medium_reordering_iterator,
+      group_sizes.Get(),
+      num_segments,
+      large_segments_selector,
+      small_segments_selector,
+      stream,
+      debug_synchronous)))
+    {
+      return error;
+    }
+
+    OffsetT h_group_sizes[num_selected_groups];
+    if (CubDebug(error = cudaMemcpy(h_group_sizes,
+                                    group_sizes.Get(),
+                                    num_selected_groups * sizeof(OffsetT),
+                                    cudaMemcpyDeviceToHost)))
+    {
+      return error;
+    }
+
+    const OffsetT large_segments = h_group_sizes[0];
+
+    if (large_segments > 0)
+    {
+      const OffsetT blocks_in_grid = large_segments; // One CTA per segment
+
+      // TODO cudaGraph
+      if (debug_synchronous)
+      {
+        _CubLog("Invoking "
+                "DeviceSegmentedSortKernelWithReorderingLarge<<<"
+                "%d, %d, 0, %lld>>>(), %d items per thread\n",
+                static_cast<int>(blocks_in_grid),
+                SmallAndMediumPolicyT::BLOCK_THREADS,
+                (long long)stream,
+                SmallAndMediumPolicyT::ITEMS_PER_THREAD);
+      }
+
+      THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
+        blocks_in_grid,
+        LargeSegmentPolicyT::BLOCK_THREADS,
+        0,
+        stream)
+        .doit(DeviceSegmentedSortKernelWithReorderingLarge<
+                IS_DESCENDING,
+                LargeSegmentPolicyT,
+                KeyT,
+                ValueT,
+                BeginOffsetIteratorT,
+                EndOffsetIteratorT,
+                OffsetT>,
+              large_and_medium_segments_reordering.Get(),
+              d_keys_in,
+              d_keys_out,
+              d_keys_remaining_passes,
+              d_values_in,
+              d_values_out,
+              d_values_remaining_passes,
+              d_begin_offsets,
+              d_end_offsets);
+
+      // Check for failure to launch
+      if (CubDebug(error = cudaPeekAtLastError()))
+      {
+        return error;
+      }
+
+      // Sync the stream if specified to flush runtime errors
+      if (debug_synchronous)
+      {
+        if (CubDebug(error = SyncStream(stream)))
+        {
+          return error;
+        }
+      }
+    }
+
+    const OffsetT small_segments = h_group_sizes[1];
+    const OffsetT medium_segments = num_segments -
+                                    (large_segments + small_segments);
+
+    const OffsetT small_blocks =
+      DivideAndRoundUp(small_segments,
+                       SmallAndMediumPolicyT::SEGMENTS_PER_SMALL_BLOCK);
+
+    const OffsetT medium_blocks =
+      DivideAndRoundUp(medium_segments,
+                       SmallAndMediumPolicyT::SEGMENTS_PER_MEDIUM_BLOCK);
+
+
+    const OffsetT small_and_medium_blocks_in_grid = small_blocks +
+                                                    medium_blocks;
+
+    if (small_and_medium_blocks_in_grid)
+    {
+      if (debug_synchronous)
+      {
+        _CubLog("Invoking "
+                "DeviceSegmentedSortKernelWithReorderingSmall<<<"
+                "%d, %d, 0, %lld>>>(), %d items per thread\n",
+                static_cast<int>(small_and_medium_blocks_in_grid),
+                SmallAndMediumPolicyT::BLOCK_THREADS,
+                (long long)stream,
+                SmallAndMediumPolicyT::ITEMS_PER_THREAD);
+      }
+
+      THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
+        small_and_medium_blocks_in_grid,
+        SmallAndMediumPolicyT::BLOCK_THREADS,
+        0,
+        stream)
+        .doit(DeviceSegmentedSortKernelWithReorderingSmall<
+                IS_DESCENDING,
+                SmallAndMediumPolicyT,
+                KeyT,
+                ValueT,
+                BeginOffsetIteratorT,
+                EndOffsetIteratorT,
+                OffsetT>,
+              small_segments,
+              medium_segments,
+              medium_blocks,
+              small_segments_reordering.Get(),
+              large_and_medium_segments_reordering.Get() + num_segments -
+              medium_segments,
+              d_keys_in,
+              d_keys_out,
+              d_values_in,
+              d_values_out,
+              d_begin_offsets,
+              d_end_offsets);
+
+      // Check for failure to launch
+      if (CubDebug(error = cudaPeekAtLastError()))
+      {
+        return error;
+      }
+
+      // Sync the stream if specified to flush runtime errors
+      if (debug_synchronous)
+      {
+        if (CubDebug(error = SyncStream(stream)))
+        {
+          return error;
+        }
+      }
+    }
+
+    return error;
+  }
+
+  template <typename LargeSegmentPolicyT>
+  CUB_RUNTIME_FUNCTION __forceinline__ cudaError_t SortWithoutReordering(
+    cub::DeviceDoubleBuffer<KeyT> &d_keys_remaining_passes,
+    cub::DeviceDoubleBuffer<ValueT> &d_values_remaining_passes)
+  {
+    cudaError_t error = cudaSuccess;
+
+    const unsigned int blocks_in_grid   = num_segments;
+    const unsigned int threads_in_block = LargeSegmentPolicyT::BLOCK_THREADS;
+
+    // Log kernel configuration
+    if (debug_synchronous)
+    {
+      _CubLog("Invoking DeviceSegmentedSortFallbackKernel<<<%d, %d, "
+              "0, %lld>>>(), %d items per thread, bit_grain %d\n",
+              blocks_in_grid,
+              threads_in_block,
+              (long long)stream,
+              LargeSegmentPolicyT::ITEMS_PER_THREAD,
+              LargeSegmentPolicyT::RADIX_BITS);
+    }
+
+    // Invoke fallback kernel
+    THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(blocks_in_grid,
+                                                            threads_in_block,
+                                                            0,
+                                                            stream)
+      .doit(DeviceSegmentedSortFallbackKernel<IS_DESCENDING,
+                                              LargeSegmentPolicyT,
+                                              KeyT,
+                                              ValueT,
+                                              BeginOffsetIteratorT,
+                                              EndOffsetIteratorT,
+                                              OffsetT>,
+            d_keys_in,
+            d_keys_out,
+            d_keys_remaining_passes,
+            d_values_in,
+            d_values_out,
+            d_values_remaining_passes,
+            d_begin_offsets,
+            d_end_offsets);
+
+    // Check for failure to launch
+    if (CubDebug(error = cudaPeekAtLastError()))
+    {
+      return error;
+    }
+
+    // Sync the stream if specified to flush runtime errors
+    if (debug_synchronous)
+    {
+      if (CubDebug(error = SyncStream(stream)))
+      {
+        return error;
+      }
+    }
 
     return error;
   }
