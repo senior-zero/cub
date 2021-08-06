@@ -784,17 +784,6 @@ struct DispatchSegmentedSort : SelectedPolicy
       // The middle group is not selected.
       constexpr std::size_t num_selected_groups = 2;
 
-      if (reorder_segments)
-      {
-        large_and_medium_segments_reordering.Grow(num_segments);
-        small_segments_reordering.Grow(num_segments);
-        group_sizes.Grow(num_selected_groups);
-      }
-
-      auto medium_reordering_iterator =
-        THRUST_NS_QUALIFIER::make_reverse_iterator(
-          large_and_medium_segments_reordering.Get());
-
       std::size_t three_way_partition_temp_storage_bytes {};
 
       SegmentSizeGreaterThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>
@@ -812,6 +801,14 @@ struct DispatchSegmentedSort : SelectedPolicy
       auto device_partition_temp_storage = keys_slot->GetAlias<std::uint8_t>();
       if (reorder_segments)
       {
+        large_and_medium_segments_reordering.Grow(num_segments);
+        small_segments_reordering.Grow(num_segments);
+        group_sizes.Grow(num_selected_groups);
+
+        auto medium_reordering_iterator =
+          THRUST_NS_QUALIFIER::make_reverse_iterator(
+            large_and_medium_segments_reordering.Get());
+
         cub::DevicePartition::If(nullptr,
                                  three_way_partition_temp_storage_bytes,
                                  THRUST_NS_QUALIFIER::counting_iterator<OffsetT>(0),
@@ -857,7 +854,7 @@ struct DispatchSegmentedSort : SelectedPolicy
 
       if (reorder_segments)
       {
-        medium_reordering_iterator =
+        auto medium_reordering_iterator =
           THRUST_NS_QUALIFIER::make_reverse_iterator(
             large_and_medium_segments_reordering.Get() + num_segments);
 
