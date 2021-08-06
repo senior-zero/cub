@@ -114,7 +114,7 @@ struct WarpReduceSmem
             LaneId() :
             LaneId() % LOGICAL_WARP_THREADS),
 
-        // TODO Extract into function?
+        // TODO Use WarpMask
         member_mask((0xffffffff >> (32 - LOGICAL_WARP_THREADS)) << ((IS_ARCH_WARP || !IS_POW_OF_TWO ) ?
             0 : // arch-width and non-power-of-two subwarps cannot be tiled with the arch-warp
             ((LaneId() / LOGICAL_WARP_THREADS) * LOGICAL_WARP_THREADS)))

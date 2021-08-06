@@ -36,6 +36,7 @@
 #include "../../device/device_partition.cuh"
 #include "../../agent/agent_segmented_sort.cuh"
 #include "../../agent/agent_segmented_radix_sort.cuh"
+#include "../../agent/agent_sub_warp_merge_sort.cuh"
 #include "../../block/block_merge_sort.cuh"
 #include "../../warp/warp_merge_sort.cuh"
 #include "../../thread/thread_sort.cuh"
@@ -48,315 +49,6 @@
 
 CUB_NAMESPACE_BEGIN
 
-
-template <int items_per_thread,
-  int threads_per_segment,
-  typename T>
-__device__ void sub_warp_load(int lane_id,
-                              int segment_size,
-                              int group_mask,
-                              const T *input,
-                              T oob_default,
-                              T (&keys)[items_per_thread],
-                              T *cache)
-{
-  for (int item = 0; item < items_per_thread; item++)
-  {
-    keys[item] = oob_default;
-  }
-
-  if (items_per_thread > 10)
-  {
-    // COALESCED_LOAD
-#pragma unroll
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = threads_per_segment * item + lane_id;
-
-      if (idx < segment_size)
-      {
-        keys[item] = input[idx];
-      }
-    }
-
-// store in shared
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = threads_per_segment * item + lane_id;
-      cache[idx]    = keys[item];
-    }
-    __syncwarp(group_mask);
-
-// load blocked
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = items_per_thread * lane_id + item;
-      keys[item]    = cache[idx];
-    }
-    __syncwarp(group_mask);
-  }
-  else
-  {
-    // Naive load
-
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const unsigned int idx = lane_id * items_per_thread + item;
-
-      if (idx < segment_size)
-      {
-        keys[item] = input[idx];
-      }
-    }
-  }
-}
-
-template <int items_per_thread,
-  int threads_per_segment,
-  typename T>
-__device__ void sub_warp_load(int lane_id,
-                              int segment_size,
-                              int group_mask,
-                              const T *input,
-                              T (&keys)[items_per_thread],
-                              T *cache)
-{
-  if (items_per_thread > 10)
-  {
-    // COALESCED_LOAD
-#pragma unroll
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = threads_per_segment * item + lane_id;
-
-      if (idx < segment_size)
-      {
-        keys[item] = input[idx];
-      }
-    }
-
-    // store in shared
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = threads_per_segment * item + lane_id;
-      cache[idx]    = keys[item];
-    }
-    __syncwarp(group_mask);
-
-    // load blocked
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = items_per_thread * lane_id + item;
-      keys[item]    = cache[idx];
-    }
-    __syncwarp(group_mask);
-  }
-  else
-  {
-    // Naive load
-
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const unsigned int idx = lane_id * items_per_thread + item;
-
-      if (idx < segment_size)
-      {
-        keys[item] = input[idx];
-      }
-    }
-  }
-}
-
-template <int items_per_thread,
-  int threads_per_segment,
-  typename T>
-__device__ void sub_warp_store(int lane_id,
-                               int segment_size,
-                               int group_mask,
-                               T *output,
-                               T (&keys)[items_per_thread],
-                               T *cache)
-{
-  if (items_per_thread > 10)
-  {
-    // Coalesced store
-    __syncwarp(group_mask);
-
-    // load blocked
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = items_per_thread * lane_id + item;
-      cache[idx] = keys[item];
-    }
-    __syncwarp(group_mask);
-
-    // store in shared
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = threads_per_segment * item + lane_id;
-      keys[item] = cache[idx];
-    }
-
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = threads_per_segment * item + lane_id;
-
-      if (idx < segment_size)
-      {
-        output[idx] = keys[item];
-      }
-    }
-  }
-  else
-  {
-    // Naive store
-    for (int item = 0; item < items_per_thread; item++)
-    {
-      const int idx = lane_id * items_per_thread + item;
-
-      if (idx < segment_size)
-      {
-        output[idx] = keys[item];
-      }
-    }
-  }
-}
-
-template <bool IS_DESCENDING,
-          int items_per_thread,
-          int threads_per_segment,
-          typename KeyT,
-          typename ValueT,
-          typename WarpMergeSortT =
-            WarpMergeSort<KeyT, items_per_thread, threads_per_segment, ValueT>>
-__device__ void
-sub_warp_merge_sort(const KeyT *keys_input,
-                    KeyT *keys_output,
-                    const ValueT *values_input,
-                    ValueT *values_output,
-                    int segment_size,
-                    typename WarpMergeSortT::TempStorage &temp_storage)
-{
-  static constexpr bool KEYS_ONLY = cub::Equals<ValueT, cub::NullType>::VALUE;
-
-  auto binary_op = [] (KeyT lhs, KeyT rhs) -> bool
-  {
-    if (IS_DESCENDING)
-    {
-      return lhs > rhs;
-    }
-    else
-    {
-      return lhs < rhs;
-    }
-  };
-
-  if (segment_size == 0)
-  {
-    return;
-  }
-
-  WarpMergeSortT warp_merge_sort(temp_storage);
-
-  if (segment_size == 1)
-  {
-    if (warp_merge_sort.linear_tid == 0)
-    {
-      keys_output[0] = keys_input[0];
-
-      if (!KEYS_ONLY)
-      {
-        values_output[0] = values_input[0];
-      }
-    }
-
-    return;
-  }
-  else if (segment_size == 2)
-  {
-    if (warp_merge_sort.linear_tid == 0)
-    {
-      KeyT lhs = keys_input[0];
-      KeyT rhs = keys_input[1];
-
-      if (binary_op(lhs, rhs))
-      {
-        keys_output[0] = lhs;
-        keys_output[1] = rhs;
-
-        if (!KEYS_ONLY)
-        {
-          values_output[0] = values_input[0];
-          values_output[1] = values_input[1];
-        }
-      }
-      else
-      {
-        keys_output[0] = rhs;
-        keys_output[1] = lhs;
-
-        if (!KEYS_ONLY)
-        {
-          values_output[0] = values_input[1];
-          values_output[1] = values_input[0];
-        }
-      }
-    }
-
-    return;
-  }
-
-  KeyT keys[items_per_thread];
-  ValueT values[items_per_thread];
-
-  // For FP64 the difference is:
-  // Lowest() -> -1.79769e+308 = 00...00b -> TwiddleIn -> -0 = 10...00b
-  // LOWEST   -> -nan          = 11...11b -> TwiddleIn ->  0 = 00...00b
-
-  using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
-  UnsignedBitsT default_key_bits = IS_DESCENDING ? Traits<KeyT>::LOWEST_KEY
-                                                 : Traits<KeyT>::MAX_KEY;
-  KeyT oob_default = reinterpret_cast<KeyT &>(default_key_bits);
-
-  sub_warp_load<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
-                                                       segment_size,
-                                                       warp_merge_sort.member_mask,
-                                                       keys_input,
-                                                       oob_default,
-                                                       keys,
-                                                       temp_storage.Alias().keys_shared);
-
-  if (!KEYS_ONLY)
-  {
-    sub_warp_load<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
-                                                         segment_size,
-                                                         warp_merge_sort.member_mask,
-                                                         values_input,
-                                                         values,
-                                                         temp_storage.Alias().items_shared);
-  }
-
-  // 2) Sort
-
-  warp_merge_sort.Sort(keys, values, binary_op, segment_size, oob_default);
-
-  sub_warp_store<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
-                                                        segment_size,
-                                                        warp_merge_sort.member_mask,
-                                                        keys_output,
-                                                        keys,
-                                                        temp_storage.Alias().keys_shared);
-
-  if (!KEYS_ONLY)
-  {
-    sub_warp_store<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
-                                                          segment_size,
-                                                          warp_merge_sort.member_mask,
-                                                          values_output,
-                                                          values,
-                                                          temp_storage.Alias().items_shared);
-  }
-}
 
 template <bool IS_DESCENDING,
           typename SegmentedPolicyT,
@@ -396,17 +88,19 @@ __global__ void DeviceSegmentedSortFallbackKernel(
 
   using WarpReduceT = cub::WarpReduce<KeyT>;
 
-  using WarpMergeSortT =
-    WarpMergeSort<KeyT,
-                  SmallAndMediumPolicyT::ITEMS_PER_THREAD,
-                  SmallAndMediumPolicyT::THREADS_PER_MEDIUM_SEGMENT,
-                  ValueT>;
+  using AgentWarpMergeSortT =
+    AgentSubWarpSort<IS_DESCENDING,
+                     SmallAndMediumPolicyT::ITEMS_PER_THREAD,
+                     SmallAndMediumPolicyT::THREADS_PER_MEDIUM_SEGMENT,
+                     KeyT,
+                     ValueT,
+                     OffsetT>;
 
   __shared__ union
   {
     typename AgentSegmentedRadixSortT::TempStorage block_sort;
     typename WarpReduceT::TempStorage warp_reduce;
-    typename WarpMergeSortT::TempStorage medium_warp_sort;
+    typename AgentWarpMergeSortT::TempStorage medium_warp_sort;
   } temp_storage;
 
   AgentSegmentedRadixSortT agent(segment_begin,
@@ -425,16 +119,12 @@ __global__ void DeviceSegmentedSortFallbackKernel(
     // Sort by a single warp
     if (threadIdx.x < SmallAndMediumPolicyT::THREADS_PER_MEDIUM_SEGMENT)
     {
-      sub_warp_merge_sort<IS_DESCENDING,
-                          SmallAndMediumPolicyT::ITEMS_PER_THREAD,
-                          SmallAndMediumPolicyT::THREADS_PER_MEDIUM_SEGMENT,
-                          KeyT,
-                          ValueT>(d_keys_in_origin + segment_begin,
-                                  d_keys_out_orig + segment_begin,
-                                  d_values_in_origin + segment_begin,
-                                  d_values_out_origin + segment_begin,
-                                  num_items,
-                                  temp_storage.medium_warp_sort);
+      AgentWarpMergeSortT().ProcessSegment(num_items,
+                                           d_keys_in_origin + segment_begin,
+                                           d_keys_out_orig + segment_begin,
+                                           d_values_in_origin + segment_begin,
+                                           d_values_out_origin + segment_begin,
+                                           temp_storage.medium_warp_sort);
     }
   }
   else if (num_items < cacheable_tile_size)
@@ -511,28 +201,37 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
   constexpr int threads_per_medium_segment = SegmentedPolicyT::THREADS_PER_MEDIUM_SEGMENT;
   constexpr int threads_per_small_segment = SegmentedPolicyT::THREADS_PER_SMALL_SEGMENT;
 
+  using MediumAgentWarpMergeSortT = AgentSubWarpSort<IS_DESCENDING,
+                                                     items_per_thread,
+                                                     threads_per_medium_segment,
+                                                     KeyT,
+                                                     ValueT,
+                                                     OffsetT>;
+
+  using SmallAgentWarpMergeSortT = AgentSubWarpSort<IS_DESCENDING,
+                                                    items_per_thread,
+                                                    threads_per_small_segment,
+                                                    KeyT,
+                                                    ValueT,
+                                                    OffsetT>;
+
   constexpr auto segments_per_medium_block =
     static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_MEDIUM_BLOCK);
 
   constexpr auto segments_per_small_block =
     static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_SMALL_BLOCK);
 
-  using MediumWarpMergeSortT =
-    WarpMergeSort<KeyT, items_per_thread, threads_per_medium_segment, ValueT>;
-
-  using SmallWarpMergeSortT =
-    WarpMergeSort<KeyT, items_per_thread, threads_per_small_segment, ValueT>;
-
   __shared__ union
   {
-    typename MediumWarpMergeSortT::TempStorage medium[segments_per_medium_block];
-    typename SmallWarpMergeSortT::TempStorage small[segments_per_small_block];
+    typename MediumAgentWarpMergeSortT::TempStorage medium[segments_per_medium_block];
+    typename SmallAgentWarpMergeSortT::TempStorage small[segments_per_small_block];
   } temp_storage;
 
   if (bid < medium_blocks)
   {
     const OffsetT sid_within_block = tid / threads_per_medium_segment;
-    const OffsetT reordered_segment_id = bid * segments_per_medium_block + sid_within_block;
+    const OffsetT reordered_segment_id = bid * segments_per_medium_block
+                                       + sid_within_block;
 
     if (reordered_segment_id < medium_segments)
     {
@@ -543,19 +242,20 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
       OffsetT segment_end   = d_end_offsets[segment_id];
       OffsetT num_items     = segment_end - segment_begin;
 
-      sub_warp_merge_sort<IS_DESCENDING, items_per_thread, threads_per_medium_segment, KeyT, ValueT>(
+      MediumAgentWarpMergeSortT().ProcessSegment(
+        num_items,
         d_keys_in_origin + segment_begin,
         d_keys_out_orig + segment_begin,
         d_values_in_origin + segment_begin,
         d_values_out_origin + segment_begin,
-        num_items,
         temp_storage.medium[sid_within_block]);
     }
   }
   else
   {
     const OffsetT sid_within_block = tid / threads_per_small_segment;
-    const OffsetT reordered_segment_id = (bid - medium_blocks) * segments_per_small_block + sid_within_block;
+    const OffsetT reordered_segment_id = (bid - medium_blocks) * segments_per_small_block
+                                       + sid_within_block;
 
     if (reordered_segment_id < small_segments)
     {
@@ -566,12 +266,12 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
       OffsetT segment_end   = d_end_offsets[segment_id];
       OffsetT num_items     = segment_end - segment_begin;
 
-      sub_warp_merge_sort<IS_DESCENDING, items_per_thread, threads_per_small_segment, KeyT, ValueT>(
+      SmallAgentWarpMergeSortT().ProcessSegment(
+        num_items,
         d_keys_in_origin + segment_begin,
         d_keys_out_orig + segment_begin,
         d_values_in_origin + segment_begin,
         d_values_out_origin + segment_begin,
-        num_items,
         temp_storage.small[sid_within_block]);
     }
   }
