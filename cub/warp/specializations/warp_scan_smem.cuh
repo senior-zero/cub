@@ -59,9 +59,6 @@ struct WarpScanSmem
         /// Whether the logical warp size and the PTX warp size coincide
         IS_ARCH_WARP = (LOGICAL_WARP_THREADS == CUB_WARP_THREADS(PTX_ARCH)),
 
-        /// Whether the logical warp size is a power-of-two
-        IS_POW_OF_TWO = PowerOfTwo<LOGICAL_WARP_THREADS>::VALUE,
-
         /// The number of warp scan steps
         STEPS = Log2<LOGICAL_WARP_THREADS>::VALUE,
 
