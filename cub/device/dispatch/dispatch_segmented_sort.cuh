@@ -480,14 +480,13 @@ struct DispatchSegmentedSort : SelectedPolicy
 
   void *d_temp_storage;
   std::size_t &temp_storage_bytes;
-  const KeyT *d_keys_in;
-  KeyT *d_keys_out;
-  const ValueT *d_values_in;
-  ValueT *d_values_out;
+  DoubleBuffer<KeyT> &d_keys;
+  DoubleBuffer<ValueT> &d_values;
   OffsetT num_items;
   OffsetT num_segments;
   BeginOffsetIteratorT d_begin_offsets;
   EndOffsetIteratorT d_end_offsets;
+  bool is_overwrite_okay;
   cudaStream_t stream;
   bool debug_synchronous;
 
@@ -495,26 +494,24 @@ struct DispatchSegmentedSort : SelectedPolicy
   CUB_RUNTIME_FUNCTION __forceinline__
   DispatchSegmentedSort(void *d_temp_storage,
                         std::size_t &temp_storage_bytes,
-                        const KeyT *d_keys_in,
-                        KeyT *d_keys_out,
-                        const ValueT *d_values_in,
-                        ValueT *d_values_out,
+                        DoubleBuffer<KeyT> &d_keys,
+                        DoubleBuffer<ValueT> &d_values,
                         OffsetT num_items,
                         OffsetT num_segments,
                         BeginOffsetIteratorT d_begin_offsets,
                         EndOffsetIteratorT d_end_offsets,
+                        bool is_overwrite_okay,
                         cudaStream_t stream,
                         bool debug_synchronous)
       : d_temp_storage(d_temp_storage)
       , temp_storage_bytes(temp_storage_bytes)
-      , d_keys_in(d_keys_in)
-      , d_keys_out(d_keys_out)
-      , d_values_in(d_values_in)
-      , d_values_out(d_values_out)
+      , d_keys(d_keys)
+      , d_values(d_values)
       , num_items(num_items)
       , num_segments(num_segments)
       , d_begin_offsets(d_begin_offsets)
       , d_end_offsets(d_end_offsets)
+      , is_overwrite_okay(is_overwrite_okay)
       , stream(stream)
       , debug_synchronous(debug_synchronous)
   {}
@@ -630,11 +627,11 @@ struct DispatchSegmentedSort : SelectedPolicy
 
       cub::DeviceDoubleBuffer<KeyT> d_keys_remaining_passes(
         keys_allocation.Get(),
-        d_keys_out);
+        d_keys.Alternate());
 
       cub::DeviceDoubleBuffer<ValueT> d_values_remaining_passes(
         values_allocation.Get(),
-        d_values_out);
+        d_values.Alternate());
 
       if (is_num_passes_odd)
       {
@@ -670,14 +667,13 @@ struct DispatchSegmentedSort : SelectedPolicy
   CUB_RUNTIME_FUNCTION __forceinline__ static cudaError_t
   Dispatch(void *d_temp_storage,
            std::size_t &temp_storage_bytes,
-           const KeyT *d_keys_in,
-           KeyT *d_keys_out,
-           const ValueT *d_values_in,
-           ValueT *d_values_out,
+           DoubleBuffer<KeyT> &d_keys,
+           DoubleBuffer<ValueT> &d_values,
            OffsetT num_items,
            OffsetT num_segments,
            BeginOffsetIteratorT d_begin_offsets,
            EndOffsetIteratorT d_end_offsets,
+           bool is_overwrite_okay,
            cudaStream_t stream,
            bool debug_synchronous)
   {
@@ -697,14 +693,13 @@ struct DispatchSegmentedSort : SelectedPolicy
       // Create dispatch functor
       DispatchSegmentedSort dispatch(d_temp_storage,
                                      temp_storage_bytes,
-                                     d_keys_in,
-                                     d_keys_out,
-                                     d_values_in,
-                                     d_values_out,
+                                     d_keys,
+                                     d_values,
                                      num_items,
                                      num_segments,
                                      d_begin_offsets,
                                      d_end_offsets,
+                                     is_overwrite_okay,
                                      stream,
                                      debug_synchronous);
 
@@ -796,11 +791,11 @@ private:
                 EndOffsetIteratorT,
                 OffsetT>,
               large_and_medium_segments_reordering.Get(),
-              d_keys_in,
-              d_keys_out,
+              d_keys.Current(),
+              d_keys.Alternate(),
               d_keys_remaining_passes,
-              d_values_in,
-              d_values_out,
+              d_values.Current(),
+              d_values.Alternate(),
               d_values_remaining_passes,
               d_begin_offsets,
               d_end_offsets);
@@ -869,10 +864,10 @@ private:
               small_segments_reordering.Get(),
               large_and_medium_segments_reordering.Get() + num_segments -
               medium_segments,
-              d_keys_in,
-              d_keys_out,
-              d_values_in,
-              d_values_out,
+              d_keys.Current(),
+              d_keys.Alternate(),
+              d_values.Current(),
+              d_values.Alternate(),
               d_begin_offsets,
               d_end_offsets);
 
@@ -931,11 +926,11 @@ private:
                                               BeginOffsetIteratorT,
                                               EndOffsetIteratorT,
                                               OffsetT>,
-            d_keys_in,
-            d_keys_out,
+            d_keys.Current(),
+            d_keys.Alternate(),
             d_keys_remaining_passes,
-            d_values_in,
-            d_values_out,
+            d_values.Current(),
+            d_values.Alternate(),
             d_values_remaining_passes,
             d_begin_offsets,
             d_end_offsets);
