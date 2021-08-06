@@ -405,7 +405,7 @@ struct DispatchThreeWayPartitionIf
       }
 
       // Invoke select_if_kernel
-      thrust::cuda_cub::launcher::triple_chevron(
+      THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
         scan_grid_size, three_way_partition_config.block_threads, 0, stream
       ).doit(three_way_partition_kernel,
              d_in,
