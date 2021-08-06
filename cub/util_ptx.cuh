@@ -432,7 +432,7 @@ __device__ __forceinline__ unsigned int WarpId()
 
 /**
  *
- * @tparam LOGICAL_WARP_THREADS Must be a power-of-two (less or equal to 32)
+ * @tparam LOGICAL_WARP_THREADS
  * @param warp_id
  * @return
  */
@@ -440,15 +440,16 @@ template <int LOGICAL_WARP_THREADS,
           int PTX_ARCH>
 __device__ __forceinline__ unsigned int WarpMask(unsigned int warp_id)
 {
-  constexpr bool IS_ARCH_WARP = LOGICAL_WARP_THREADS ==
+  constexpr bool is_pow_of_two = PowerOfTwo<LOGICAL_WARP_THREADS>::VALUE;
+  constexpr bool is_arch_warp = LOGICAL_WARP_THREADS ==
                                 CUB_WARP_THREADS(PTX_ARCH);
 
   unsigned int member_mask =
-    0xffffffffu >> (CUB_WARP_THREADS(PTX_ARCH) - LOGICAL_WARP_THREADS);
+    0xFFFFFFFFu >> (CUB_WARP_THREADS(PTX_ARCH) - LOGICAL_WARP_THREADS);
 
-  if (!IS_ARCH_WARP)
+  if (is_pow_of_two && !is_arch_warp)
   {
-    member_mask = member_mask << (warp_id * LOGICAL_WARP_THREADS);
+    member_mask <<= warp_id * LOGICAL_WARP_THREADS;
   }
 
   return member_mask;
