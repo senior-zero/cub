@@ -290,6 +290,7 @@ sub_warp_merge_sort(const KeyT *keys_input,
 
 template <bool IS_DESCENDING,
           typename SegmentedPolicyT,
+          typename SmallAndMediumPolicyT,
           typename KeyT,
           typename ValueT,
           typename BeginOffsetIteratorT,
@@ -325,15 +326,11 @@ __global__ void DeviceSegmentedSortFallbackKernel(
 
   using WarpReduceT = cub::WarpReduce<KeyT>;
 
-  constexpr int items_per_medium_segment = 9;
-  constexpr int threads_per_medium_segment = 32;
-  constexpr int sub_warp_sort_threshold = items_per_medium_segment *
-                                          threads_per_medium_segment;
-
-  using WarpMergeSortT = WarpMergeSort<KeyT,
-                                       items_per_medium_segment,
-                                       threads_per_medium_segment,
-                                       ValueT>;
+  using WarpMergeSortT =
+    WarpMergeSort<KeyT,
+                  SmallAndMediumPolicyT::ITEMS_PER_THREAD,
+                  SmallAndMediumPolicyT::THREADS_PER_MEDIUM_SEGMENT,
+                  ValueT>;
 
   __shared__ union
   {
@@ -350,16 +347,17 @@ __global__ void DeviceSegmentedSortFallbackKernel(
   constexpr int begin_bit = 0;
   constexpr int end_bit = sizeof(KeyT) * 8;
 
-  constexpr int small_tile_size = SegmentedPolicyT::BLOCK_THREADS *
-                                  SegmentedPolicyT::ITEMS_PER_THREAD;
+  constexpr int cacheable_tile_size = SegmentedPolicyT::BLOCK_THREADS *
+                                      SegmentedPolicyT::ITEMS_PER_THREAD;
 
-  if (num_items <= sub_warp_sort_threshold)
+  if (num_items <= SmallAndMediumPolicyT::MEDIUM_SEGMENT_MAX_SIZE)
   {
-    if (threadIdx.x < threads_per_medium_segment)
+    // Sort by a single warp
+    if (threadIdx.x < SmallAndMediumPolicyT::THREADS_PER_MEDIUM_SEGMENT)
     {
       sub_warp_merge_sort<IS_DESCENDING,
-                          items_per_medium_segment,
-                          threads_per_medium_segment,
+                          SmallAndMediumPolicyT::ITEMS_PER_THREAD,
+                          SmallAndMediumPolicyT::THREADS_PER_MEDIUM_SEGMENT,
                           KeyT,
                           ValueT>(d_keys_in_origin + segment_begin,
                                   d_keys_out_orig + segment_begin,
@@ -369,8 +367,9 @@ __global__ void DeviceSegmentedSortFallbackKernel(
                                   temp_storage.medium_warp_sort);
     }
   }
-  else if (num_items < small_tile_size)
+  else if (num_items < cacheable_tile_size)
   {
+    // Sort by a CTA if data fits into shared memory
     agent.ProcessSmallSegment(begin_bit,
                               end_bit,
                               d_keys_in_origin,
@@ -380,6 +379,7 @@ __global__ void DeviceSegmentedSortFallbackKernel(
   }
   else
   {
+    // Sort by a CTA with multiple reads from global memory
     int current_bit = begin_bit;
     int pass_bits = CUB_MIN(SegmentedPolicyT::RADIX_BITS, (end_bit - current_bit));
 
@@ -888,8 +888,9 @@ struct DispatchSegmentedSort : SelectedPolicy
       else
       {
         error =
-          SortWithoutReordering<LargeSegmentPolicyT>(d_keys_remaining_passes,
-                                                     d_values_remaining_passes);
+          SortWithoutReordering<LargeSegmentPolicyT, SmallAndMediumPolicyT>(
+            d_keys_remaining_passes,
+            d_values_remaining_passes);
       }
     } while (false);
 
@@ -1124,7 +1125,8 @@ private:
     return error;
   }
 
-  template <typename LargeSegmentPolicyT>
+  template <typename LargeSegmentPolicyT,
+            typename SmallAndMediumPolicyT>
   CUB_RUNTIME_FUNCTION __forceinline__ cudaError_t SortWithoutReordering(
     cub::DeviceDoubleBuffer<KeyT> &d_keys_remaining_passes,
     cub::DeviceDoubleBuffer<ValueT> &d_values_remaining_passes)
@@ -1153,6 +1155,7 @@ private:
                                                             stream)
       .doit(DeviceSegmentedSortFallbackKernel<IS_DESCENDING,
                                               LargeSegmentPolicyT,
+                                              SmallAndMediumPolicyT,
                                               KeyT,
                                               ValueT,
                                               BeginOffsetIteratorT,
