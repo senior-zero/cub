@@ -238,9 +238,9 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
       const OffsetT segment_id =
         d_medium_segments_reordering[reordered_segment_id];
 
-      OffsetT segment_begin = d_begin_offsets[segment_id];
-      OffsetT segment_end   = d_end_offsets[segment_id];
-      OffsetT num_items     = segment_end - segment_begin;
+      const OffsetT segment_begin = d_begin_offsets[segment_id];
+      const OffsetT segment_end   = d_end_offsets[segment_id];
+      const OffsetT num_items     = segment_end - segment_begin;
 
       MediumAgentWarpMergeSortT().ProcessSegment(
         num_items,
@@ -262,9 +262,9 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
       const OffsetT segment_id =
         d_small_segments_reordering[reordered_segment_id];
 
-      OffsetT segment_begin = d_begin_offsets[segment_id];
-      OffsetT segment_end   = d_end_offsets[segment_id];
-      OffsetT num_items     = segment_end - segment_begin;
+      const OffsetT segment_begin = d_begin_offsets[segment_id];
+      const OffsetT segment_end   = d_end_offsets[segment_id];
+      const OffsetT num_items     = segment_end - segment_begin;
 
       SmallAgentWarpMergeSortT().ProcessSegment(
         num_items,

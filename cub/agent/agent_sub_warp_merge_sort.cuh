@@ -50,10 +50,6 @@ public:
   using TempStorage = typename WarpMergeSortT::TempStorage;
 
   __device__ __forceinline__
-  AgentSubWarpSort()
-  {}
-
-  __device__ __forceinline__
   void ProcessSegment(int segment_size,
                       const KeyT *keys_input,
                       KeyT *keys_output,
@@ -73,16 +69,90 @@ public:
       }
     };
 
+    WarpMergeSortT warp_merge_sort(temp_storage);
+
+    if (segment_size < 3)
+    {
+      ShortCircuit(warp_merge_sort.linear_tid,
+                   segment_size,
+                   keys_input,
+                   keys_output,
+                   values_input,
+                   values_output,
+                   binary_op);
+    }
+    else
+    {
+      KeyT keys[ITEMS_PER_THREAD];
+      ValueT values[ITEMS_PER_THREAD];
+
+      // For FP64 the difference is:
+      // Lowest() -> -1.79769e+308 = 00...00b -> TwiddleIn -> -0 = 10...00b
+      // LOWEST   -> -nan          = 11...11b -> TwiddleIn ->  0 = 00...00b
+
+      using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
+      UnsignedBitsT default_key_bits = IS_DESCENDING ? Traits<KeyT>::LOWEST_KEY
+                                                     : Traits<KeyT>::MAX_KEY;
+      KeyT oob_default = reinterpret_cast<KeyT &>(default_key_bits);
+
+      Load(warp_merge_sort.linear_tid,
+           warp_merge_sort.member_mask,
+           segment_size,
+           keys_input,
+           oob_default,
+           keys,
+           temp_storage.Alias().keys_shared);
+
+      if (!KEYS_ONLY)
+      {
+        Load(warp_merge_sort.linear_tid,
+             warp_merge_sort.member_mask,
+             segment_size,
+             values_input,
+             values,
+             temp_storage.Alias().items_shared);
+      }
+
+      warp_merge_sort.Sort(keys, values, binary_op, segment_size, oob_default);
+
+      Store(warp_merge_sort.linear_tid,
+            warp_merge_sort.member_mask,
+            segment_size,
+            keys_output,
+            keys,
+            temp_storage.Alias().keys_shared);
+
+      if (!KEYS_ONLY)
+      {
+        Store(warp_merge_sort.linear_tid,
+              warp_merge_sort.member_mask,
+              segment_size,
+              values_output,
+              values,
+              temp_storage.Alias().items_shared);
+      }
+    }
+  }
+
+private:
+  template <typename CompareOpT>
+  __device__ __forceinline__
+  void ShortCircuit(
+    unsigned int linear_tid,
+    OffsetT segment_size,
+    const KeyT *keys_input,
+    KeyT *keys_output,
+    const ValueT *values_input,
+    ValueT *values_output,
+    CompareOpT binary_op)
+  {
     if (segment_size == 0)
     {
       return;
     }
-
-    WarpMergeSortT warp_merge_sort(temp_storage);
-
-    if (segment_size == 1)
+    else if (segment_size == 1)
     {
-      if (warp_merge_sort.linear_tid == 0)
+      if (linear_tid == 0)
       {
         keys_output[0] = keys_input[0];
 
@@ -91,12 +161,10 @@ public:
           values_output[0] = values_input[0];
         }
       }
-
-      return;
     }
     else if (segment_size == 2)
     {
-      if (warp_merge_sort.linear_tid == 0)
+      if (linear_tid == 0)
       {
         KeyT lhs = keys_input[0];
         KeyT rhs = keys_input[1];
@@ -124,90 +192,35 @@ public:
           }
         }
       }
-
-      return;
     }
-
-    KeyT keys[ITEMS_PER_THREAD];
-    ValueT values[ITEMS_PER_THREAD];
-
-    // For FP64 the difference is:
-    // Lowest() -> -1.79769e+308 = 00...00b -> TwiddleIn -> -0 = 10...00b
-    // LOWEST   -> -nan          = 11...11b -> TwiddleIn ->  0 = 00...00b
-
-    using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
-    UnsignedBitsT default_key_bits = IS_DESCENDING ? Traits<KeyT>::LOWEST_KEY
-                                                   : Traits<KeyT>::MAX_KEY;
-    KeyT oob_default = reinterpret_cast<KeyT &>(default_key_bits);
-
-    sub_warp_load(warp_merge_sort.linear_tid,
-                  segment_size,
-                  warp_merge_sort.member_mask,
-                  keys_input,
-                  oob_default,
-                  keys,
-                  temp_storage.Alias().keys_shared);
-
-    if (!KEYS_ONLY)
-    {
-      sub_warp_load(warp_merge_sort.linear_tid,
-                    segment_size,
-                    warp_merge_sort.member_mask,
-                    values_input,
-                    values,
-                    temp_storage.Alias().items_shared);
-    }
-
-    // 2) Sort
-
-    warp_merge_sort.Sort(keys, values, binary_op, segment_size, oob_default);
-
-    sub_warp_store(warp_merge_sort.linear_tid,
-                   segment_size,
-                   warp_merge_sort.member_mask,
-                   keys_output,
-                   keys,
-                   temp_storage.Alias().keys_shared);
-
-    if (!KEYS_ONLY)
-    {
-      sub_warp_store(warp_merge_sort.linear_tid,
-                     segment_size,
-                     warp_merge_sort.member_mask,
-                     values_output,
-                     values,
-                     temp_storage.Alias().items_shared);
-    }
-
   }
 
-private:
   template <typename T>
   __device__ __forceinline__
-  void sub_warp_load(int lane_id,
-                     int segment_size,
-                     int group_mask,
-                     const T *input,
-                     T oob_default,
-                     T (&keys)[ITEMS_PER_THREAD],
-                     T *cache)
+  void Load(unsigned int lane_id,
+            unsigned int group_mask,
+            OffsetT segment_size,
+            const T *input,
+            T oob_default,
+            T (&keys)[ITEMS_PER_THREAD],
+            T *cache)
   {
     for (int item = 0; item < ITEMS_PER_THREAD; item++)
     {
       keys[item] = oob_default;
     }
 
-    sub_warp_load(lane_id, segment_size, group_mask, input, keys, cache);
+    Load(lane_id, group_mask, segment_size, input, keys, cache);
   }
 
   template <typename T>
   __device__ __forceinline__
-  void sub_warp_load(int lane_id,
-                     int segment_size,
-                     int group_mask,
-                     const T *input,
-                     T (&keys)[ITEMS_PER_THREAD],
-                     T *cache)
+  void Load(unsigned int lane_id,
+            unsigned int group_mask,
+            OffsetT segment_size,
+            const T *input,
+            T (&keys)[ITEMS_PER_THREAD],
+            T *cache)
   {
     if (ITEMS_PER_THREAD > 10)
     {
@@ -258,12 +271,12 @@ private:
 
   template <typename T>
   __device__ __forceinline__
-  void sub_warp_store(int lane_id,
-                      int segment_size,
-                      int group_mask,
-                      T *output,
-                      T (&keys)[ITEMS_PER_THREAD],
-                      T *cache)
+  void Store(unsigned int lane_id,
+             unsigned int group_mask,
+             OffsetT segment_size,
+             T *output,
+             T (&keys)[ITEMS_PER_THREAD],
+             T *cache)
   {
     if (ITEMS_PER_THREAD > 10)
     {
