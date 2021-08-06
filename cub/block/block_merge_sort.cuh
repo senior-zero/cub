@@ -253,7 +253,7 @@ public:
    * \tparam IS_LAST_TILE True if valid_items isn't equal to the ITEMS_PER_TILE
    */
   template <typename CompareOp,
-    bool IS_LAST_TILE = true>
+            bool IS_LAST_TILE = true>
   __device__ __forceinline__ void
   Sort(KeyT (&keys)[ITEMS_PER_THREAD],     ///< [in-out] Keys to sort
        ValueT (&items)[ITEMS_PER_THREAD],  ///< [in-out] Values to sort

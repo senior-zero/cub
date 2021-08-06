@@ -254,11 +254,6 @@ public:
     return thrust::raw_pointer_cast(d_values.data());
   }
 
-  MaskedValueT *get_d_values()
-  {
-    return thrust::raw_pointer_cast(d_values.data());
-  }
-
   const OffsetT *get_d_offsets() const
   {
     return thrust::raw_pointer_cast(d_offsets.data());
@@ -1119,6 +1114,41 @@ void InputTestDescending(Input<KeyT, OffsetT> &input)
   }
 }
 
+
+template <typename T,
+          typename OffsetT>
+bool compare_two_outputs(const thrust::host_vector<OffsetT> &offsets,
+                         const thrust::host_vector<T> &lhs,
+                         const thrust::host_vector<T> &rhs)
+{
+  const std::size_t num_segments = offsets.size() - 1;
+
+  for (std::size_t segment_id = 0; segment_id < num_segments; segment_id++)
+  {
+    auto lhs_begin = lhs.cbegin() + offsets[segment_id];
+    auto lhs_end = lhs.cbegin() + offsets[segment_id + 1];
+    auto rhs_begin = rhs.cbegin() + offsets[segment_id];
+
+    auto err = thrust::mismatch(lhs_begin, lhs_end, rhs_begin);
+
+    if (err.first != lhs_end)
+    {
+      const auto idx = thrust::distance(lhs_begin, err.first);
+      const auto segment_size = std::distance(lhs_begin, lhs_end);
+
+      std::cerr << "Mismatch in segment " << segment_id
+                << " at position " << idx << " / " << segment_size
+                << ": "
+                << static_cast<std::int64_t>(lhs_begin[idx]) << " vs "
+                << static_cast<std::int64_t>(rhs_begin[idx]) << std::endl;
+
+      return false;
+    }
+  }
+
+  return true;
+}
+
 template <typename KeyT,
           typename OffsetT>
 void InputTestDescendingRandom(Input<KeyT, OffsetT> &input)
@@ -1182,7 +1212,7 @@ void InputTestDescendingRandom(Input<KeyT, OffsetT> &input)
 
     h_keys_output = keys_output;
 
-    AssertEquals(h_keys, h_keys_output);
+    AssertTrue(compare_two_outputs(h_offsets, h_keys, h_keys_output));
 
     input.shuffle();
   }
@@ -1249,7 +1279,7 @@ void InputTestRandom(Input<KeyT, OffsetT> &input)
 
     h_keys_output = keys_output;
 
-    AssertEquals(h_keys, h_keys_output);
+    AssertTrue(compare_two_outputs(h_offsets, h_keys, h_keys_output));
 
     input.shuffle();
   }
@@ -1328,8 +1358,10 @@ void InputTestPairsRandom(Input<KeyT, OffsetT, ValueT> &input)
     }
 
     h_keys_output = keys_output;
+    h_values_output = values_output;
 
-    AssertEquals(h_keys, h_keys_output);
+    AssertTrue(compare_two_outputs(h_offsets, h_keys, h_keys_output));
+    AssertTrue(compare_two_outputs(h_offsets, h_values, h_values_output));
 
     input.shuffle();
   }
@@ -1374,6 +1406,7 @@ void InputTestPairsDescendingRandom(Input<KeyT, OffsetT, ValueT> &input)
   for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
   {
     thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
+    thrust::fill(values_output.begin(), values_output.end(), ValueT{});
 
     for (std::size_t i = 0; i < input.get_num_items(); i++)
     {
@@ -1411,9 +1444,11 @@ void InputTestPairsDescendingRandom(Input<KeyT, OffsetT, ValueT> &input)
                           thrust::greater<KeyT>{});
     }
 
-    h_keys_output = keys_output;
+    thrust::copy(keys_output.begin(), keys_output.end(), h_keys_output.begin());
+    thrust::copy(values_output.begin(), values_output.end(), h_values_output.begin());
 
-    AssertEquals(h_keys, h_keys_output);
+    AssertTrue(compare_two_outputs(h_offsets, h_keys, h_keys_output));
+    AssertTrue(compare_two_outputs(h_offsets, h_values, h_values_output));
 
     input.shuffle();
   }
@@ -1673,7 +1708,6 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  TestKeysAndPairs<std::int8_t,   std::uint32_t>();
   TestKeysAndPairs<std::uint8_t,  std::uint32_t>();
   TestKeysAndPairs<std::uint16_t, std::uint32_t>();
   TestKeysAndPairs<std::uint32_t, std::uint32_t>();
@@ -1681,6 +1715,7 @@ int main(int argc, char** argv)
   TestKeysAndPairs<std::uint64_t, std::uint64_t>();
 
   TestPairs<std::uint8_t, std::uint64_t, std::uint32_t>();
+  TestPairs<std::int64_t, std::uint64_t, std::uint32_t>();
 
   return 0;
 }

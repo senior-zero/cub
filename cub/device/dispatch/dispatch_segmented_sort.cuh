@@ -56,13 +56,18 @@ __device__ void sub_warp_load(int lane_id,
                               int segment_size,
                               int group_mask,
                               const T *input,
+                              T oob_default,
                               T (&keys)[items_per_thread],
                               T *cache)
 {
+  for (int item = 0; item < items_per_thread; item++)
+  {
+    keys[item] = oob_default;
+  }
+
   if (items_per_thread > 10)
   {
     // COALESCED_LOAD
-
 #pragma unroll
     for (int item = 0; item < items_per_thread; item++)
     {
@@ -83,6 +88,62 @@ __device__ void sub_warp_load(int lane_id,
     __syncwarp(group_mask);
 
 // load blocked
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = items_per_thread * lane_id + item;
+      keys[item]    = cache[idx];
+    }
+    __syncwarp(group_mask);
+  }
+  else
+  {
+    // Naive load
+
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const unsigned int idx = lane_id * items_per_thread + item;
+
+      if (idx < segment_size)
+      {
+        keys[item] = input[idx];
+      }
+    }
+  }
+}
+
+template <int items_per_thread,
+  int threads_per_segment,
+  typename T>
+__device__ void sub_warp_load(int lane_id,
+                              int segment_size,
+                              int group_mask,
+                              const T *input,
+                              T (&keys)[items_per_thread],
+                              T *cache)
+{
+  if (items_per_thread > 10)
+  {
+    // COALESCED_LOAD
+#pragma unroll
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = threads_per_segment * item + lane_id;
+
+      if (idx < segment_size)
+      {
+        keys[item] = input[idx];
+      }
+    }
+
+    // store in shared
+    for (int item = 0; item < items_per_thread; item++)
+    {
+      const int idx = threads_per_segment * item + lane_id;
+      cache[idx]    = keys[item];
+    }
+    __syncwarp(group_mask);
+
+    // load blocked
     for (int item = 0; item < items_per_thread; item++)
     {
       const int idx = items_per_thread * lane_id + item;
@@ -248,10 +309,20 @@ sub_warp_merge_sort(const KeyT *keys_input,
   KeyT keys[items_per_thread];
   ValueT values[items_per_thread];
 
+  // For FP64 the difference is:
+  // Lowest() -> -1.79769e+308 = 00...00b -> TwiddleIn -> -0 = 10...00b
+  // LOWEST   -> -nan          = 11...11b -> TwiddleIn ->  0 = 00...00b
+
+  using UnsignedBitsT = typename Traits<KeyT>::UnsignedBits;
+  UnsignedBitsT default_key_bits = IS_DESCENDING ? Traits<KeyT>::LOWEST_KEY
+                                                 : Traits<KeyT>::MAX_KEY;
+  KeyT oob_default = reinterpret_cast<KeyT &>(default_key_bits);
+
   sub_warp_load<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
                                                        segment_size,
                                                        warp_merge_sort.member_mask,
                                                        keys_input,
+                                                       oob_default,
                                                        keys,
                                                        temp_storage.Alias().keys_shared);
 
@@ -267,7 +338,6 @@ sub_warp_merge_sort(const KeyT *keys_input,
 
   // 2) Sort
 
-  KeyT oob_default = keys_input[0];
   warp_merge_sort.Sort(keys, values, binary_op, segment_size, oob_default);
 
   sub_warp_store<items_per_thread, threads_per_segment>(warp_merge_sort.linear_tid,
