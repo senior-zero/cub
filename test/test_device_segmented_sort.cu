@@ -364,6 +364,40 @@ public:
 
 template <typename KeyT,
           typename OffsetT>
+void TestZeroSegmentsBuffer()
+{
+  const OffsetT *d_offsets = nullptr;
+  cub::DoubleBuffer<KeyT> buffer(nullptr, nullptr);
+
+  std::size_t temp_storage_bytes = 42ul;
+  CubDebugExit(cub::DeviceSegmentedSort::SortKeys(nullptr,
+                                                  temp_storage_bytes,
+                                                  buffer,
+                                                  OffsetT{},
+                                                  OffsetT{},
+                                                  d_offsets,
+                                                  d_offsets + 1,
+                                                  0,
+                                                  true));
+
+  AssertEquals(temp_storage_bytes, 0ul);
+
+  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
+  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
+
+  CubDebugExit(cub::DeviceSegmentedSort::SortKeys(d_tmp_storage,
+                                                  temp_storage_bytes,
+                                                  buffer,
+                                                  OffsetT{},
+                                                  OffsetT{},
+                                                  d_offsets,
+                                                  d_offsets + 1,
+                                                  0,
+                                                  true));
+  }
+
+template <typename KeyT,
+          typename OffsetT>
 void TestZeroSegments()
 {
   const OffsetT *d_offsets = nullptr;
@@ -437,6 +471,40 @@ void TestZeroSegmentsDescending()
 }
 
 template <typename KeyT,
+          typename OffsetT>
+void TestZeroSegmentsDescendingBuffer()
+{
+  const OffsetT *d_offsets = nullptr;
+  cub::DoubleBuffer<KeyT> buffer(nullptr, nullptr);
+
+  std::size_t temp_storage_bytes = 42ul;
+  CubDebugExit(cub::DeviceSegmentedSort::SortKeysDescending(nullptr,
+                                                            temp_storage_bytes,
+                                                            buffer,
+                                                            OffsetT{},
+                                                            OffsetT{},
+                                                            d_offsets,
+                                                            d_offsets + 1,
+                                                            0,
+                                                            true));
+
+  AssertEquals(temp_storage_bytes, 0ul);
+
+  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
+  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
+
+  CubDebugExit(cub::DeviceSegmentedSort::SortKeysDescending(d_tmp_storage,
+                                                            temp_storage_bytes,
+                                                            buffer,
+                                                            OffsetT{},
+                                                            OffsetT{},
+                                                            d_offsets,
+                                                            d_offsets + 1,
+                                                            0,
+                                                            true));
+  }
+
+template <typename KeyT,
           typename ValueT,
           typename OffsetT>
 void TestZeroSegmentsPairs()
@@ -484,6 +552,45 @@ void TestZeroSegmentsPairs()
 template <typename KeyT,
           typename ValueT,
           typename OffsetT>
+void TestZeroSegmentsPairsBuffer()
+{
+  const OffsetT *d_offsets = nullptr;
+
+  cub::DoubleBuffer<KeyT> keys(nullptr, nullptr);
+  cub::DoubleBuffer<ValueT> values(nullptr, nullptr);
+
+  std::size_t temp_storage_bytes = 42ul;
+  CubDebugExit(cub::DeviceSegmentedSort::SortPairs(nullptr,
+                                                   temp_storage_bytes,
+                                                   keys,
+                                                   values,
+                                                   OffsetT{},
+                                                   OffsetT{},
+                                                   d_offsets,
+                                                   d_offsets + 1,
+                                                   0,
+                                                   true));
+
+  AssertEquals(temp_storage_bytes, 0ul);
+
+  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
+  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
+
+  CubDebugExit(cub::DeviceSegmentedSort::SortPairs(d_tmp_storage,
+                                                   temp_storage_bytes,
+                                                   keys,
+                                                   values,
+                                                   OffsetT{},
+                                                   OffsetT{},
+                                                   d_offsets,
+                                                   d_offsets + 1,
+                                                   0,
+                                                   true));
+  }
+
+template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
 void TestZeroSegmentsDescendingPairs()
 {
   const OffsetT *d_offsets = nullptr;
@@ -525,6 +632,44 @@ void TestZeroSegmentsDescendingPairs()
                                                              0,
                                                              true));
 }
+
+template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
+void TestZeroSegmentsDescendingPairsBuffer()
+{
+  const OffsetT *d_offsets = nullptr;
+  cub::DoubleBuffer<KeyT> keys(nullptr, nullptr);
+  cub::DoubleBuffer<ValueT> values(nullptr, nullptr);
+
+  std::size_t temp_storage_bytes = 42ul;
+  CubDebugExit(cub::DeviceSegmentedSort::SortPairsDescending(nullptr,
+                                                             temp_storage_bytes,
+                                                             keys,
+                                                             values,
+                                                             OffsetT{},
+                                                             OffsetT{},
+                                                             d_offsets,
+                                                             d_offsets + 1,
+                                                             0,
+                                                             true));
+
+  AssertEquals(temp_storage_bytes, 0ul);
+
+  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
+  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
+
+  CubDebugExit(cub::DeviceSegmentedSort::SortPairsDescending(d_tmp_storage,
+                                                             temp_storage_bytes,
+                                                             keys,
+                                                             values,
+                                                             OffsetT{},
+                                                             OffsetT{},
+                                                             d_offsets,
+                                                             d_offsets + 1,
+                                                             0,
+                                                             true));
+  }
 
 template <typename KeyT,
           typename OffsetT>
@@ -919,7 +1064,9 @@ template <typename KeyT,
 void IndependentTest()
 {
   TestZeroSegments<KeyT, OffsetT>();
+  TestZeroSegmentsBuffer<KeyT, OffsetT>();
   TestZeroSegmentsDescending<KeyT, OffsetT>();
+  TestZeroSegmentsDescendingBuffer<KeyT, OffsetT>();
 }
 
 template <typename KeyT,
@@ -928,7 +1075,9 @@ template <typename KeyT,
 void IndependentTestPairs()
 {
   TestZeroSegmentsPairs<KeyT, ValueT, OffsetT>();
+  TestZeroSegmentsPairsBuffer<KeyT, ValueT, OffsetT>();
   TestZeroSegmentsDescendingPairs<KeyT, ValueT, OffsetT>();
+  TestZeroSegmentsDescendingPairsBuffer<KeyT, ValueT, OffsetT>();
 }
 
 template <typename KeyT,
