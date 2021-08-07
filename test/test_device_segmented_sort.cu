@@ -1092,7 +1092,7 @@ void TestSameSizeSegmentsBuffer(OffsetT segment_size, OffsetT segments)
                                                   true));
 
   const std::size_t items_selected =
-    keys.selector
+    keys.selector == 1
       ? thrust::count(keys_output.begin(), keys_output.end(), KeyT{42})
       : thrust::count(keys_input.begin(), keys_input.end(), KeyT{42});
   AssertEquals(items_selected, num_items);

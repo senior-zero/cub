@@ -657,10 +657,11 @@ struct DispatchSegmentedSort : SelectedPolicy
             d_keys_remaining_passes,
             d_values_remaining_passes);
       }
-    } while (false);
 
-    d_keys.selector = GetFinalSelector(d_keys.selector, radix_bits);
-    d_values.selector = GetFinalSelector(d_values.selector, radix_bits);
+      d_keys.selector = GetFinalSelector(d_keys.selector, radix_bits);
+      d_values.selector = GetFinalSelector(d_values.selector, radix_bits);
+
+    } while (false);
 
     return error;
   }

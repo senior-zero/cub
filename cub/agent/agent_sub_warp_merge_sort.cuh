@@ -146,19 +146,21 @@ private:
     ValueT *values_output,
     CompareOpT binary_op)
   {
-    if (segment_size == 0)
-    {
-      return;
-    }
-    else if (segment_size == 1)
+    if (segment_size == 1)
     {
       if (linear_tid == 0)
       {
-        keys_output[0] = keys_input[0];
+        if (keys_input != keys_output)
+        {
+          keys_output[0] = keys_input[0];
+        }
 
         if (!KEYS_ONLY)
         {
-          values_output[0] = values_input[0];
+          if (values_input != values_output)
+          {
+            values_output[0] = values_input[0];
+          }
         }
       }
     }
