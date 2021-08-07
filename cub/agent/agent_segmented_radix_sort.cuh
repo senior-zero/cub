@@ -90,12 +90,12 @@ struct AgentSegmentedRadixSort
     typename BlockUpsweepT::TempStorage upsweep;
     typename BlockDownsweepT::TempStorage downsweep;
 
-    struct
+    struct UnboundBlockSort
     {
       volatile OffsetT reverse_counts_in[RADIX_DIGITS];
       volatile OffsetT reverse_counts_out[RADIX_DIGITS];
       typename DigitScanT::TempStorage scan;
-    };
+    } unbound_sort;
 
     // Small segment handlers
     typename BlockKeyLoadT::TempStorage keys_load;
@@ -218,7 +218,7 @@ struct AgentSegmentedRadixSort
 
         if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
         {
-          temp_storage.reverse_counts_in[bin_idx] = bin_count[track];
+          temp_storage.unbound_sort.reverse_counts_in[bin_idx] = bin_count[track];
         }
       }
 
@@ -231,14 +231,14 @@ struct AgentSegmentedRadixSort
 
         if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
         {
-          bin_count[track] = temp_storage.reverse_counts_in[RADIX_DIGITS - bin_idx - 1];
+          bin_count[track] = temp_storage.unbound_sort.reverse_counts_in[RADIX_DIGITS - bin_idx - 1];
         }
       }
     }
 
     // Scan
     OffsetT bin_offset[BINS_TRACKED_PER_THREAD]; // The global scatter base offset for each digit value in this pass (valid in the first RADIX_DIGITS threads)
-    DigitScanT(temp_storage.scan).ExclusiveSum(bin_count, bin_offset);
+    DigitScanT(temp_storage.unbound_sort.scan).ExclusiveSum(bin_count, bin_offset);
 
     #pragma unroll
     for (int track = 0; track < BINS_TRACKED_PER_THREAD; ++track)
@@ -256,7 +256,7 @@ struct AgentSegmentedRadixSort
 
         if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
         {
-          temp_storage.reverse_counts_out[threadIdx.x] = bin_offset[track];
+          temp_storage.unbound_sort.reverse_counts_out[threadIdx.x] = bin_offset[track];
         }
       }
 
@@ -269,7 +269,7 @@ struct AgentSegmentedRadixSort
 
         if ((BLOCK_THREADS == RADIX_DIGITS) || (bin_idx < RADIX_DIGITS))
         {
-          bin_offset[track] = temp_storage.reverse_counts_out[RADIX_DIGITS - bin_idx - 1];
+          bin_offset[track] = temp_storage.unbound_sort.reverse_counts_out[RADIX_DIGITS - bin_idx - 1];
         }
       }
     }
