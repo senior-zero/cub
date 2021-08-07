@@ -377,7 +377,7 @@ struct SegmentSizeGreaterThan
   BeginOffsetIteratorT d_offset_begin {};
   EndOffsetIteratorT d_offset_end {};
 
-  explicit SegmentSizeGreaterThan(
+  SegmentSizeGreaterThan(
     T value,
     BeginOffsetIteratorT d_offset_begin,
     EndOffsetIteratorT d_offset_end)
@@ -394,15 +394,15 @@ struct SegmentSizeGreaterThan
 };
 
 template <typename T,
-  typename BeginOffsetIteratorT,
-  typename EndOffsetIteratorT>
+          typename BeginOffsetIteratorT,
+          typename EndOffsetIteratorT>
 struct SegmentSizeLessThan
 {
   T value {};
   BeginOffsetIteratorT d_offset_begin {};
   EndOffsetIteratorT d_offset_end {};
 
-  explicit SegmentSizeLessThan(
+  SegmentSizeLessThan(
     T value,
     BeginOffsetIteratorT d_offset_begin,
     EndOffsetIteratorT d_offset_end)
@@ -420,7 +420,7 @@ struct SegmentSizeLessThan
 
 
 template <typename KeyT,
-  typename ValueT>
+          typename ValueT>
 struct DeviceSegmentedSortPolicy
 {
   using DominantT = typename std::conditional<(sizeof(ValueT) > sizeof(KeyT)), ValueT, KeyT>::type;
@@ -431,6 +431,7 @@ struct DeviceSegmentedSortPolicy
   // Architecture-specific tuning policies
   //------------------------------------------------------------------------------
 
+  // TODO Port other policies
   struct Policy300 : ChainedPolicy<300, Policy300, Policy300>
   {
     using LargeSegmentPolicy =
