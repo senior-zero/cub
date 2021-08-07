@@ -741,7 +741,8 @@ private:
   T* GetFinalOutput(int radix_bits,
                     DoubleBuffer<T> &buffer)
   {
-    return buffer.d_buffers[GetFinalSelector(buffer.selector, radix_bits)];
+    const int final_selector = GetFinalSelector(buffer.selector, radix_bits);
+    return buffer.d_buffers[final_selector];
   }
 
   template <typename LargeSegmentPolicyT,

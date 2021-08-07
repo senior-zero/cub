@@ -176,8 +176,11 @@ private:
 
           if (!KEYS_ONLY)
           {
-            values_output[0] = values_input[0];
-            values_output[1] = values_input[1];
+            if (values_output != values_input)
+            {
+              values_output[0] = values_input[0];
+              values_output[1] = values_input[1];
+            }
           }
         }
         else
@@ -187,8 +190,14 @@ private:
 
           if (!KEYS_ONLY)
           {
-            values_output[0] = values_input[1];
-            values_output[1] = values_input[0];
+            // values_output might be an alias for values_input, so
+            // we have to use registers here
+
+            const ValueT lhs_val = values_input[0];
+            const ValueT rhs_val = values_input[1];
+
+            values_output[0] = rhs_val;
+            values_output[1] = lhs_val;
           }
         }
       }
