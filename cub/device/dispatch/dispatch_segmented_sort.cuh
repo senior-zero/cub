@@ -524,6 +524,8 @@ struct DispatchSegmentedSort : SelectedPolicy
     using LargeSegmentPolicyT = typename ActivePolicyT::LargeSegmentPolicy;
     using SmallAndMediumPolicyT = typename ActivePolicyT::SmallAndMediumPolicy;
 
+    constexpr int radix_bits = LargeSegmentPolicyT::RADIX_BITS;
+
     cudaError error = cudaSuccess;
 
     do
@@ -538,7 +540,6 @@ struct DispatchSegmentedSort : SelectedPolicy
       // Prepare temporary storage layout
       //------------------------------------------------------------------------
 
-      // TODO Add DoubleBuffer option - is_override_enabled
       const bool reorder_segments = num_segments > 500; // TODO Magick number
 
       TemporaryStorage::Layout<5> temporary_storage_layout;
@@ -549,12 +550,17 @@ struct DispatchSegmentedSort : SelectedPolicy
       auto small_reordering_slot = temporary_storage_layout.GetSlot(3);
       auto group_sizes_slot = temporary_storage_layout.GetSlot(4);
 
-      auto keys_allocation = keys_slot->GetAlias<KeyT>(num_items);
+      auto keys_allocation = keys_slot->GetAlias<KeyT>();
       auto values_allocation = values_slot->GetAlias<ValueT>();
 
-      if (!KEYS_ONLY)
+      if (!is_overwrite_okay)
       {
-        values_allocation.Grow(num_items);
+        keys_allocation.Grow(num_items);
+
+        if (!KEYS_ONLY)
+        {
+          values_allocation.Grow(num_items);
+        }
       }
 
       auto large_and_medium_segments_reordering = large_and_medium_reordering_slot->GetAlias<OffsetT>();
@@ -621,24 +627,15 @@ struct DispatchSegmentedSort : SelectedPolicy
       // Sort
       //------------------------------------------------------------------------
 
-      const int radix_bits          = LargeSegmentPolicyT::RADIX_BITS;
-      const int num_bits            = sizeof(KeyT) * 8;
-      const int num_passes          = (num_bits + radix_bits - 1) / radix_bits;
-      const bool is_num_passes_odd  = num_passes & 1;
+      const bool is_num_passes_odd = GetNumPasses(radix_bits) & 1;
 
-      cub::DeviceDoubleBuffer<KeyT> d_keys_remaining_passes(
-        keys_allocation.Get(),
-        d_keys.Alternate());
+      DeviceDoubleBuffer<KeyT> d_keys_remaining_passes(
+        (is_overwrite_okay || is_num_passes_odd) ? d_keys.Alternate() : keys_allocation.Get(),
+        (is_overwrite_okay) ? d_keys.Current() : (is_num_passes_odd) ? keys_allocation.Get() : d_keys.Alternate());
 
-      cub::DeviceDoubleBuffer<ValueT> d_values_remaining_passes(
-        values_allocation.Get(),
-        d_values.Alternate());
-
-      if (is_num_passes_odd)
-      {
-        d_keys_remaining_passes.Swap();
-        d_values_remaining_passes.Swap();
-      }
+      DeviceDoubleBuffer<ValueT> d_values_remaining_passes(
+        (is_overwrite_okay || is_num_passes_odd) ? d_values.Alternate() : values_allocation.Get(),
+        (is_overwrite_okay) ? d_values.Current() : (is_num_passes_odd) ? values_allocation.Get() : d_values.Alternate());
 
       if (reorder_segments)
       {
@@ -661,6 +658,9 @@ struct DispatchSegmentedSort : SelectedPolicy
             d_values_remaining_passes);
       }
     } while (false);
+
+    d_keys.selector = GetFinalSelector(d_keys.selector, radix_bits);
+    d_values.selector = GetFinalSelector(d_values.selector, radix_bits);
 
     return error;
   }
@@ -715,9 +715,39 @@ struct DispatchSegmentedSort : SelectedPolicy
   }
 
 private:
+  CUB_RUNTIME_FUNCTION __forceinline__
+  int GetNumPasses(int radix_bits)
+  {
+    const int byte_size  = 8;
+    const int num_bits   = sizeof(KeyT) * byte_size;
+    const int num_passes = DivideAndRoundUp(num_bits, radix_bits);
+    return num_passes;
+  }
+
+  CUB_RUNTIME_FUNCTION __forceinline__
+  int GetFinalSelector(int selector, int radix_bits)
+  {
+    // Sorted data always ends up in the other vector
+    if (!is_overwrite_okay)
+    {
+      return (selector + 1) & 1;
+    }
+
+    return (selector + GetNumPasses(radix_bits)) & 1;
+  }
+
+  template <typename T>
+  CUB_RUNTIME_FUNCTION __forceinline__
+  T* GetFinalOutput(int radix_bits,
+                    DoubleBuffer<T> &buffer)
+  {
+    return buffer.d_buffers[GetFinalSelector(buffer.selector, radix_bits)];
+  }
+
   template <typename LargeSegmentPolicyT,
             typename SmallAndMediumPolicyT>
-  CUB_RUNTIME_FUNCTION __forceinline__ cudaError_t SortWithReordering(
+  CUB_RUNTIME_FUNCTION __forceinline__ cudaError_t
+  SortWithReordering(
     std::size_t three_way_partition_temp_storage_bytes,
     cub::DeviceDoubleBuffer<KeyT> &d_keys_remaining_passes,
     cub::DeviceDoubleBuffer<ValueT> &d_values_remaining_passes,
@@ -793,10 +823,10 @@ private:
                 OffsetT>,
               large_and_medium_segments_reordering.Get(),
               d_keys.Current(),
-              d_keys.Alternate(),
+              GetFinalOutput(LargeSegmentPolicyT::RADIX_BITS, d_keys),
               d_keys_remaining_passes,
               d_values.Current(),
-              d_values.Alternate(),
+              GetFinalOutput(LargeSegmentPolicyT::RADIX_BITS, d_values),
               d_values_remaining_passes,
               d_begin_offsets,
               d_end_offsets);
@@ -866,9 +896,9 @@ private:
               large_and_medium_segments_reordering.Get() + num_segments -
               medium_segments,
               d_keys.Current(),
-              d_keys.Alternate(),
+              GetFinalOutput(LargeSegmentPolicyT::RADIX_BITS, d_keys),
               d_values.Current(),
-              d_values.Alternate(),
+              GetFinalOutput(LargeSegmentPolicyT::RADIX_BITS, d_values),
               d_begin_offsets,
               d_end_offsets);
 
@@ -928,10 +958,10 @@ private:
                                               EndOffsetIteratorT,
                                               OffsetT>,
             d_keys.Current(),
-            d_keys.Alternate(),
+            GetFinalOutput(LargeSegmentPolicyT::RADIX_BITS, d_keys),
             d_keys_remaining_passes,
             d_values.Current(),
-            d_values.Alternate(),
+            GetFinalOutput(LargeSegmentPolicyT::RADIX_BITS, d_values),
             d_values_remaining_passes,
             d_begin_offsets,
             d_end_offsets);
