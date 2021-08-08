@@ -268,17 +268,21 @@ public:
     {
       thrust::transform(
         thrust::counting_iterator<unsigned int>(0),
-        thrust::counting_iterator<unsigned int>(get_num_segments()),
-        is_segment_sorted.begin(),
-        DescendingSegmentChecker<T, OffsetT>(keys_output, get_d_offsets()));
+                        thrust::counting_iterator<unsigned int>(
+                          static_cast<unsigned int>(get_num_segments())),
+                        is_segment_sorted.begin(),
+                        DescendingSegmentChecker<T, OffsetT>(keys_output,
+                                                             get_d_offsets()));
     }
     else
     {
       thrust::transform(
         thrust::counting_iterator<unsigned int>(0),
-        thrust::counting_iterator<unsigned int>(get_num_segments()),
-        is_segment_sorted.begin(),
-        SegmentChecker<T, OffsetT>(keys_output, get_d_offsets()));
+                        thrust::counting_iterator<unsigned int>(
+                          static_cast<unsigned int>(get_num_segments())),
+                        is_segment_sorted.begin(),
+                        SegmentChecker<T, OffsetT>(keys_output,
+                                                   get_d_offsets()));
     }
 
     return thrust::reduce(is_segment_sorted.begin(),
@@ -314,7 +318,8 @@ private:
 
   void gen_keys()
   {
-    const unsigned int total_segments = get_num_segments();
+    const unsigned int total_segments =
+      static_cast<unsigned int>(get_num_segments());
 
     if (reverse)
     {
@@ -1756,7 +1761,7 @@ void InputTestPairsBuffer(Input<KeyT, OffsetT, ValueT> &input)
   for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
   {
     thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
-    thrust::fill(values_output.begin(), values_output.end(), KeyT{});
+    thrust::fill(values_output.begin(), values_output.end(), ValueT{});
 
     cub::DoubleBuffer<KeyT> keys(input.get_d_keys(), d_keys_output);
     cub::DoubleBuffer<ValueT> values(input.get_d_values(), d_values_output);

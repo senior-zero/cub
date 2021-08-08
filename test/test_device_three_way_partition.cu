@@ -247,8 +247,8 @@ ThreeWayPartitionResult<T> ThrustPartition(
                            intermediate_result.begin(),
                            first_selector);
 
-  result.num_items_in_first_part =
-    thrust::distance(result.first_part.begin(), intermediate_iterators.first);
+  result.num_items_in_first_part = static_cast<int>(
+    thrust::distance(result.first_part.begin(), intermediate_iterators.first));
 
   auto final_iterators = thrust::partition_copy(
     intermediate_result.begin(),
@@ -257,11 +257,11 @@ ThreeWayPartitionResult<T> ThrustPartition(
     result.unselected.begin(),
     second_selector);
 
-  result.num_items_in_second_part = thrust::distance(result.second_part.begin(),
-                                                     final_iterators.first);
+  result.num_items_in_second_part = static_cast<int>(
+    thrust::distance(result.second_part.begin(), final_iterators.first));
 
-  result.num_unselected_items = thrust::distance(result.unselected.begin(),
-                                                 final_iterators.second);
+  result.num_unselected_items = static_cast<int>(
+    thrust::distance(result.unselected.begin(), final_iterators.second));
 
   return result;
 }
@@ -399,8 +399,8 @@ void TestStability(int num_items)
 
   thrust::tabulate(in.begin(), in.end(), CountToPair<KeyT>{});
 
-  T first_unselected_val = static_cast<T>(num_items / 3);
-  T first_val_of_second_part = static_cast<T>(2 * num_items / 3);
+  T first_unselected_val = static_cast<KeyT>(num_items / 3);
+  T first_val_of_second_part = static_cast<KeyT>(2 * num_items / 3);
 
   LessThan<T> le(first_unselected_val);
   GreaterOrEqual<T> ge(first_val_of_second_part);
