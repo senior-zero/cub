@@ -188,15 +188,15 @@ void TestBlockedToStriped(thrust::device_vector<InputT> &input,
 
   for (int warp_id = 0; warp_id < warps_in_block; warp_id++)
   {
-    const InputT warp_offset_val = static_cast<InputT>(items_per_warp * warp_id);
+    const OutputT warp_offset_val = static_cast<OutputT>(items_per_warp * warp_id);
 
     for (int lane_id = 0; lane_id < LogicalWarpThreads; lane_id++)
     {
-      const InputT lane_offset = warp_offset_val + static_cast<InputT>(lane_id);
+      const OutputT lane_offset = warp_offset_val + static_cast<OutputT>(lane_id);
 
       for (int item = 0; item < ItemsPerThread; item++)
       {
-        *(it++) = lane_offset + static_cast<InputT>(item * LogicalWarpThreads);
+        *(it++) = lane_offset + static_cast<OutputT>(item * LogicalWarpThreads);
       }
     }
   }
@@ -249,22 +249,24 @@ template <int LogicalWarpThreads,
 void Test()
 {
   Test<std::uint16_t, std::uint32_t, LogicalWarpThreads, ItemsPerThread, BlockThreads>();
+  Test<std::uint32_t, std::uint32_t, LogicalWarpThreads, ItemsPerThread, BlockThreads>();
+  Test<std::uint64_t, std::uint32_t, LogicalWarpThreads, ItemsPerThread, BlockThreads>();
 }
 
 template <int LogicalWarpThreads,
           int ItemsPerThread>
 void Test()
 {
-  // Test<LogicalWarpThreads, ItemsPerThread, 128>();
+  Test<LogicalWarpThreads, ItemsPerThread, 128>();
   Test<LogicalWarpThreads, ItemsPerThread, 256>();
 }
 
 template <int LogicalWarpThreads>
 void Test()
 {
-  // Test<LogicalWarpThreads, 1>();
+  Test<LogicalWarpThreads, 1>();
   Test<LogicalWarpThreads, 4>();
-  // Test<LogicalWarpThreads, 7>();
+  Test<LogicalWarpThreads, 7>();
 }
 
 int main(int argc, char** argv)
@@ -274,9 +276,9 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  // Test<4>();
+  Test<4>();
   Test<16>();
-  // Test<32>();
+  Test<32>();
 
   return 0;
 }
