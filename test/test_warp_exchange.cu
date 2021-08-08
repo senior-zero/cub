@@ -39,7 +39,8 @@ template <typename InputT,
           typename ActionT>
 __global__ void kernel(const InputT *input_data,
                        OutputT *output_data,
-                       ActionT action)
+                       ActionT action,
+                       cub::Int2Type<true> same_type)
 {
   using WarpExchangeT =
     cub::WarpExchange<InputT, ItemsPerThread, LogicalWarpThreads>;
@@ -51,7 +52,45 @@ __global__ void kernel(const InputT *input_data,
   const int warp_id = threadIdx.x / LogicalWarpThreads;
   WarpExchangeT exchange(temp_storage[warp_id]);
 
-  // TODO Inplace test
+  InputT input[ItemsPerThread];
+
+  input_data += warp_id * tile_size;
+  output_data += warp_id * tile_size;
+
+  for (int item = 0; item < ItemsPerThread; item++)
+  {
+    input[item] = input_data[exchange.lane_id * ItemsPerThread + item];
+  }
+
+  action(input, input, exchange);
+
+  for (int item = 0; item < ItemsPerThread; item++)
+  {
+    output_data[exchange.lane_id * ItemsPerThread + item] = input[item];
+  }
+}
+
+template <typename InputT,
+          typename OutputT,
+          int LogicalWarpThreads,
+          int ItemsPerThread,
+          int BlockThreads,
+          typename ActionT>
+__global__ void kernel(const InputT *input_data,
+                       OutputT *output_data,
+                       ActionT action,
+                       cub::Int2Type<false> different_types)
+{
+  using WarpExchangeT =
+  cub::WarpExchange<InputT, ItemsPerThread, LogicalWarpThreads>;
+
+  constexpr int tile_size = ItemsPerThread * LogicalWarpThreads;
+  constexpr int warps_per_block = BlockThreads / LogicalWarpThreads;
+  __shared__ typename WarpExchangeT::TempStorage temp_storage[warps_per_block];
+
+  const int warp_id = threadIdx.x / LogicalWarpThreads;
+  WarpExchangeT exchange(temp_storage[warp_id]);
+
   InputT input[ItemsPerThread];
   OutputT output[ItemsPerThread];
 
@@ -68,8 +107,8 @@ __global__ void kernel(const InputT *input_data,
   for (int item = 0; item < ItemsPerThread; item++)
   {
     output_data[exchange.lane_id * ItemsPerThread + item] = output[item];
-  }
-}
+    }
+                         }
 
 struct StripedToBlocked
 {
@@ -125,6 +164,34 @@ bool Compare(
 }
 
 
+template <typename T,
+          int LogicalWarpThreads,
+          int ItemsPerThread,
+          int BlockThreads>
+void FillStriped(thrust::host_vector<T> &data)
+{
+  auto it = data.begin();
+
+  const int warps_in_block = BlockThreads / LogicalWarpThreads;
+  const int items_per_warp = LogicalWarpThreads * ItemsPerThread;
+
+  for (int warp_id = 0; warp_id < warps_in_block; warp_id++)
+  {
+    const T warp_offset_val = static_cast<T>(items_per_warp * warp_id);
+
+    for (int lane_id = 0; lane_id < LogicalWarpThreads; lane_id++)
+    {
+      const T lane_offset = warp_offset_val + static_cast<T>(lane_id);
+
+      for (int item = 0; item < ItemsPerThread; item++)
+      {
+        *(it++) = lane_offset + static_cast<T>(item * LogicalWarpThreads);
+      }
+    }
+  }
+}
+
+
 template <typename InputT,
           typename OutputT,
           int LogicalWarpThreads,
@@ -136,32 +203,15 @@ void TestStripedToBlocked(thrust::device_vector<InputT> &input,
   thrust::fill(output.begin(), output.end(), OutputT{0});
 
   thrust::host_vector<InputT> h_input(input.size());
-  auto it = h_input.begin();
-
-  const int warps_in_block = BlockThreads / LogicalWarpThreads;
-  const int items_per_warp = LogicalWarpThreads * ItemsPerThread;
-
-  for (int warp_id = 0; warp_id < warps_in_block; warp_id++)
-  {
-    const InputT warp_offset_val = static_cast<InputT>(items_per_warp * warp_id);
-
-    for (int lane_id = 0; lane_id < LogicalWarpThreads; lane_id++)
-    {
-      const InputT lane_offset = warp_offset_val + static_cast<InputT>(lane_id);
-
-      for (int item = 0; item < ItemsPerThread; item++)
-      {
-        *(it++) = lane_offset + static_cast<InputT>(item * LogicalWarpThreads);
-      }
-    }
-  }
+  FillStriped<InputT, LogicalWarpThreads, ItemsPerThread, BlockThreads>(h_input);
 
   input = h_input;
 
   kernel<InputT, OutputT, LogicalWarpThreads, ItemsPerThread, BlockThreads>
     <<<1, BlockThreads>>>(thrust::raw_pointer_cast(input.data()),
                           thrust::raw_pointer_cast(output.data()),
-                          StripedToBlocked{});
+                          StripedToBlocked{},
+                          cub::Int2Type<std::is_same<InputT, OutputT>::value>{});
   cudaDeviceSynchronize();
 
   thrust::device_vector<OutputT> expected_output(output.size());
@@ -181,32 +231,15 @@ void TestBlockedToStriped(thrust::device_vector<InputT> &input,
   thrust::fill(output.begin(), output.end(), OutputT{0});
 
   thrust::host_vector<OutputT> expected_output(input.size());
-  auto it = expected_output.begin();
-
-  const int warps_in_block = BlockThreads / LogicalWarpThreads;
-  const int items_per_warp = LogicalWarpThreads * ItemsPerThread;
-
-  for (int warp_id = 0; warp_id < warps_in_block; warp_id++)
-  {
-    const OutputT warp_offset_val = static_cast<OutputT>(items_per_warp * warp_id);
-
-    for (int lane_id = 0; lane_id < LogicalWarpThreads; lane_id++)
-    {
-      const OutputT lane_offset = warp_offset_val + static_cast<OutputT>(lane_id);
-
-      for (int item = 0; item < ItemsPerThread; item++)
-      {
-        *(it++) = lane_offset + static_cast<OutputT>(item * LogicalWarpThreads);
-      }
-    }
-  }
+  FillStriped<OutputT, LogicalWarpThreads, ItemsPerThread, BlockThreads>(expected_output);
 
   thrust::sequence(input.begin(), input.end());
 
   kernel<InputT, OutputT, LogicalWarpThreads, ItemsPerThread, BlockThreads>
     <<<1, BlockThreads>>>(thrust::raw_pointer_cast(input.data()),
                           thrust::raw_pointer_cast(output.data()),
-                          BlockedToStriped{});
+                          BlockedToStriped{},
+                          cub::Int2Type<std::is_same<InputT, OutputT>::value>{});
   cudaDeviceSynchronize();
 
   thrust::device_vector<OutputT> d_expected_output(expected_output);
