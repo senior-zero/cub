@@ -36,7 +36,7 @@
 #include <iterator>
 #include <type_traits>
 
-#include "block_exchange.cuh"
+#include "../block/block_exchange.cuh"
 #include "../iterator/cache_modified_input_iterator.cuh"
 #include "../config.cuh"
 #include "../util_ptx.cuh"
@@ -736,7 +736,7 @@ private:
         template <typename InputIteratorT>
         __device__ __forceinline__ void Load(
             InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
-            InputT          (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load{
+            InputT          (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load
         {
             LoadDirectStriped<BLOCK_THREADS>(linear_tid, block_itr, items);
         }
