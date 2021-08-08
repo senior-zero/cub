@@ -36,6 +36,7 @@
 #include "../config.cuh"
 #include "../util_ptx.cuh"
 #include "../util_type.cuh"
+#include "../warp/warp_exchange.cuh"
 
 CUB_NAMESPACE_BEGIN
 
@@ -1115,126 +1116,6 @@ public:
 
 
 };
-
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
-
-
-template <
-    typename    T,
-    int         ITEMS_PER_THREAD,
-    int         LOGICAL_WARP_THREADS    = CUB_PTX_WARP_THREADS,
-    int         PTX_ARCH                = CUB_PTX_ARCH>
-class WarpExchange
-{
-private:
-
-    /******************************************************************************
-     * Constants
-     ******************************************************************************/
-
-    /// Constants
-    enum
-    {
-        // Whether the logical warp size and the PTX warp size coincide
-        IS_ARCH_WARP = (LOGICAL_WARP_THREADS == CUB_WARP_THREADS(PTX_ARCH)),
-
-        WARP_ITEMS                  = (ITEMS_PER_THREAD * LOGICAL_WARP_THREADS) + 1,
-
-        LOG_SMEM_BANKS              = CUB_LOG_SMEM_BANKS(PTX_ARCH),
-        SMEM_BANKS                  = 1 << LOG_SMEM_BANKS,
-
-        // Insert padding if the number of items per thread is a power of two and > 4 (otherwise we can typically use 128b loads)
-        INSERT_PADDING              = (ITEMS_PER_THREAD > 4) && (PowerOfTwo<ITEMS_PER_THREAD>::VALUE),
-        PADDING_ITEMS               = (INSERT_PADDING) ? (WARP_ITEMS >> LOG_SMEM_BANKS) : 0,
-    };
-
-    /******************************************************************************
-     * Type definitions
-     ******************************************************************************/
-
-    /// Shared memory storage layout type
-    struct _TempStorage
-    {
-        T buff[WARP_ITEMS + PADDING_ITEMS];
-    };
-
-public:
-
-    /// \smemstorage{WarpExchange}
-    struct TempStorage : Uninitialized<_TempStorage> {};
-
-private:
-
-
-    /******************************************************************************
-     * Thread fields
-     ******************************************************************************/
-
-    _TempStorage    &temp_storage;
-    int             lane_id;
-
-public:
-
-    /******************************************************************************
-     * Construction
-     ******************************************************************************/
-
-    /// Constructor
-    __device__ __forceinline__ WarpExchange(
-        TempStorage &temp_storage)
-    :
-        temp_storage(temp_storage.Alias()),
-        lane_id(IS_ARCH_WARP ?
-            LaneId() :
-            LaneId() % LOGICAL_WARP_THREADS)
-    {}
-
-
-    /******************************************************************************
-     * Interface
-     ******************************************************************************/
-
-    /**
-     * \brief Exchanges valid data items annotated by rank into <em>striped</em> arrangement.
-     *
-     * \par
-     * - \smemreuse
-     *
-     * \tparam OffsetT                              <b>[inferred]</b> Signed integer type for local offsets
-     */
-    template <typename OffsetT>
-    __device__ __forceinline__ void ScatterToStriped(
-        T               items[ITEMS_PER_THREAD],        ///< [in-out] Items to exchange
-        OffsetT         ranks[ITEMS_PER_THREAD])        ///< [in] Corresponding scatter ranks
-    {
-        #pragma unroll
-        for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ITEM++)
-        {
-            if (INSERT_PADDING) ranks[ITEM] = SHR_ADD(ranks[ITEM], LOG_SMEM_BANKS, ranks[ITEM]);
-            temp_storage.buff[ranks[ITEM]] = items[ITEM];
-        }
-
-        WARP_SYNC(0xffffffff);
-
-        #pragma unroll
-        for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ITEM++)
-        {
-            int item_offset = (ITEM * LOGICAL_WARP_THREADS) + lane_id;
-            if (INSERT_PADDING) item_offset = SHR_ADD(item_offset, LOG_SMEM_BANKS, item_offset);
-            items[ITEM] = temp_storage.buff[item_offset];
-        }
-    }
-
-};
-
-
-
-
-#endif // DOXYGEN_SHOULD_SKIP_THIS
-
-
-
 
 
 CUB_NAMESPACE_END
