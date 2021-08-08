@@ -155,7 +155,7 @@ public:
         ranks[ITEM] = SHR_ADD(ranks[ITEM], LOG_SMEM_BANKS, ranks[ITEM]);
       }
 
-      temp_storage.buff[ranks[ITEM]] = items[ITEM];
+      temp_storage.items_shared[ranks[ITEM]] = items[ITEM];
     }
 
     WARP_SYNC(member_mask);
@@ -168,7 +168,7 @@ public:
       {
         item_offset = SHR_ADD(item_offset, LOG_SMEM_BANKS, item_offset);
       }
-      items[ITEM] = temp_storage.buff[item_offset];
+      items[ITEM] = temp_storage.items_shared[item_offset];
     }
   }
 };
