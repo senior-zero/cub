@@ -81,14 +81,12 @@ private:
     int linear_tid;
 
     /// Constructor
-    __device__ __forceinline__ LoadInternal(
-      TempStorage &/*temp_storage*/,
-      int linear_tid)
-      :
-      linear_tid(linear_tid)
+    __device__ __forceinline__
+    LoadInternal(TempStorage & /*temp_storage*/,
+                 int linear_tid)
+        : linear_tid(linear_tid)
     {}
 
-    /// Load a linear segment of items from memory
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
       InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
@@ -97,7 +95,6 @@ private:
       LoadDirectBlocked(linear_tid, block_itr, items);
     }
 
-    /// Load a linear segment of items from memory, guarded by range
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
       InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
@@ -107,7 +104,6 @@ private:
       LoadDirectBlocked(linear_tid, block_itr, items, valid_items);
     }
 
-    /// Load a linear segment of items from memory, guarded by range, with a fall-back assignment of out-of-bound elements
     template <typename InputIteratorT, typename DefaultT>
     __device__ __forceinline__ void Load(
       InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
@@ -117,13 +113,9 @@ private:
     {
       LoadDirectBlocked(linear_tid, block_itr, items, valid_items, oob_default);
     }
-
   };
 
 
-  /**
-  * BLOCK_LOAD_STRIPED specialization of load helper
-  */
   template <int DUMMY>
   struct LoadInternal<WARP_LOAD_STRIPED, DUMMY>
   {
@@ -140,7 +132,6 @@ private:
         : linear_tid(linear_tid)
     {}
 
-    /// Load a linear segment of items from memory
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
       InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
@@ -149,7 +140,6 @@ private:
       LoadDirectStriped<LOGICAL_WARP_THREADS>(linear_tid, block_itr, items);
     }
 
-    /// Load a linear segment of items from memory, guarded by range
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
       InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
@@ -162,8 +152,8 @@ private:
                                               valid_items);
     }
 
-    /// Load a linear segment of items from memory, guarded by range, with a fall-back assignment of out-of-bound elements
-    template <typename InputIteratorT, typename DefaultT>
+    template <typename InputIteratorT,
+              typename DefaultT>
     __device__ __forceinline__ void Load(
       InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
       InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
@@ -176,13 +166,9 @@ private:
                                               valid_items,
                                               oob_default);
     }
-
   };
 
 
-  /**
-   * BLOCK_LOAD_VECTORIZE specialization of load helper
-   */
   template <int DUMMY>
   struct LoadInternal<WARP_LOAD_VECTORIZE, DUMMY>
   {
@@ -219,7 +205,6 @@ private:
                                                         items);
     }
 
-    /// Load a linear segment of items from memory, specialized for native pointer types (attempts vectorization)
     template <
       CacheLoadModifier   MODIFIER,
       typename            ValueType,
@@ -259,13 +244,9 @@ private:
     {
       LoadDirectBlocked(linear_tid, block_itr, items, valid_items, oob_default);
     }
-
   };
 
 
-  /**
-   * BLOCK_LOAD_TRANSPOSE specialization of load helper
-   */
   template <int DUMMY>
   struct LoadInternal<WARP_LOAD_TRANSPOSE, DUMMY>
   {
@@ -324,7 +305,6 @@ private:
       LoadDirectStriped<LOGICAL_WARP_THREADS>(linear_tid, block_itr, items, valid_items, oob_default);
       WarpExchangeT(temp_storage).StripedToBlocked(items, items);
     }
-
   };
 
   /******************************************************************************
@@ -365,12 +345,14 @@ public:
   /// \smemstorage{WarpLoad}
   struct TempStorage : Uninitialized<_TempStorage> {};
 
-  __device__ __forceinline__ WarpLoad()
+  __device__ __forceinline__
+  WarpLoad()
       : temp_storage(PrivateStorage())
       , linear_tid(IS_ARCH_WARP ? LaneId() : (LaneId() % LOGICAL_WARP_THREADS))
   {}
 
-  __device__ __forceinline__ WarpLoad(TempStorage &temp_storage)
+  __device__ __forceinline__
+  WarpLoad(TempStorage &temp_storage)
       : temp_storage(temp_storage.Alias())
       , linear_tid(IS_ARCH_WARP ? LaneId() : (LaneId() % LOGICAL_WARP_THREADS))
   {}
@@ -401,9 +383,9 @@ public:
     int             valid_items,                ///< [in] Number of valid items to load
     DefaultT        oob_default)                ///< [in] Default value to assign out-of-bound items
   {
-    InternalLoad(temp_storage, linear_tid).Load(block_itr, items, valid_items, oob_default);
+    InternalLoad(temp_storage, linear_tid)
+      .Load(block_itr, items, valid_items, oob_default);
   }
-
 };
 
 CUB_NAMESPACE_END
