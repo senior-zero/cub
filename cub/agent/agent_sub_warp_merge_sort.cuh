@@ -30,6 +30,7 @@
 #include "../config.cuh"
 #include "../util_type.cuh"
 #include "../warp/warp_load.cuh"
+#include "../warp/warp_store.cuh"
 #include "../warp/warp_merge_sort.cuh"
 
 #include <thrust/system/cuda/detail/core/util.h>
@@ -42,15 +43,17 @@ template <
   int                      WARP_THREADS_ARG,
   int                      ITEMS_PER_THREAD_ARG,
   cub::WarpLoadAlgorithm   LOAD_ALGORITHM_ARG   = cub::WARP_LOAD_DIRECT,
-  cub::CacheLoadModifier   LOAD_MODIFIER_ARG    = cub::LOAD_LDG>
+  cub::CacheLoadModifier   LOAD_MODIFIER_ARG    = cub::LOAD_LDG,
+  cub::WarpStoreAlgorithm  STORE_ALGORITHM_ARG  = cub::WARP_STORE_DIRECT>
 struct AgentSubWarpMergeSortPolicy
 {
   static constexpr int WARP_THREADS       = WARP_THREADS_ARG;
   static constexpr int ITEMS_PER_THREAD   = ITEMS_PER_THREAD_ARG;
   static constexpr int ITEMS_PER_TILE     = WARP_THREADS * ITEMS_PER_THREAD;
 
-  static constexpr cub::WarpLoadAlgorithm LOAD_ALGORITHM   = LOAD_ALGORITHM_ARG;
-  static constexpr cub::CacheLoadModifier LOAD_MODIFIER    = LOAD_MODIFIER_ARG;
+  static constexpr cub::WarpLoadAlgorithm  LOAD_ALGORITHM   = LOAD_ALGORITHM_ARG;
+  static constexpr cub::CacheLoadModifier  LOAD_MODIFIER    = LOAD_MODIFIER_ARG;
+  static constexpr cub::WarpStoreAlgorithm STORE_ALGORITHM  = STORE_ALGORITHM_ARG;
 };
 
 
@@ -91,17 +94,16 @@ public:
   using WarpLoadKeys  = cub::WarpLoad<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::LOAD_ALGORITHM, PolicyT::WARP_THREADS>;
   using WarpLoadItems = cub::WarpLoad<ValueT, PolicyT::ITEMS_PER_THREAD, PolicyT::LOAD_ALGORITHM, PolicyT::WARP_THREADS>;
 
+  using WarpStoreKeys  = cub::WarpStore<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::STORE_ALGORITHM, PolicyT::WARP_THREADS>;
+  using WarpStoreItems = cub::WarpStore<ValueT, PolicyT::ITEMS_PER_THREAD, PolicyT::STORE_ALGORITHM, PolicyT::WARP_THREADS>;
+
   union _TempStorage
   {
     typename WarpLoadKeys::TempStorage load_keys;
     typename WarpLoadItems::TempStorage load_items;
     typename WarpMergeSortT::TempStorage sort;
-
-    struct StoreTMP
-    {
-      KeyT keys_shared[PolicyT::ITEMS_PER_THREAD * PolicyT::WARP_THREADS];
-      ValueT items_shared[PolicyT::ITEMS_PER_THREAD * PolicyT::WARP_THREADS];
-    } store;
+    typename WarpStoreKeys::TempStorage store_keys;
+    typename WarpStoreItems::TempStorage store_items;
   };
 
   /// Alias wrapper allowing storage to be unioned
@@ -174,22 +176,15 @@ public:
       }
 
       warp_merge_sort.Sort(keys, values, binary_op, segment_size, oob_default);
+      WARP_SYNC(warp_merge_sort.member_mask);
 
-      Store(warp_merge_sort.linear_tid,
-            warp_merge_sort.member_mask,
-            segment_size,
-            keys_output,
-            keys,
-            storage.store.keys_shared);
+      WarpStoreKeys(storage.store_keys).Store(keys_output, keys, segment_size);
 
       if (!KEYS_ONLY)
       {
-        Store(warp_merge_sort.linear_tid,
-              warp_merge_sort.member_mask,
-              segment_size,
-              values_output,
-              values,
-              storage.store.items_shared);
+        WARP_SYNC(warp_merge_sort.member_mask);
+        WarpStoreItems(storage.store_items)
+          .Store(values_output, values, segment_size);
       }
     }
   }
@@ -261,60 +256,6 @@ private:
             values_output[0] = rhs_val;
             values_output[1] = lhs_val;
           }
-        }
-      }
-    }
-  }
-
-  template <typename T>
-  __device__ __forceinline__
-  void Store(unsigned int lane_id,
-             unsigned int group_mask,
-             OffsetT segment_size,
-             T *output,
-             T (&keys)[PolicyT::ITEMS_PER_THREAD],
-             T *cache)
-  {
-    if (PolicyT::ITEMS_PER_THREAD > 10)
-    {
-      // Coalesced store
-      __syncwarp(group_mask);
-
-      // load blocked
-      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
-      {
-        const int idx = PolicyT::ITEMS_PER_THREAD * lane_id + item;
-        cache[idx]    = keys[item];
-      }
-      __syncwarp(group_mask);
-
-      // store in shared
-      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
-      {
-        const int idx = PolicyT::WARP_THREADS * item + lane_id;
-        keys[item]    = cache[idx];
-      }
-
-      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
-      {
-        const int idx = PolicyT::WARP_THREADS * item + lane_id;
-
-        if (idx < segment_size)
-        {
-          output[idx] = keys[item];
-        }
-      }
-    }
-    else
-    {
-      // Naive store
-      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
-      {
-        const int idx = lane_id * PolicyT::ITEMS_PER_THREAD + item;
-
-        if (idx < segment_size)
-        {
-          output[idx] = keys[item];
         }
       }
     }
