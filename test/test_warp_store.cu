@@ -65,6 +65,12 @@ __global__ void kernel(OutputIteratorT output)
   __shared__ typename WarpStoreT::TempStorage temp_storage[warps_in_block];
 
   OutputT reg[ItemsPerThread];
+
+  for (int item = 0; item < ItemsPerThread; item++)
+  {
+    reg[item] = static_cast<OutputT>(threadIdx.x * ItemsPerThread + item);
+  }
+
   WarpStoreT(temp_storage[warp_id]).Store(output + warp_id * tile_size, reg);
 }
 
@@ -91,16 +97,87 @@ __global__ void kernel(int valid_items,
 
   OutputT reg[ItemsPerThread];
 
+  for (int item = 0; item < ItemsPerThread; item++)
+  {
+    reg[item] = static_cast<OutputT>(threadIdx.x * ItemsPerThread + item);
+  }
+
   WarpStoreT(temp_storage[warp_id])
     .Store(output + warp_id * tile_size, reg, valid_items);
 }
+
 
 template <typename            T,
           int                 BlockThreads,
           int                 WarpThreads,
           int                 ItemsPerThread,
-          WarpStoreAlgorithm  StoreAlgorithm,
-          typename            OutputIteratorT>
+          WarpStoreAlgorithm  StoreAlgorithm>
+thrust::device_vector<T> GenExpectedOutput(int valid_items)
+{
+  const int tile_size = WarpThreads * ItemsPerThread;
+  const int total_warps = BlockThreads / WarpThreads;
+  const int elements = total_warps * tile_size;
+
+  thrust::device_vector<T> input(elements);
+
+  if (StoreAlgorithm == WarpStoreAlgorithm::WARP_STORE_STRIPED)
+  {
+    thrust::host_vector<T> h_input(elements);
+
+    // In this case we need different stripe pattern, so the
+    // items/threads parameters are swapped
+
+    constexpr int fake_block_size = ItemsPerThread *
+                                    (BlockThreads / WarpThreads);
+
+    FillStriped<ItemsPerThread, WarpThreads, fake_block_size>(h_input.begin());
+    input = h_input;
+  }
+  else
+  {
+    thrust::sequence(input.begin(), input.end());
+  }
+
+  if (valid_items != elements)
+  {
+    for (int warp_id = 0; warp_id < total_warps; warp_id++)
+    {
+      thrust::fill(input.begin() + warp_id * tile_size + valid_items,
+                   input.begin() + (warp_id + 1) * tile_size,
+                   T{});
+    }
+  }
+
+  return input;
+}
+
+
+template <
+  typename            T,
+  int                 BlockThreads,
+  int                 WarpThreads,
+  int                 ItemsPerThread,
+  WarpStoreAlgorithm  StoreAlgorithm>
+void CheckResults(int valid_items,
+                  const thrust::device_vector<T> &output)
+{
+  const thrust::device_vector<T> expected_output =
+    GenExpectedOutput<T,
+                      BlockThreads,
+                      WarpThreads,
+                      ItemsPerThread,
+                      StoreAlgorithm>(valid_items);
+
+  AssertEquals(expected_output, output);
+}
+
+
+template <typename            T,
+  int                 BlockThreads,
+  int                 WarpThreads,
+  int                 ItemsPerThread,
+  WarpStoreAlgorithm  StoreAlgorithm,
+  typename            OutputIteratorT>
 void TestImplementation(OutputIteratorT output)
 {
   kernel<BlockThreads,
@@ -137,52 +214,24 @@ void TestImplementation(int valid_items,
 
 
 template <typename            T,
-          int                 BlockThreads,
-          int                 WarpThreads,
-          int                 ItemsPerThread,
-          WarpStoreAlgorithm  StoreAlgorithm>
-thrust::device_vector<T> GenInput()
+  int                 BlockThreads,
+  int                 WarpThreads,
+  int                 ItemsPerThread,
+  WarpStoreAlgorithm  StoreAlgorithm>
+void TestPointer()
 {
   const int tile_size = WarpThreads * ItemsPerThread;
   const int total_warps = BlockThreads / WarpThreads;
   const int elements = total_warps * tile_size;
 
-  thrust::device_vector<T> input(elements);
-
-  if (StoreAlgorithm == WarpStoreAlgorithm::WARP_STORE_STRIPED)
-  {
-    thrust::host_vector<T> h_input(elements);
-
-    // In this case we need different stripe pattern, so the
-    // items/threads parameters are swapped
-
-    constexpr int fake_block_size = ItemsPerThread *
-                                    (BlockThreads / WarpThreads);
-
-    FillStriped<ItemsPerThread, WarpThreads, fake_block_size>(h_input.begin());
-    input = h_input;
-  }
-  else
-  {
-    thrust::sequence(input.begin(), input.end());
-  }
-
-  return input;
-}
-
-
-template <typename            T,
-          int                 BlockThreads,
-          int                 WarpThreads,
-          int                 ItemsPerThread,
-          WarpStoreAlgorithm  StoreAlgorithm>
-void TestPointer()
-{
-  thrust::device_vector<T> input =
-    GenInput<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>();
+  thrust::device_vector<T> output(elements);
+  thrust::fill(output.begin(), output.end(), T{});
 
   TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
-    thrust::raw_pointer_cast(input.data()));
+    thrust::raw_pointer_cast(output.data()));
+
+  CheckResults<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
+    elements, output);
 
   const unsigned int max_valid_items = WarpThreads * ItemsPerThread;
 
@@ -190,8 +239,12 @@ void TestPointer()
   {
     const int valid_items = static_cast<int>(RandomValue(max_valid_items));
 
+    thrust::fill(output.begin(), output.end(), T{});
     TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
-      valid_items, thrust::raw_pointer_cast(input.data()));
+      valid_items, thrust::raw_pointer_cast(output.data()));
+
+    CheckResults<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
+      valid_items, output);
   }
 }
 
@@ -204,12 +257,19 @@ template <typename            T,
   CacheStoreModifier  StoreModifier>
 void TestIterator()
 {
-  thrust::device_vector<T> input =
-    GenInput<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>();
+  const int tile_size = WarpThreads * ItemsPerThread;
+  const int total_warps = BlockThreads / WarpThreads;
+  const int elements = total_warps * tile_size;
 
+  thrust::device_vector<T> output(elements);
+
+  thrust::fill(output.begin(), output.end(), T{});
   TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
     CacheModifiedOutputIterator<StoreModifier, T>(
-      thrust::raw_pointer_cast(input.data())));
+      thrust::raw_pointer_cast(output.data())));
+
+  CheckResults<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
+    elements, output);
 
   const int max_valid_items = WarpThreads * ItemsPerThread;
 
@@ -217,6 +277,7 @@ void TestIterator()
   {
     const int valid_items = RandomValue(max_valid_items);
 
+    thrust::fill(output.begin(), output.end(), T{});
     TestImplementation<T,
                        BlockThreads,
                        WarpThreads,
@@ -224,7 +285,10 @@ void TestIterator()
                        StoreAlgorithm>(
       valid_items,
       CacheModifiedOutputIterator<StoreModifier, T>(
-        thrust::raw_pointer_cast(input.data())));
+        thrust::raw_pointer_cast(output.data())));
+
+    CheckResults<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
+      valid_items, output);
   }
 }
 
