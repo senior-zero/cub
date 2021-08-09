@@ -2900,14 +2900,16 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  TestKeysAndPairs<std::uint8_t,  std::uint32_t>();
+  /*TestKeysAndPairs<std::uint8_t,  std::uint32_t>();
   TestKeysAndPairs<std::uint16_t, std::uint32_t>();
   TestKeysAndPairs<std::uint32_t, std::uint32_t>();
-  TestKeysAndPairs<std::uint64_t, std::uint32_t>();
+  TestKeysAndPairs<std::uint64_t, std::uint32_t>();*/
   TestKeysAndPairs<std::uint64_t, std::uint64_t>();
 
+  /*
   TestPairs<std::uint8_t, std::uint64_t, std::uint32_t>();
   TestPairs<std::int64_t, std::uint64_t, std::uint32_t>();
+   */
 
   return 0;
 }

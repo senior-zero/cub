@@ -29,13 +29,48 @@
 
 #include "../config.cuh"
 #include "../util_type.cuh"
+#include "../warp/warp_load.cuh"
 #include "../warp/warp_merge_sort.cuh"
 
 CUB_NAMESPACE_BEGIN
 
+
+template <
+  int                      WARP_THREADS_ARG,
+  int                      ITEMS_PER_THREAD_ARG,
+  cub::WarpLoadAlgorithm   LOAD_ALGORITHM_ARG   = cub::WARP_LOAD_DIRECT,
+  cub::CacheLoadModifier   LOAD_MODIFIER_ARG    = cub::LOAD_LDG>
+struct AgentSubWarpMergeSortPolicy
+{
+  static constexpr int WARP_THREADS       = WARP_THREADS_ARG;
+  static constexpr int ITEMS_PER_THREAD   = ITEMS_PER_THREAD_ARG;
+  static constexpr int ITEMS_PER_TILE     = WARP_THREADS * ITEMS_PER_THREAD;
+
+  static constexpr cub::WarpLoadAlgorithm LOAD_ALGORITHM   = LOAD_ALGORITHM_ARG;
+  static constexpr cub::CacheLoadModifier LOAD_MODIFIER    = LOAD_MODIFIER_ARG;
+};
+
+
+template <
+  int       BLOCK_THREADS_ARG,
+  typename  SmallPolicy,
+  typename  MediumPolicy>
+struct AgentSmallAndMediumSegmentedSortPolicy
+{
+  static constexpr int BLOCK_THREADS = BLOCK_THREADS_ARG;
+  using SmallPolicyT                 = SmallPolicy;
+  using MediumPolicyT                = MediumPolicy;
+
+  constexpr static int SEGMENTS_PER_MEDIUM_BLOCK = BLOCK_THREADS /
+                                                   MediumPolicyT::WARP_THREADS;
+
+  constexpr static int SEGMENTS_PER_SMALL_BLOCK = BLOCK_THREADS /
+                                                  SmallPolicyT::WARP_THREADS;
+};
+
+
 template <bool IS_DESCENDING,
-          int ITEMS_PER_THREAD,
-          int THREADS_PER_SEGMENT,
+          typename PolicyT,
           typename KeyT,
           typename ValueT,
           typename OffsetT>
@@ -45,7 +80,10 @@ public:
   static constexpr bool KEYS_ONLY = cub::Equals<ValueT, cub::NullType>::VALUE;
 
   using WarpMergeSortT =
-    WarpMergeSort<KeyT, ITEMS_PER_THREAD, THREADS_PER_SEGMENT, ValueT>;
+    WarpMergeSort<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::WARP_THREADS, ValueT>;
+
+  using WarpKeyLoadT =
+    WarpLoad<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::LOAD_ALGORITHM, PolicyT::WARP_THREADS>;
 
   using TempStorage = typename WarpMergeSortT::TempStorage;
 
@@ -83,8 +121,8 @@ public:
     }
     else
     {
-      KeyT keys[ITEMS_PER_THREAD];
-      ValueT values[ITEMS_PER_THREAD];
+      KeyT keys[PolicyT::ITEMS_PER_THREAD];
+      ValueT values[PolicyT::ITEMS_PER_THREAD];
 
       // For FP64 the difference is:
       // Lowest() -> -1.79769e+308 = 00...00b -> TwiddleIn -> -0 = 10...00b
@@ -213,10 +251,10 @@ private:
             OffsetT segment_size,
             const T *input,
             T oob_default,
-            T (&keys)[ITEMS_PER_THREAD],
+            T (&keys)[PolicyT::ITEMS_PER_THREAD],
             T *cache)
   {
-    for (int item = 0; item < ITEMS_PER_THREAD; item++)
+    for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
     {
       keys[item] = oob_default;
     }
@@ -230,17 +268,17 @@ private:
             unsigned int group_mask,
             OffsetT segment_size,
             const T *input,
-            T (&keys)[ITEMS_PER_THREAD],
+            T (&keys)[PolicyT::ITEMS_PER_THREAD],
             T *cache)
   {
-    if (ITEMS_PER_THREAD > 10)
+    if (PolicyT::ITEMS_PER_THREAD > 10)
     {
       // COALESCED_LOAD
 
       #pragma unroll
-      for (int item = 0; item < ITEMS_PER_THREAD; item++)
+      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
       {
-        const int idx = THREADS_PER_SEGMENT * item + lane_id;
+        const int idx = PolicyT::WARP_THREADS * item + lane_id;
 
         if (idx < segment_size)
         {
@@ -249,17 +287,17 @@ private:
       }
 
       // store in shared
-      for (int item = 0; item < ITEMS_PER_THREAD; item++)
+      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
       {
-        const int idx = THREADS_PER_SEGMENT * item + lane_id;
+        const int idx = PolicyT::WARP_THREADS * item + lane_id;
         cache[idx]    = keys[item];
       }
       __syncwarp(group_mask);
 
       // load blocked
-      for (int item = 0; item < ITEMS_PER_THREAD; item++)
+      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
       {
-        const int idx = ITEMS_PER_THREAD * lane_id + item;
+        const int idx = PolicyT::ITEMS_PER_THREAD * lane_id + item;
         keys[item]    = cache[idx];
       }
       __syncwarp(group_mask);
@@ -268,9 +306,9 @@ private:
     {
       // Naive load
 
-      for (int item = 0; item < ITEMS_PER_THREAD; item++)
+      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
       {
-        const unsigned int idx = lane_id * ITEMS_PER_THREAD + item;
+        const unsigned int idx = lane_id * PolicyT::ITEMS_PER_THREAD + item;
 
         if (idx < segment_size)
         {
@@ -286,32 +324,32 @@ private:
              unsigned int group_mask,
              OffsetT segment_size,
              T *output,
-             T (&keys)[ITEMS_PER_THREAD],
+             T (&keys)[PolicyT::ITEMS_PER_THREAD],
              T *cache)
   {
-    if (ITEMS_PER_THREAD > 10)
+    if (PolicyT::ITEMS_PER_THREAD > 10)
     {
       // Coalesced store
       __syncwarp(group_mask);
 
       // load blocked
-      for (int item = 0; item < ITEMS_PER_THREAD; item++)
+      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
       {
-        const int idx = ITEMS_PER_THREAD * lane_id + item;
+        const int idx = PolicyT::ITEMS_PER_THREAD * lane_id + item;
         cache[idx]    = keys[item];
       }
       __syncwarp(group_mask);
 
       // store in shared
-      for (int item = 0; item < ITEMS_PER_THREAD; item++)
+      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
       {
-        const int idx = THREADS_PER_SEGMENT * item + lane_id;
+        const int idx = PolicyT::WARP_THREADS * item + lane_id;
         keys[item]    = cache[idx];
       }
 
-      for (int item = 0; item < ITEMS_PER_THREAD; item++)
+      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
       {
-        const int idx = THREADS_PER_SEGMENT * item + lane_id;
+        const int idx = PolicyT::WARP_THREADS * item + lane_id;
 
         if (idx < segment_size)
         {
@@ -322,9 +360,9 @@ private:
     else
     {
       // Naive store
-      for (int item = 0; item < ITEMS_PER_THREAD; item++)
+      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
       {
-        const int idx = lane_id * ITEMS_PER_THREAD + item;
+        const int idx = lane_id * PolicyT::ITEMS_PER_THREAD + item;
 
         if (idx < segment_size)
         {
