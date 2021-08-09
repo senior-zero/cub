@@ -32,6 +32,9 @@
 #include "../warp/warp_load.cuh"
 #include "../warp/warp_merge_sort.cuh"
 
+#include <thrust/system/cuda/detail/core/util.h>
+
+
 CUB_NAMESPACE_BEGIN
 
 
@@ -82,18 +85,43 @@ public:
   using WarpMergeSortT =
     WarpMergeSort<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::WARP_THREADS, ValueT>;
 
-  using WarpKeyLoadT =
-    WarpLoad<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::LOAD_ALGORITHM, PolicyT::WARP_THREADS>;
+  using KeysLoadIt  = typename THRUST_NS_QUALIFIER::cuda_cub::core::LoadIterator<PolicyT, const KeyT*>::type;
+  using ItemsLoadIt = typename THRUST_NS_QUALIFIER::cuda_cub::core::LoadIterator<PolicyT, const ValueT*>::type;
 
-  using TempStorage = typename WarpMergeSortT::TempStorage;
+  using WarpLoadKeys  = cub::WarpLoad<KeyT, PolicyT::ITEMS_PER_THREAD, PolicyT::LOAD_ALGORITHM, PolicyT::WARP_THREADS>;
+  using WarpLoadItems = cub::WarpLoad<ValueT, PolicyT::ITEMS_PER_THREAD, PolicyT::LOAD_ALGORITHM, PolicyT::WARP_THREADS>;
+
+  union _TempStorage
+  {
+    typename WarpLoadKeys::TempStorage load_keys;
+    typename WarpLoadItems::TempStorage load_items;
+    typename WarpMergeSortT::TempStorage sort;
+
+    struct StoreTMP
+    {
+      KeyT keys_shared[PolicyT::ITEMS_PER_THREAD * PolicyT::WARP_THREADS];
+      ValueT items_shared[PolicyT::ITEMS_PER_THREAD * PolicyT::WARP_THREADS];
+    } store;
+  };
+
+  /// Alias wrapper allowing storage to be unioned
+  struct TempStorage : Uninitialized<_TempStorage> {};
+
+  _TempStorage &storage;
+
+  __device__ __forceinline__
+  explicit AgentSubWarpSort(TempStorage &temp_storage)
+    : storage(temp_storage.Alias())
+  {
+  }
+
 
   __device__ __forceinline__
   void ProcessSegment(int segment_size,
-                      const KeyT *keys_input,
+                      KeysLoadIt keys_input,
                       KeyT *keys_output,
-                      const ValueT *values_input,
-                      ValueT *values_output,
-                      TempStorage& temp_storage)
+                      ItemsLoadIt values_input,
+                      ValueT *values_output)
   {
     auto binary_op = [] (KeyT lhs, KeyT rhs) -> bool
     {
@@ -107,7 +135,7 @@ public:
       }
     };
 
-    WarpMergeSortT warp_merge_sort(temp_storage);
+    WarpMergeSortT warp_merge_sort(storage.sort);
 
     if (segment_size < 3)
     {
@@ -133,22 +161,16 @@ public:
                                                      : Traits<KeyT>::MAX_KEY;
       KeyT oob_default = reinterpret_cast<KeyT &>(default_key_bits);
 
-      Load(warp_merge_sort.linear_tid,
-           warp_merge_sort.member_mask,
-           segment_size,
-           keys_input,
-           oob_default,
-           keys,
-           temp_storage.Alias().keys_shared);
+      WarpLoadKeys(storage.load_keys)
+        .Load(keys_input, keys, segment_size, oob_default);
+      WARP_SYNC(warp_merge_sort.member_mask);
 
       if (!KEYS_ONLY)
       {
-        Load(warp_merge_sort.linear_tid,
-             warp_merge_sort.member_mask,
-             segment_size,
-             values_input,
-             values,
-             temp_storage.Alias().items_shared);
+        WarpLoadItems(storage.load_items)
+          .Load(values_input, values, segment_size);
+
+        WARP_SYNC(warp_merge_sort.member_mask);
       }
 
       warp_merge_sort.Sort(keys, values, binary_op, segment_size, oob_default);
@@ -158,7 +180,7 @@ public:
             segment_size,
             keys_output,
             keys,
-            temp_storage.Alias().keys_shared);
+            storage.store.keys_shared);
 
       if (!KEYS_ONLY)
       {
@@ -167,7 +189,7 @@ public:
               segment_size,
               values_output,
               values,
-              temp_storage.Alias().items_shared);
+              storage.store.items_shared);
       }
     }
   }
@@ -178,9 +200,9 @@ private:
   void ShortCircuit(
     unsigned int linear_tid,
     OffsetT segment_size,
-    const KeyT *keys_input,
+    KeysLoadIt keys_input,
     KeyT *keys_output,
-    const ValueT *values_input,
+    ItemsLoadIt values_input,
     ValueT *values_output,
     CompareOpT binary_op)
   {
@@ -188,14 +210,14 @@ private:
     {
       if (linear_tid == 0)
       {
-        if (keys_input != keys_output)
+        if (keys_input.ptr != keys_output)
         {
           keys_output[0] = keys_input[0];
         }
 
         if (!KEYS_ONLY)
         {
-          if (values_input != values_output)
+          if (values_input.ptr != values_output)
           {
             values_output[0] = values_input[0];
           }
@@ -216,7 +238,7 @@ private:
 
           if (!KEYS_ONLY)
           {
-            if (values_output != values_input)
+            if (values_output != values_input.ptr)
             {
               values_output[0] = values_input[0];
               values_output[1] = values_input[1];
@@ -239,80 +261,6 @@ private:
             values_output[0] = rhs_val;
             values_output[1] = lhs_val;
           }
-        }
-      }
-    }
-  }
-
-  template <typename T>
-  __device__ __forceinline__
-  void Load(unsigned int lane_id,
-            unsigned int group_mask,
-            OffsetT segment_size,
-            const T *input,
-            T oob_default,
-            T (&keys)[PolicyT::ITEMS_PER_THREAD],
-            T *cache)
-  {
-    for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
-    {
-      keys[item] = oob_default;
-    }
-
-    Load(lane_id, group_mask, segment_size, input, keys, cache);
-  }
-
-  template <typename T>
-  __device__ __forceinline__
-  void Load(unsigned int lane_id,
-            unsigned int group_mask,
-            OffsetT segment_size,
-            const T *input,
-            T (&keys)[PolicyT::ITEMS_PER_THREAD],
-            T *cache)
-  {
-    if (PolicyT::ITEMS_PER_THREAD > 10)
-    {
-      // COALESCED_LOAD
-
-      #pragma unroll
-      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
-      {
-        const int idx = PolicyT::WARP_THREADS * item + lane_id;
-
-        if (idx < segment_size)
-        {
-          keys[item] = input[idx];
-        }
-      }
-
-      // store in shared
-      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
-      {
-        const int idx = PolicyT::WARP_THREADS * item + lane_id;
-        cache[idx]    = keys[item];
-      }
-      __syncwarp(group_mask);
-
-      // load blocked
-      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
-      {
-        const int idx = PolicyT::ITEMS_PER_THREAD * lane_id + item;
-        keys[item]    = cache[idx];
-      }
-      __syncwarp(group_mask);
-    }
-    else
-    {
-      // Naive load
-
-      for (int item = 0; item < PolicyT::ITEMS_PER_THREAD; item++)
-      {
-        const unsigned int idx = lane_id * PolicyT::ITEMS_PER_THREAD + item;
-
-        if (idx < segment_size)
-        {
-          keys[item] = input[idx];
         }
       }
     }

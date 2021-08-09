@@ -117,12 +117,12 @@ __global__ void DeviceSegmentedSortFallbackKernel(
     // Sort by a single warp
     if (threadIdx.x < MediumPolicyT::WARP_THREADS)
     {
-      AgentWarpMergeSortT().ProcessSegment(num_items,
-                                           d_keys_in_origin + segment_begin,
-                                           d_keys_out_orig + segment_begin,
-                                           d_values_in_origin + segment_begin,
-                                           d_values_out_origin + segment_begin,
-                                           temp_storage.medium_warp_sort);
+      AgentWarpMergeSortT(temp_storage.medium_warp_sort)
+        .ProcessSegment(num_items,
+                        d_keys_in_origin + segment_begin,
+                        d_keys_out_orig + segment_begin,
+                        d_values_in_origin + segment_begin,
+                        d_values_out_origin + segment_begin);
     }
   }
   else if (num_items < cacheable_tile_size)
@@ -234,13 +234,12 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
       const OffsetT segment_end   = d_end_offsets[segment_id];
       const OffsetT num_items     = segment_end - segment_begin;
 
-      MediumAgentWarpMergeSortT().ProcessSegment(
-        num_items,
-        d_keys_in_origin + segment_begin,
-        d_keys_out_orig + segment_begin,
-        d_values_in_origin + segment_begin,
-        d_values_out_origin + segment_begin,
-        temp_storage.medium[sid_within_block]);
+      MediumAgentWarpMergeSortT(temp_storage.medium[sid_within_block])
+        .ProcessSegment(num_items,
+                        d_keys_in_origin + segment_begin,
+                        d_keys_out_orig + segment_begin,
+                        d_values_in_origin + segment_begin,
+                        d_values_out_origin + segment_begin);
     }
   }
   else
@@ -258,13 +257,12 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
       const OffsetT segment_end   = d_end_offsets[segment_id];
       const OffsetT num_items     = segment_end - segment_begin;
 
-      SmallAgentWarpMergeSortT().ProcessSegment(
-        num_items,
-        d_keys_in_origin + segment_begin,
-        d_keys_out_orig + segment_begin,
-        d_values_in_origin + segment_begin,
-        d_values_out_origin + segment_begin,
-        temp_storage.small[sid_within_block]);
+      SmallAgentWarpMergeSortT(temp_storage.small[sid_within_block])
+        .ProcessSegment(num_items,
+                        d_keys_in_origin + segment_begin,
+                        d_keys_out_orig + segment_begin,
+                        d_values_in_origin + segment_begin,
+                        d_values_out_origin + segment_begin);
     }
   }
 }
