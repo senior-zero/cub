@@ -164,34 +164,6 @@ bool Compare(
 }
 
 
-template <typename T,
-          int LogicalWarpThreads,
-          int ItemsPerThread,
-          int BlockThreads>
-void FillStriped(thrust::host_vector<T> &data)
-{
-  auto it = data.begin();
-
-  const int warps_in_block = BlockThreads / LogicalWarpThreads;
-  const int items_per_warp = LogicalWarpThreads * ItemsPerThread;
-
-  for (int warp_id = 0; warp_id < warps_in_block; warp_id++)
-  {
-    const T warp_offset_val = static_cast<T>(items_per_warp * warp_id);
-
-    for (int lane_id = 0; lane_id < LogicalWarpThreads; lane_id++)
-    {
-      const T lane_offset = warp_offset_val + static_cast<T>(lane_id);
-
-      for (int item = 0; item < ItemsPerThread; item++)
-      {
-        *(it++) = lane_offset + static_cast<T>(item * LogicalWarpThreads);
-      }
-    }
-  }
-}
-
-
 template <typename InputT,
           typename OutputT,
           int LogicalWarpThreads,
@@ -203,7 +175,8 @@ void TestStripedToBlocked(thrust::device_vector<InputT> &input,
   thrust::fill(output.begin(), output.end(), OutputT{0});
 
   thrust::host_vector<InputT> h_input(input.size());
-  FillStriped<InputT, LogicalWarpThreads, ItemsPerThread, BlockThreads>(h_input);
+  FillStriped<LogicalWarpThreads, ItemsPerThread, BlockThreads>(
+    h_input.begin());
 
   input = h_input;
 
@@ -231,7 +204,8 @@ void TestBlockedToStriped(thrust::device_vector<InputT> &input,
   thrust::fill(output.begin(), output.end(), OutputT{0});
 
   thrust::host_vector<OutputT> expected_output(input.size());
-  FillStriped<OutputT, LogicalWarpThreads, ItemsPerThread, BlockThreads>(expected_output);
+  FillStriped<LogicalWarpThreads, ItemsPerThread, BlockThreads>(
+    expected_output.begin());
 
   thrust::sequence(input.begin(), input.end());
 
