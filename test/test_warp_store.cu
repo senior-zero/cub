@@ -30,8 +30,8 @@
 
 #include <iterator>
 
-#include <cub/warp/warp_load.cuh>
-#include <cub/iterator/cache_modified_input_iterator.cuh>
+#include <cub/warp/warp_store.cuh>
+#include <cub/iterator/cache_modified_output_iterator.cuh>
 #include <cub/iterator/discard_output_iterator.cuh>
 #include <cub/util_allocator.cuh>
 
@@ -50,123 +50,68 @@ const int MAX_ITERATIONS = 30;
 template <int                 BlockThreads,
           int                 WarpThreads,
           int                 ItemsPerThread,
-          WarpLoadAlgorithm   LoadAlgorithm,
-          typename            InputIteratorT>
-__global__ void kernel(InputIteratorT input,
-                       int *err)
+          WarpStoreAlgorithm  StoreAlgorithm,
+          typename            OutputIteratorT,
+          typename            OutputT>
+__global__ void kernel(OutputIteratorT output)
 {
-  using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
-
-  using WarpLoadT = WarpLoad<InputT,
-                             ItemsPerThread,
-                             LoadAlgorithm,
-                             WarpThreads>;
+  using WarpStoreT =
+    WarpStore<OutputT, ItemsPerThread, StoreAlgorithm, WarpThreads>;
 
   constexpr int warps_in_block = BlockThreads / WarpThreads;
   constexpr int tile_size = ItemsPerThread * WarpThreads;
   const int warp_id = static_cast<int>(threadIdx.x) / WarpThreads;
 
-  __shared__
-    typename WarpLoadT::TempStorage temp_storage[warps_in_block];
+  __shared__ typename WarpStoreT::TempStorage temp_storage[warps_in_block];
 
-  InputT reg[ItemsPerThread];
-  WarpLoadT(temp_storage[warp_id]).Load(input + warp_id * tile_size, reg);
-
-  for (int item = 0; item < ItemsPerThread; item++)
-  {
-    const auto expected_value =
-      static_cast<InputT>(threadIdx.x * ItemsPerThread + item);
-
-    if (reg[item] != expected_value)
-    {
-      printf("TID: %u; WID: %d; LID: %d: ITEM: %d/%d: %d != %d\n",
-             threadIdx.x,
-             warp_id,
-             static_cast<int>(threadIdx.x) % WarpThreads,
-             item,
-             ItemsPerThread,
-             static_cast<int>(reg[item]),
-             static_cast<int>(expected_value));
-      atomicAdd(err, 1);
-      break;
-    }
-  }
+  OutputT reg[ItemsPerThread];
+  WarpStoreT(temp_storage[warp_id]).Store(output + warp_id * tile_size, reg);
 }
 
 
 template <int                 BlockThreads,
           int                 WarpThreads,
           int                 ItemsPerThread,
-          WarpLoadAlgorithm   LoadAlgorithm,
-          typename            InputIteratorT>
+          WarpStoreAlgorithm  StoreAlgorithm,
+          typename            OutputIteratorT,
+          typename            OutputT>
 __global__ void kernel(int valid_items,
-                       InputIteratorT input,
-                       int *err)
+                       OutputIteratorT output)
 {
-  using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
-
-  using WarpLoadT = WarpLoad<InputT,
-    ItemsPerThread,
-    LoadAlgorithm,
-    WarpThreads>;
+  using WarpStoreT =
+    WarpStore<OutputT, ItemsPerThread, StoreAlgorithm, WarpThreads>;
 
   constexpr int warps_in_block = BlockThreads / WarpThreads;
   constexpr int tile_size = ItemsPerThread * WarpThreads;
 
   const int tid = static_cast<int>(threadIdx.x);
   const int warp_id = tid / WarpThreads;
-  const int lane_id = tid % WarpThreads;
 
-  __shared__
-  typename WarpLoadT::TempStorage temp_storage[warps_in_block];
+  __shared__ typename WarpStoreT::TempStorage temp_storage[warps_in_block];
 
-  InputT reg[ItemsPerThread];
-  const auto oob_default = static_cast<InputT>(valid_items);
+  OutputT reg[ItemsPerThread];
 
-  WarpLoadT(temp_storage[warp_id])
-    .Load(input + warp_id * tile_size, reg, valid_items, oob_default);
-
-  for (int item = 0; item < ItemsPerThread; item++)
-  {
-    const auto expected_value =
-      static_cast<InputT>(tid * ItemsPerThread + item);
-
-    const bool is_oob = LoadAlgorithm == WarpLoadAlgorithm::WARP_LOAD_STRIPED
-                      ? item * WarpThreads + lane_id >= valid_items
-                      : lane_id * ItemsPerThread + item >= valid_items;
-
-    if (is_oob)
-    {
-      if (reg[item] != oob_default)
-      {
-        atomicAdd(err, 1);
-      }
-    }
-    else if (reg[item] != expected_value)
-    {
-      atomicAdd(err, 1);
-    }
-  }
+  WarpStoreT(temp_storage[warp_id])
+    .Store(output + warp_id * tile_size, reg, valid_items);
 }
 
 template <typename            T,
           int                 BlockThreads,
           int                 WarpThreads,
           int                 ItemsPerThread,
-          WarpLoadAlgorithm   LoadAlgorithm,
-          typename            InputIteratorT>
-void TestImplementation(InputIteratorT input)
+          WarpStoreAlgorithm  StoreAlgorithm,
+          typename            OutputIteratorT>
+void TestImplementation(OutputIteratorT output)
 {
-  thrust::device_vector<int> err(1, 0);
+  kernel<BlockThreads,
+         WarpThreads,
+         ItemsPerThread,
+         StoreAlgorithm,
+         OutputIteratorT,
+         T><<<1, BlockThreads>>>(output);
 
-  kernel<BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>
-    <<<1, BlockThreads>>>(input, thrust::raw_pointer_cast(err.data()));
   CubDebugExit(cudaPeekAtLastError());
   CubDebugExit(cudaDeviceSynchronize());
-
-  const int errors_number = err[0];
-  const int expected_errors_number = 0;
-  AssertEquals(errors_number, expected_errors_number);
 }
 
 
@@ -174,24 +119,20 @@ template <typename            T,
           int                 BlockThreads,
           int                 WarpThreads,
           int                 ItemsPerThread,
-          WarpLoadAlgorithm   LoadAlgorithm,
-          typename            InputIteratorT>
+          WarpStoreAlgorithm  StoreAlgorithm,
+          typename            OutputIteratorT>
 void TestImplementation(int valid_items,
-                        InputIteratorT input)
+                        OutputIteratorT output)
 {
-  thrust::device_vector<int> err(1, 0);
-
-  kernel<BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>
-    <<<1, BlockThreads>>>(valid_items,
-                          input,
-                          thrust::raw_pointer_cast(err.data()));
+  kernel<BlockThreads,
+         WarpThreads,
+         ItemsPerThread,
+         StoreAlgorithm,
+         OutputIteratorT,
+         T><<<1, BlockThreads>>>(valid_items, output);
 
   CubDebugExit(cudaPeekAtLastError());
   CubDebugExit(cudaDeviceSynchronize());
-
-  const int errors_number = err[0];
-  const int expected_errors_number = 0;
-  AssertEquals(errors_number, expected_errors_number);
 }
 
 
@@ -199,7 +140,7 @@ template <typename            T,
           int                 BlockThreads,
           int                 WarpThreads,
           int                 ItemsPerThread,
-          WarpLoadAlgorithm   LoadAlgorithm>
+          WarpStoreAlgorithm  StoreAlgorithm>
 thrust::device_vector<T> GenInput()
 {
   const int tile_size = WarpThreads * ItemsPerThread;
@@ -208,7 +149,7 @@ thrust::device_vector<T> GenInput()
 
   thrust::device_vector<T> input(elements);
 
-  if (LoadAlgorithm == WarpLoadAlgorithm::WARP_LOAD_STRIPED)
+  if (StoreAlgorithm == WarpStoreAlgorithm::WARP_STORE_STRIPED)
   {
     thrust::host_vector<T> h_input(elements);
 
@@ -234,13 +175,13 @@ template <typename            T,
           int                 BlockThreads,
           int                 WarpThreads,
           int                 ItemsPerThread,
-          WarpLoadAlgorithm   LoadAlgorithm>
+          WarpStoreAlgorithm  StoreAlgorithm>
 void TestPointer()
 {
   thrust::device_vector<T> input =
-    GenInput<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>();
+    GenInput<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>();
 
-  TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>(
+  TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
     thrust::raw_pointer_cast(input.data()));
 
   const unsigned int max_valid_items = WarpThreads * ItemsPerThread;
@@ -249,25 +190,25 @@ void TestPointer()
   {
     const int valid_items = static_cast<int>(RandomValue(max_valid_items));
 
-    TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>(
+    TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
       valid_items, thrust::raw_pointer_cast(input.data()));
   }
 }
 
 
 template <typename            T,
-          int                 BlockThreads,
-          int                 WarpThreads,
-          int                 ItemsPerThread,
-          WarpLoadAlgorithm   LoadAlgorithm,
-          CacheLoadModifier   LoadModifier>
+  int                 BlockThreads,
+  int                 WarpThreads,
+  int                 ItemsPerThread,
+  WarpStoreAlgorithm  StoreAlgorithm,
+  CacheStoreModifier  StoreModifier>
 void TestIterator()
 {
   thrust::device_vector<T> input =
-    GenInput<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>();
+    GenInput<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>();
 
-  TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>(
-    CacheModifiedInputIterator<LoadModifier, T>(
+  TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>(
+    CacheModifiedOutputIterator<StoreModifier, T>(
       thrust::raw_pointer_cast(input.data())));
 
   const int max_valid_items = WarpThreads * ItemsPerThread;
@@ -276,9 +217,13 @@ void TestIterator()
   {
     const int valid_items = RandomValue(max_valid_items);
 
-    TestImplementation<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>(
+    TestImplementation<T,
+                       BlockThreads,
+                       WarpThreads,
+                       ItemsPerThread,
+                       StoreAlgorithm>(
       valid_items,
-      CacheModifiedInputIterator<LoadModifier, T>(
+      CacheModifiedOutputIterator<StoreModifier, T>(
         thrust::raw_pointer_cast(input.data())));
   }
 }
@@ -288,16 +233,15 @@ template <typename            T,
           int                 BlockThreads,
           int                 WarpThreads,
           int                 ItemsPerThread,
-          WarpLoadAlgorithm   LoadAlgorithm>
+          WarpStoreAlgorithm  StoreAlgorithm>
 void TestIterator()
 {
-  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm, CacheLoadModifier::LOAD_DEFAULT>();
-  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm, CacheLoadModifier::LOAD_CA>();
-  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm, CacheLoadModifier::LOAD_CG>();
-  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm, CacheLoadModifier::LOAD_CS>();
-  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm, CacheLoadModifier::LOAD_CV>();
-  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm, CacheLoadModifier::LOAD_LDG>();
-  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm, CacheLoadModifier::LOAD_VOLATILE>();
+  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm, CacheStoreModifier::STORE_DEFAULT>();
+  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm, CacheStoreModifier::STORE_WB>();
+  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm, CacheStoreModifier::STORE_CG>();
+  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm, CacheStoreModifier::STORE_CS>();
+  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm, CacheStoreModifier::STORE_WT>();
+  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm, CacheStoreModifier::STORE_VOLATILE>();
 }
 
 
@@ -305,11 +249,11 @@ template <typename            T,
           int                 BlockThreads,
           int                 WarpThreads,
           int                 ItemsPerThread,
-          WarpLoadAlgorithm   LoadAlgorithm>
+          WarpStoreAlgorithm  StoreAlgorithm>
 void Test()
 {
-  TestPointer<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>();
-  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, LoadAlgorithm>();
+  TestPointer<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>();
+  TestIterator<T, BlockThreads, WarpThreads, ItemsPerThread, StoreAlgorithm>();
 }
 
 
@@ -319,10 +263,10 @@ template <typename  T,
           int       ItemsPerThread>
 void Test()
 {
-  Test<T, BlockThreads, WarpThreads, ItemsPerThread, WarpLoadAlgorithm::WARP_LOAD_DIRECT>();
-  Test<T, BlockThreads, WarpThreads, ItemsPerThread, WarpLoadAlgorithm::WARP_LOAD_STRIPED>();
-  Test<T, BlockThreads, WarpThreads, ItemsPerThread, WarpLoadAlgorithm::WARP_LOAD_TRANSPOSE>();
-  Test<T, BlockThreads, WarpThreads, ItemsPerThread, WarpLoadAlgorithm::WARP_LOAD_VECTORIZE>();
+  Test<T, BlockThreads, WarpThreads, ItemsPerThread, WarpStoreAlgorithm::WARP_STORE_DIRECT>();
+  Test<T, BlockThreads, WarpThreads, ItemsPerThread, WarpStoreAlgorithm::WARP_STORE_STRIPED>();
+  Test<T, BlockThreads, WarpThreads, ItemsPerThread, WarpStoreAlgorithm::WARP_STORE_TRANSPOSE>();
+  Test<T, BlockThreads, WarpThreads, ItemsPerThread, WarpStoreAlgorithm::WARP_STORE_VECTORIZE>();
 }
 
 

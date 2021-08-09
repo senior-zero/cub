@@ -76,8 +76,12 @@
 #include "thread/thread_store.cuh"
 
 // Warp
+#include "warp/warp_exchange.cuh"
+#include "warp/warp_load.cuh"
+#include "warp/warp_merge_sort.cuh"
 #include "warp/warp_reduce.cuh"
 #include "warp/warp_scan.cuh"
+#include "warp/warp_store.cuh"
 
 // Iterator
 #include "iterator/arg_index_input_iterator.cuh"

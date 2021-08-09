@@ -250,24 +250,18 @@ private:
   template <int DUMMY>
   struct LoadInternal<WARP_LOAD_TRANSPOSE, DUMMY>
   {
-    // BlockExchange utility type for keys
     using WarpExchangeT =
       WarpExchange<InputT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS, PTX_ARCH>;
 
-    /// Shared memory storage layout type
     struct _TempStorage : WarpExchangeT::TempStorage
     {};
 
-    /// Alias wrapper allowing storage to be unioned
     struct TempStorage : Uninitialized<_TempStorage> {};
 
-    /// Thread reference to shared storage
     _TempStorage &temp_storage;
 
-    /// Linear thread-id
     int linear_tid;
 
-    /// Constructor
     __device__ __forceinline__ LoadInternal(
       TempStorage &temp_storage,
       int linear_tid)
