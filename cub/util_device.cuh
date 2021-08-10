@@ -116,11 +116,13 @@ class Array
 public:
   Array() = delete;
 
+  __host__ __device__
   explicit Array(void *&slot_pointer, std::size_t &slot_bytes)
       : slot_pointer(slot_pointer)
       , slot_bytes(slot_bytes)
   {}
 
+  __host__ __device__
   explicit Array(void *&slot_pointer,
                  std::size_t &slot_bytes,
                  std::size_t elements)
@@ -131,12 +133,14 @@ public:
     UpdateSlot();
   }
 
+  __host__ __device__
   void Grow(std::size_t new_elements)
   {
     elements = new_elements;
     UpdateSlot();
   }
 
+  __host__ __device__
   T *Get() const
   {
     if (elements == 0)
@@ -148,9 +152,10 @@ public:
   }
 
 private:
+  __host__ __device__
   void UpdateSlot()
   {
-    slot_bytes = std::max(slot_bytes, elements * sizeof(T));
+    slot_bytes = (max)(slot_bytes, elements * sizeof(T));
   }
 };
 
@@ -162,17 +167,21 @@ class Slot
 public:
   Slot() = default;
 
+  __host__ __device__
   std::size_t GetBytesRequired() const { return size; }
 
+  __host__ __device__
   void SetStorage(void *ptr) { pointer = ptr; }
 
   template <typename T>
+  __host__ __device__
   Array<T> GetAlias()
   {
     return Array<T>(pointer, size);
   }
 
   template <typename T>
+  __host__ __device__
   Array<T> GetAlias(std::size_t elements)
   {
     return Array<T>(pointer, size, elements);
@@ -182,7 +191,7 @@ public:
 template <int SlotsCount>
 class Layout
 {
-  std::array<Slot, SlotsCount> slots;
+  Slot slots[SlotsCount];
 
   std::size_t sizes[SlotsCount];
   void *pointers[SlotsCount];
@@ -190,6 +199,7 @@ class Layout
 public:
   Layout() = default;
 
+  __host__ __device__
   Slot *GetSlot(int slot_id)
   {
     if (slot_id < SlotsCount)
@@ -200,6 +210,7 @@ public:
     return nullptr;
   }
 
+  __host__ __device__
   std::size_t GetSize()
   {
     PrepareInterface();
@@ -217,6 +228,7 @@ public:
     return temp_storage_bytes;
   }
 
+  __host__ __device__
   cudaError_t MapToBuffer(void *d_temp_storage, std::size_t temp_storage_bytes)
   {
     cudaError_t error = cudaSuccess;
@@ -231,7 +243,7 @@ public:
       return error;
     }
 
-    for (std::size_t slot_id = 0; slot_id < slots.size(); slot_id++)
+    for (std::size_t slot_id = 0; slot_id < SlotsCount; slot_id++)
     {
       slots[slot_id].SetStorage(pointers[slot_id]);
     }
@@ -240,9 +252,10 @@ public:
   }
 
 private:
+  __host__ __device__
   void PrepareInterface()
   {
-    for (std::size_t slot_id = 0; slot_id < slots.size(); slot_id++)
+    for (std::size_t slot_id = 0; slot_id < SlotsCount; slot_id++)
     {
       const std::size_t slot_size = slots[slot_id].GetBytesRequired();
 

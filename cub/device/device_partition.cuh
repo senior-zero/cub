@@ -264,6 +264,7 @@ struct DevicePartition
               typename NumSelectedIteratorT,
               typename SelectFirstPartOp,
               typename SelectSecondPartOp>
+    CUB_RUNTIME_FUNCTION __forceinline__
     static cudaError_t If(
       void*                       d_temp_storage,
       std::size_t&                temp_storage_bytes,
