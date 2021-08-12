@@ -46,34 +46,6 @@
 
 #include <type_traits>
 
-#ifndef ITEMS_PER_SMALL_SEG
-#define ITEMS_PER_SMALL_SEG 9
-#endif
-
-#ifndef ITEMS_PER_MEDIUM_SEG
-#define ITEMS_PER_MEDIUM_SEG 9
-#endif
-
-#ifndef THREADS_PER_SMALL_SEG
-#define THREADS_PER_SMALL_SEG 4
-#endif
-
-#ifndef THREADS_PER_MEDIUM_SEG
-#define THREADS_PER_MEDIUM_SEG 32
-#endif
-
-#ifndef SMALL_LOAD_ALG
-#define SMALL_LOAD_ALG WarpLoadAlgorithm::WARP_LOAD_DIRECT
-#endif
-
-#ifndef MEDIUM_LOAD_ALG
-#define MEDIUM_LOAD_ALG WarpLoadAlgorithm::WARP_LOAD_DIRECT
-#endif
-
-#ifndef LOAD_MOD
-#define LOAD_MOD CacheLoadModifier::LOAD_DEFAULT
-#endif
-
 
 CUB_NAMESPACE_BEGIN
 
@@ -454,7 +426,6 @@ struct DeviceSegmentedSortPolicy
   // Architecture-specific tuning policies
   //------------------------------------------------------------------------------
 
-  // TODO uint32, uint64, pairs
   struct Policy350 : ChainedPolicy<350, Policy350, Policy350>
   {
     constexpr static int BLOCK_THREADS = 128;
@@ -471,41 +442,38 @@ struct DeviceSegmentedSortPolicy
                                     RADIX_BITS>;
 
     constexpr static int ITEMS_PER_SMALL_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_SMALL_SEG);
+      Nominal4BItemsToItems<DominantT>(5);
 
     constexpr static int ITEMS_PER_MEDIUM_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_MEDIUM_SEG);
+      Nominal4BItemsToItems<DominantT>(5);
 
     using SmallAndMediumSegmentedSortPolicyT =
-    AgentSmallAndMediumSegmentedSortPolicy<
+      AgentSmallAndMediumSegmentedSortPolicy<
 
-      BLOCK_THREADS,
+        BLOCK_THREADS,
 
-      // Small policy
-      cub::AgentSubWarpMergeSortPolicy<THREADS_PER_SMALL_SEG, // Threads per
-        // segment
-        ITEMS_PER_SMALL_THREAD,
-        SMALL_LOAD_ALG,
-        LOAD_MOD>,
+        // Small policy
+        cub::AgentSubWarpMergeSortPolicy<4,
+                                         ITEMS_PER_SMALL_THREAD,
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>,
 
-      // Medium policy
-      cub::AgentSubWarpMergeSortPolicy<THREADS_PER_MEDIUM_SEG, // Threads per
-        // segment
-        ITEMS_PER_MEDIUM_THREAD,
-        MEDIUM_LOAD_ALG,
-        LOAD_MOD>>;
+        // Medium policy
+        cub::AgentSubWarpMergeSortPolicy<32,
+                                         ITEMS_PER_MEDIUM_THREAD,
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>>;
   };
 
-  // TODO uint32, uint64, pairs
   struct Policy500 : ChainedPolicy<500, Policy500, Policy350>
   {
     constexpr static int BLOCK_THREADS = 256;
     constexpr static int RADIX_BITS = sizeof(KeyT) > 1 ? 6 : 4;
 
     using LargeSegmentPolicy =
-    AgentRadixSortDownsweepPolicy<BLOCK_THREADS,
-      16,
-      DominantT,
+      AgentRadixSortDownsweepPolicy<BLOCK_THREADS,
+                                    16,
+                                    DominantT,
                                     BLOCK_LOAD_DIRECT,
                                     LOAD_LDG,
                                     RADIX_RANK_MEMOIZE,
@@ -513,10 +481,10 @@ struct DeviceSegmentedSortPolicy
                                     RADIX_BITS>;
 
     constexpr static int ITEMS_PER_SMALL_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_SMALL_SEG);
+      Nominal4BItemsToItems<DominantT>(7);
 
     constexpr static int ITEMS_PER_MEDIUM_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_MEDIUM_SEG);
+      Nominal4BItemsToItems<DominantT>(7);
 
     using SmallAndMediumSegmentedSortPolicyT =
       AgentSmallAndMediumSegmentedSortPolicy<
@@ -524,28 +492,27 @@ struct DeviceSegmentedSortPolicy
         BLOCK_THREADS,
 
         // Small policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_SMALL_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<4, // Threads per segment
                                          ITEMS_PER_SMALL_THREAD,
-                                         SMALL_LOAD_ALG,
-                                         LOAD_MOD>,
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>,
 
         // Medium policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_MEDIUM_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<32, // Threads per segment
                                          ITEMS_PER_MEDIUM_THREAD,
-                                         MEDIUM_LOAD_ALG,
-                                         LOAD_MOD>>;
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>>;
   };
 
-  // TODO uint32, uint64, pairs
   struct Policy600 : ChainedPolicy<600, Policy600, Policy500>
   {
     constexpr static int BLOCK_THREADS = 256;
     constexpr static int RADIX_BITS = sizeof(KeyT) > 1 ? 6 : 5;
 
     using LargeSegmentPolicy =
-    AgentRadixSortDownsweepPolicy<BLOCK_THREADS,
-      19,
-      DominantT,
+      AgentRadixSortDownsweepPolicy<BLOCK_THREADS,
+                                    19,
+                                    DominantT,
                                     BLOCK_LOAD_TRANSPOSE,
                                     LOAD_DEFAULT,
                                     RADIX_RANK_MATCH,
@@ -553,10 +520,10 @@ struct DeviceSegmentedSortPolicy
                                     RADIX_BITS>;
 
     constexpr static int ITEMS_PER_SMALL_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_SMALL_SEG);
+      Nominal4BItemsToItems<DominantT>(9);
 
     constexpr static int ITEMS_PER_MEDIUM_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_MEDIUM_SEG);
+      Nominal4BItemsToItems<DominantT>(9);
 
     using SmallAndMediumSegmentedSortPolicyT =
       AgentSmallAndMediumSegmentedSortPolicy<
@@ -564,28 +531,27 @@ struct DeviceSegmentedSortPolicy
         BLOCK_THREADS,
 
         // Small policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_SMALL_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<4, // Threads per segment
                                          ITEMS_PER_SMALL_THREAD,
-                                         SMALL_LOAD_ALG,
-                                         LOAD_MOD>,
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>,
 
         // Medium policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_MEDIUM_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<32, // Threads per segment
                                          ITEMS_PER_MEDIUM_THREAD,
-                                         MEDIUM_LOAD_ALG,
-                                         LOAD_MOD>>;
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>>;
   };
 
-  // TODO uint32, uint64, pairs
   struct Policy610 : ChainedPolicy<610, Policy610, Policy600>
   {
     constexpr static int BLOCK_THREADS = 256;
     constexpr static int RADIX_BITS = sizeof(KeyT) > 1 ? 6 : 5;
 
     using LargeSegmentPolicy =
-    AgentRadixSortDownsweepPolicy<BLOCK_THREADS,
-      19,
-      DominantT,
+      AgentRadixSortDownsweepPolicy<BLOCK_THREADS,
+                                    19,
+                                    DominantT,
                                     BLOCK_LOAD_DIRECT,
                                     LOAD_LDG,
                                     RADIX_RANK_MEMOIZE,
@@ -593,10 +559,10 @@ struct DeviceSegmentedSortPolicy
                                     RADIX_BITS>;
 
     constexpr static int ITEMS_PER_SMALL_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_SMALL_SEG);
+      Nominal4BItemsToItems<DominantT>(9);
 
     constexpr static int ITEMS_PER_MEDIUM_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_MEDIUM_SEG);
+      Nominal4BItemsToItems<DominantT>(9);
 
     using SmallAndMediumSegmentedSortPolicyT =
       AgentSmallAndMediumSegmentedSortPolicy<
@@ -604,19 +570,18 @@ struct DeviceSegmentedSortPolicy
         BLOCK_THREADS,
 
         // Small policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_SMALL_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<4, // Threads per segment
                                          ITEMS_PER_SMALL_THREAD,
-                                         SMALL_LOAD_ALG,
-                                         LOAD_MOD>,
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>,
 
         // Medium policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_MEDIUM_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<32, // Threads per segment
                                          ITEMS_PER_MEDIUM_THREAD,
-                                         MEDIUM_LOAD_ALG,
-                                         LOAD_MOD>>;
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>>;
   };
 
-  // TODO uint32, uint64, pairs
   struct Policy620 : ChainedPolicy<620, Policy620, Policy610>
   {
     constexpr static int BLOCK_THREADS = 256;
@@ -633,10 +598,10 @@ struct DeviceSegmentedSortPolicy
                                     RADIX_BITS>;
 
     constexpr static int ITEMS_PER_SMALL_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_SMALL_SEG);
+      Nominal4BItemsToItems<DominantT>(9);
 
     constexpr static int ITEMS_PER_MEDIUM_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_MEDIUM_SEG);
+      Nominal4BItemsToItems<DominantT>(9);
 
     using SmallAndMediumSegmentedSortPolicyT =
       AgentSmallAndMediumSegmentedSortPolicy<
@@ -644,28 +609,27 @@ struct DeviceSegmentedSortPolicy
         BLOCK_THREADS,
 
         // Small policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_SMALL_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<4, // Threads per segment
                                          ITEMS_PER_SMALL_THREAD,
-                                         SMALL_LOAD_ALG,
-                                         LOAD_MOD>,
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>,
 
         // Medium policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_MEDIUM_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<32, // Threads per segment
                                          ITEMS_PER_MEDIUM_THREAD,
-                                         MEDIUM_LOAD_ALG,
-                                         LOAD_MOD>>;
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>>;
   };
 
-  // TODO uint32, uint64, pairs
   struct Policy700 : ChainedPolicy<700, Policy700, Policy620>
   {
     constexpr static int BLOCK_THREADS = 256;
     constexpr static int RADIX_BITS = sizeof(KeyT) > 1 ? 6 : 5;
 
     using LargeSegmentPolicy =
-    AgentRadixSortDownsweepPolicy<BLOCK_THREADS,
-      19,
-      DominantT,
+      AgentRadixSortDownsweepPolicy<BLOCK_THREADS,
+                                    19,
+                                    DominantT,
                                     BLOCK_LOAD_DIRECT,
                                     LOAD_LDG,
                                     RADIX_RANK_MEMOIZE,
@@ -673,10 +637,10 @@ struct DeviceSegmentedSortPolicy
                                     RADIX_BITS>;
 
     constexpr static int ITEMS_PER_SMALL_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_SMALL_SEG);
+      Nominal4BItemsToItems<DominantT>(7);
 
     constexpr static int ITEMS_PER_MEDIUM_THREAD =
-      Nominal4BItemsToItems<DominantT>(ITEMS_PER_MEDIUM_SEG);
+      Nominal4BItemsToItems<DominantT>(KEYS_ONLY ? 11 : 7);
 
     using SmallAndMediumSegmentedSortPolicyT =
       AgentSmallAndMediumSegmentedSortPolicy<
@@ -684,19 +648,18 @@ struct DeviceSegmentedSortPolicy
         BLOCK_THREADS,
 
         // Small policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_SMALL_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<(KEYS_ONLY ? 4 : 8), // Threads per segment
                                          ITEMS_PER_SMALL_THREAD,
-                                         SMALL_LOAD_ALG,
-                                         LOAD_MOD>,
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>,
 
         // Medium policy
-        cub::AgentSubWarpMergeSortPolicy<THREADS_PER_MEDIUM_SEG, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<32, // Threads per segment
                                          ITEMS_PER_MEDIUM_THREAD,
-                                         MEDIUM_LOAD_ALG,
-                                         LOAD_MOD>>;
+                                         WarpLoadAlgorithm::WARP_LOAD_DIRECT,
+                                         CacheLoadModifier::LOAD_DEFAULT>>;
   };
 
-  // TODO uint64, pairs
   struct Policy750 : ChainedPolicy<750, Policy750, Policy700>
   {
     constexpr static int BLOCK_THREADS = 256;
@@ -736,7 +699,6 @@ struct DeviceSegmentedSortPolicy
                                          CacheLoadModifier::LOAD_DEFAULT>>;
   };
 
-  // TODO uint64, pairs
   struct Policy800 : ChainedPolicy<800, Policy800, Policy750>
   {
     constexpr static int BLOCK_THREADS = 256;
@@ -755,7 +717,7 @@ struct DeviceSegmentedSortPolicy
       Nominal4BItemsToItems<DominantT>(9);
 
     constexpr static int ITEMS_PER_MEDIUM_THREAD =
-      Nominal4BItemsToItems<DominantT>(7);
+      Nominal4BItemsToItems<DominantT>(KEYS_ONLY ? 7 : 11);
 
     using SmallAndMediumSegmentedSortPolicyT =
       AgentSmallAndMediumSegmentedSortPolicy<
@@ -763,19 +725,18 @@ struct DeviceSegmentedSortPolicy
         BLOCK_THREADS,
 
         // Small policy
-        cub::AgentSubWarpMergeSortPolicy<4, // Threads per segment
+        cub::AgentSubWarpMergeSortPolicy<(KEYS_ONLY ? 4 : 2), // Threads per segment
                                          ITEMS_PER_SMALL_THREAD,
                                          WarpLoadAlgorithm::WARP_LOAD_TRANSPOSE,
-                                         CacheLoadModifier::LOAD_LDG>,
+                                         CacheLoadModifier::LOAD_DEFAULT>,
 
         // Medium policy
         cub::AgentSubWarpMergeSortPolicy<32, // Threads per segment
                                          ITEMS_PER_MEDIUM_THREAD,
                                          WarpLoadAlgorithm::WARP_LOAD_TRANSPOSE,
-                                         CacheLoadModifier::LOAD_LDG>>;
+                                         CacheLoadModifier::LOAD_DEFAULT>>;
   };
 
-  // TODO pairs
   struct Policy860 : ChainedPolicy<860, Policy860, Policy800>
   {
     constexpr static int BLOCK_THREADS = 256;
@@ -1166,7 +1127,6 @@ private:
     {
       const OffsetT blocks_in_grid = large_segments; // One CTA per segment
 
-      // TODO cudaGraph
       if (debug_synchronous)
       {
         _CubLog("Invoking "
