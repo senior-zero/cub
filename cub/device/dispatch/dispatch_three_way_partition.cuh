@@ -60,7 +60,7 @@ template <
   typename            SelectSecondPartOp,
   typename            OffsetT>
 __launch_bounds__ (int(AgentThreeWayPartitionPolicyT::BLOCK_THREADS))
-__global__ void DeviceSelectSweep3Kernel(
+__global__ void DeviceThreeWayPartitionKernel(
   InputIteratorT             d_in,
   FirstOutputIteratorT       d_first_part_out,
   SecondOutputIteratorT      d_second_part_out,
@@ -105,7 +105,7 @@ __global__ void DeviceSelectSweep3Kernel(
 template <
   typename                ScanTileStateT,         ///< Tile status interface type
   typename                NumSelectedIteratorT>   ///< Output iterator type for recording the number of items selected
-__global__ void DeviceCompactInit3Kernel(
+__global__ void DeviceThreeWayPartitionInitKernel(
   ScanTileStateT          tile_state_1,           ///< [in] Tile status interface
   ScanTileStateT          tile_state_2,           ///< [in] Tile status interface
   int                     num_tiles,              ///< [in] Number of tiles
@@ -144,16 +144,10 @@ struct DispatchThreeWayPartitionIf
    * Types and constants
    ******************************************************************************/
 
-  // The output value type
   using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
+  using ScanTileStateT = cub::ScanTileState<OffsetT>;
 
-  enum
-  {
-    INIT_KERNEL_THREADS = 128,
-  };
-
-  // Tile status descriptor interface type
-  typedef cub::ScanTileState<OffsetT> ScanTileStateT;
+  constexpr static int INIT_KERNEL_THREADS = 256;
 
 
   /******************************************************************************
@@ -177,7 +171,7 @@ struct DispatchThreeWayPartitionIf
    * Tuning policies of current PTX compiler pass
    ******************************************************************************/
 
-  typedef Policy350 PtxPolicy;
+  using PtxPolicy = Policy350;
 
   // "Opaque" policies (whose parameterizations aren't reflected in the type signature)
   struct PtxThreeWayPartitionPolicyT : PtxPolicy::ThreeWayPartitionPolicy {};
@@ -474,33 +468,33 @@ struct DispatchThreeWayPartitionIf
       InitConfigs(ptx_version, select_if_config);
 
       // Dispatch
-      if (CubDebug(
-            error = Dispatch(
-              d_temp_storage,
-              temp_storage_bytes,
-              d_in,
-              d_first_part_out,
-              d_second_part_out,
-              d_unselected_out,
-              d_num_selected_out,
-              select_first_part_op,
-              select_second_part_op,
-              num_items,
-              stream,
-              debug_synchronous,
-              ptx_version,
-              DeviceCompactInit3Kernel<ScanTileStateT, NumSelectedIteratorT>,
-              DeviceSelectSweep3Kernel<PtxThreeWayPartitionPolicyT,
-                                       InputIteratorT,
-                                       FirstOutputIteratorT,
-                                       SecondOutputIteratorT,
-                                       UnselectedOutputIteratorT,
-                                       NumSelectedIteratorT,
-                                       ScanTileStateT,
-                                       SelectFirstPartOp,
-                                       SelectSecondPartOp,
-                                       OffsetT>,
-              select_if_config)))
+      if (CubDebug(error = Dispatch(
+                     d_temp_storage,
+                     temp_storage_bytes,
+                     d_in,
+                     d_first_part_out,
+                     d_second_part_out,
+                     d_unselected_out,
+                     d_num_selected_out,
+                     select_first_part_op,
+                     select_second_part_op,
+                     num_items,
+                     stream,
+                     debug_synchronous,
+                     ptx_version,
+                     DeviceThreeWayPartitionInitKernel<ScanTileStateT,
+                                                       NumSelectedIteratorT>,
+                     DeviceThreeWayPartitionKernel<PtxThreeWayPartitionPolicyT,
+                                                   InputIteratorT,
+                                                   FirstOutputIteratorT,
+                                                   SecondOutputIteratorT,
+                                                   UnselectedOutputIteratorT,
+                                                   NumSelectedIteratorT,
+                                                   ScanTileStateT,
+                                                   SelectFirstPartOp,
+                                                   SelectSecondPartOp,
+                                                   OffsetT>,
+                     select_if_config)))
       {
         break;
       }
