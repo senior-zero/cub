@@ -163,14 +163,13 @@ struct DispatchThreeWayPartitionIf
   /// SM35
   struct Policy350
   {
-    constexpr static int NOMINAL_4B_ITEMS_PER_THREAD = 10;
-    constexpr static int ITEMS_PER_THREAD = Nominal4BItemsToItems<InputT>(10);
+    constexpr static int ITEMS_PER_THREAD = Nominal4BItemsToItems<InputT>(9);
 
     using ThreeWayPartitionPolicy =
-      cub::AgentThreeWayPartitionPolicy<128,
+      cub::AgentThreeWayPartitionPolicy<256,
                                         ITEMS_PER_THREAD,
                                         cub::BLOCK_LOAD_DIRECT,
-                                        cub::LOAD_LDG,
+                                        cub::LOAD_DEFAULT,
                                         cub::BLOCK_SCAN_WARP_SCANS>;
   };
 
