@@ -438,7 +438,8 @@ __device__ __forceinline__ unsigned int WarpId()
  */
 template <int LOGICAL_WARP_THREADS,
           int PTX_ARCH = CUB_PTX_ARCH>
-__device__ __forceinline__ unsigned int WarpMask(unsigned int warp_id)
+__host__ __device__ __forceinline__
+unsigned int WarpMask(unsigned int warp_id)
 {
   constexpr bool is_pow_of_two = PowerOfTwo<LOGICAL_WARP_THREADS>::VALUE;
   constexpr bool is_arch_warp = LOGICAL_WARP_THREADS ==
