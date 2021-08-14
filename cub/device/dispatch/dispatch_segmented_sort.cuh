@@ -181,11 +181,11 @@ template <
   typename                OffsetT>                        ///< Signed integer type for global offsets
 __launch_bounds__ (SegmentedPolicyT::BLOCK_THREADS)
 __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
-  OffsetT                          small_segments,
-  OffsetT                          medium_segments,
-  OffsetT                          medium_blocks,
-  const OffsetT                   *d_small_segments_reordering,
-  const OffsetT                   *d_medium_segments_reordering,
+  unsigned int                     small_segments,
+  unsigned int                     medium_segments,
+  unsigned int                     medium_blocks,
+  const unsigned int              *d_small_segments_reordering,
+  const unsigned int              *d_medium_segments_reordering,
   const KeyT                      *d_keys_in_origin,              ///< [in] Input keys buffer
   KeyT                            *d_keys_out_orig,               ///< [out] Output keys buffer
   const ValueT                    *d_values_in_origin,            ///< [in] Input values buffer
@@ -209,10 +209,10 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
     AgentSubWarpSort<IS_DESCENDING, SmallPolicyT, KeyT, ValueT, OffsetT>;
 
   constexpr auto segments_per_medium_block =
-    static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_MEDIUM_BLOCK);
+    static_cast<unsigned int>(SegmentedPolicyT::SEGMENTS_PER_MEDIUM_BLOCK);
 
   constexpr auto segments_per_small_block =
-    static_cast<OffsetT>(SegmentedPolicyT::SEGMENTS_PER_SMALL_BLOCK);
+    static_cast<unsigned int>(SegmentedPolicyT::SEGMENTS_PER_SMALL_BLOCK);
 
   __shared__ union
   {
@@ -222,13 +222,13 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
 
   if (bid < medium_blocks)
   {
-    const OffsetT sid_within_block = tid / threads_per_medium_segment;
-    const OffsetT reordered_segment_id = bid * segments_per_medium_block
-                                       + sid_within_block;
+    const unsigned int sid_within_block = tid / threads_per_medium_segment;
+    const unsigned int reordered_segment_id = bid * segments_per_medium_block +
+                                              sid_within_block;
 
     if (reordered_segment_id < medium_segments)
     {
-      const OffsetT segment_id =
+      const unsigned int segment_id =
         d_medium_segments_reordering[reordered_segment_id];
 
       const OffsetT segment_begin = d_begin_offsets[segment_id];
@@ -245,13 +245,13 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
   }
   else
   {
-    const OffsetT sid_within_block = tid / threads_per_small_segment;
-    const OffsetT reordered_segment_id = (bid - medium_blocks) * segments_per_small_block
-                                       + sid_within_block;
+    const unsigned int sid_within_block = tid / threads_per_small_segment;
+    const unsigned int reordered_segment_id =
+      (bid - medium_blocks) * segments_per_small_block + sid_within_block;
 
     if (reordered_segment_id < small_segments)
     {
-      const OffsetT segment_id =
+      const unsigned int segment_id =
         d_small_segments_reordering[reordered_segment_id];
 
       const OffsetT segment_begin = d_begin_offsets[segment_id];
@@ -278,7 +278,7 @@ template <
   typename                OffsetT>                        ///< Signed integer type for global offsets
 __launch_bounds__ (SegmentedPolicyT::BLOCK_THREADS)
 __global__ void DeviceSegmentedSortKernelWithReorderingLarge(
-  const OffsetT                   *d_segments_reordering,
+  const unsigned int              *d_segments_reordering,
   const KeyT                      *d_keys_in_origin,              ///< [in] Input keys buffer
   KeyT                            *d_keys_out_orig,               ///< [out] Output keys buffer
   cub::DeviceDoubleBuffer<KeyT>    d_keys_remaining_passes,       ///< [in,out] Double keys buffer
@@ -305,10 +305,10 @@ __global__ void DeviceSegmentedSortKernelWithReorderingLarge(
   constexpr int begin_bit = 0;
   constexpr int end_bit   = sizeof(KeyT) * 8;
 
-  const OffsetT segment_id    = d_segments_reordering[bid];
-  const OffsetT segment_begin = d_begin_offsets[segment_id];
-  const OffsetT segment_end   = d_end_offsets[segment_id];
-  const OffsetT num_items     = segment_end - segment_begin;
+  const unsigned int segment_id = d_segments_reordering[bid];
+  const OffsetT segment_begin   = d_begin_offsets[segment_id];
+  const OffsetT segment_end     = d_end_offsets[segment_id];
+  const OffsetT num_items       = segment_end - segment_begin;
 
   AgentSegmentedRadixSortT agent(segment_begin,
                                  segment_end,
@@ -807,7 +807,7 @@ struct DispatchSegmentedSort : SelectedPolicy
   DoubleBuffer<KeyT> &d_keys;
   DoubleBuffer<ValueT> &d_values;
   OffsetT num_items;
-  OffsetT num_segments;
+  unsigned int num_segments;
   BeginOffsetIteratorT d_begin_offsets;
   EndOffsetIteratorT d_end_offsets;
   bool is_overwrite_okay;
@@ -821,7 +821,7 @@ struct DispatchSegmentedSort : SelectedPolicy
                         DoubleBuffer<KeyT> &d_keys,
                         DoubleBuffer<ValueT> &d_values,
                         OffsetT num_items,
-                        OffsetT num_segments,
+                        unsigned int num_segments,
                         BeginOffsetIteratorT d_begin_offsets,
                         EndOffsetIteratorT d_end_offsets,
                         bool is_overwrite_okay,
@@ -864,7 +864,7 @@ struct DispatchSegmentedSort : SelectedPolicy
       // Prepare temporary storage layout
       //------------------------------------------------------------------------
 
-      const bool reorder_segments = num_segments > 500; // TODO Magick number
+      const bool reorder_segments = num_segments > 500u; // TODO Magick number
 
       TemporaryStorage::Layout<5> temporary_storage_layout;
 
@@ -887,9 +887,11 @@ struct DispatchSegmentedSort : SelectedPolicy
         }
       }
 
-      auto large_and_medium_segments_reordering = large_and_medium_reordering_slot->GetAlias<OffsetT>();
-      auto small_segments_reordering = small_reordering_slot->GetAlias<OffsetT>();
-      auto group_sizes = group_sizes_slot->GetAlias<OffsetT>();
+      auto large_and_medium_segments_reordering =
+        large_and_medium_reordering_slot->GetAlias<unsigned int>();
+      auto small_segments_reordering =
+        small_reordering_slot->GetAlias<unsigned int>();
+      auto group_sizes = group_sizes_slot->GetAlias<unsigned int>();
 
       std::size_t three_way_partition_temp_storage_bytes {};
 
@@ -922,7 +924,7 @@ struct DispatchSegmentedSort : SelectedPolicy
           small_segments_reordering.Get(),
           medium_reordering_iterator,
           group_sizes.Get(),
-          num_segments,
+          static_cast<int>(num_segments),
           large_segments_selector,
           small_segments_selector,
           stream,
@@ -997,7 +999,7 @@ struct DispatchSegmentedSort : SelectedPolicy
            DoubleBuffer<KeyT> &d_keys,
            DoubleBuffer<ValueT> &d_values,
            OffsetT num_items,
-           OffsetT num_segments,
+           unsigned int num_segments,
            BeginOffsetIteratorT d_begin_offsets,
            EndOffsetIteratorT d_end_offsets,
            bool is_overwrite_okay,
@@ -1081,9 +1083,9 @@ private:
     LargeSegmentsSelectorT &large_segments_selector,
     SmallSegmentsSelectorT &small_segments_selector,
     TemporaryStorage::Array<std::uint8_t> &device_partition_temp_storage,
-    TemporaryStorage::Array<OffsetT> &large_and_medium_segments_reordering,
-    TemporaryStorage::Array<OffsetT> &small_segments_reordering,
-    TemporaryStorage::Array<OffsetT> &group_sizes)
+    TemporaryStorage::Array<unsigned int> &large_and_medium_segments_reordering,
+    TemporaryStorage::Array<unsigned int> &small_segments_reordering,
+    TemporaryStorage::Array<unsigned int> &group_sizes)
   {
     cudaError_t error = cudaSuccess;
 
@@ -1099,7 +1101,7 @@ private:
       small_segments_reordering.Get(),
       medium_reordering_iterator,
       group_sizes.Get(),
-      num_segments,
+      static_cast<int>(num_segments),
       large_segments_selector,
       small_segments_selector,
       stream,
@@ -1109,23 +1111,24 @@ private:
     }
 
 #ifdef __CUDA_ARCH__
-    OffsetT *h_group_sizes = group_sizes.Get();
+    unsigned int *h_group_sizes = group_sizes.Get();
 #else
-    OffsetT h_group_sizes[num_selected_groups];
+    unsigned int h_group_sizes[num_selected_groups];
     if (CubDebug(error = cudaMemcpy(h_group_sizes,
                                     group_sizes.Get(),
-                                    num_selected_groups * sizeof(OffsetT),
+                                    num_selected_groups * sizeof(unsigned int),
                                     cudaMemcpyDeviceToHost)))
     {
       return error;
     }
 #endif
 
-    const OffsetT large_segments = h_group_sizes[0];
+    const unsigned int large_segments = h_group_sizes[0];
 
     if (large_segments > 0)
     {
-      const OffsetT blocks_in_grid = large_segments; // One CTA per segment
+      // One CTA per segment
+      const unsigned int blocks_in_grid = large_segments;
 
       if (debug_synchronous)
       {
@@ -1176,21 +1179,20 @@ private:
       }
     }
 
-    const OffsetT small_segments = h_group_sizes[1];
-    const OffsetT medium_segments = num_segments -
-                                    (large_segments + small_segments);
+    const unsigned int small_segments  = h_group_sizes[1];
+    const unsigned int medium_segments = num_segments -
+                                         (large_segments + small_segments);
 
-    const OffsetT small_blocks =
+    const unsigned int small_blocks =
       DivideAndRoundUp(small_segments,
                        SmallAndMediumPolicyT::SEGMENTS_PER_SMALL_BLOCK);
 
-    const OffsetT medium_blocks =
+    const unsigned int medium_blocks =
       DivideAndRoundUp(medium_segments,
                        SmallAndMediumPolicyT::SEGMENTS_PER_MEDIUM_BLOCK);
 
-
-    const OffsetT small_and_medium_blocks_in_grid = small_blocks +
-                                                    medium_blocks;
+    const unsigned int small_and_medium_blocks_in_grid = small_blocks +
+                                                         medium_blocks;
 
     if (small_and_medium_blocks_in_grid)
     {
