@@ -725,7 +725,7 @@ void TestSameSizeSegments(OffsetT segment_size,
   const KeyT target_key = KeyT{42};
   const ValueT target_value = ValueT{42};
 
-  thrust::device_vector<KeyT> keys_input(num_items, target_key);
+  thrust::device_vector<KeyT> keys_input(num_items);
   thrust::device_vector<KeyT> keys_output(num_items);
 
   KeyT *d_keys_input  = thrust::raw_pointer_cast(keys_input.data());
@@ -737,44 +737,45 @@ void TestSameSizeSegments(OffsetT segment_size,
   ValueT *d_values_input  = thrust::raw_pointer_cast(values_input.data());
   ValueT *d_values_output = thrust::raw_pointer_cast(values_output.data());
 
-  for (bool sort_keys: { keys, pairs })
+  for (bool sort_pairs: { keys, pairs })
   {
-    if (!sort_keys)
+    if (sort_pairs)
     {
       if (skip_values)
       {
-        break;
+        continue;
       }
     }
 
-    for (bool sort_ascending: { ascending, descending })
+    for (bool sort_descending: { ascending, descending })
     {
-      for (bool sort_pointers: { pointers, double_buffer })
+      for (bool sort_buffers: { pointers, double_buffer })
       {
         cub::DoubleBuffer<KeyT> keys_buffer(nullptr, nullptr);
         cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
         values_buffer.selector = 1;
 
+        thrust::fill(keys_input.begin(), keys_input.end(), target_key);
         thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
 
-        if (!sort_keys)
+        if (sort_pairs)
         {
-          if (sort_pointers)
-          {
-            thrust::fill(values_input.begin(), values_input.end(), target_value);
-            thrust::fill(values_output.begin(), values_output.end(), ValueT{});
-          }
-          else
+          if (sort_buffers)
           {
             thrust::fill(values_input.begin(), values_input.end(), ValueT{});
             thrust::fill(values_output.begin(), values_output.end(), target_value);
           }
+          else
+          {
+            thrust::fill(values_input.begin(), values_input.end(), target_value);
+            thrust::fill(values_output.begin(), values_output.end(), ValueT{});
+          }
         }
 
         const std::size_t temp_storage_bytes =
-          Sort<KeyT, ValueT, OffsetT>(sort_keys,
-                                      sort_ascending,
-                                      sort_pointers,
+          Sort<KeyT, ValueT, OffsetT>(sort_pairs,
+                                      sort_descending,
+                                      sort_buffers,
                                       d_keys_input,
                                       d_keys_output,
                                       d_values_input,
@@ -786,52 +787,58 @@ void TestSameSizeSegments(OffsetT segment_size,
                                       &values_buffer.selector);
 
         // If temporary storage size is defined by extra keys storage
-        if (2 * segments * sizeof(OffsetT) < num_items * sizeof(KeyT))
+        if (sort_buffers)
         {
-          std::size_t extra_temp_storage_bytes{};
+          if (2 * segments * sizeof(unsigned int) < num_items * sizeof(KeyT))
+          {
+            std::size_t extra_temp_storage_bytes{};
 
-          Sort(sort_keys,
-               sort_ascending,
-               sort_pointers,
-               nullptr,
-               extra_temp_storage_bytes,
-               d_keys_input,
-               d_keys_output,
-               d_values_input,
-               d_values_output,
-               num_items,
-               segments,
-               d_offsets,
-               &keys_buffer.selector,
-               &values_buffer.selector);
+            Sort(sort_pairs,
+                 sort_descending,
+                 pointers,
+                 nullptr,
+                 extra_temp_storage_bytes,
+                 d_keys_input,
+                 d_keys_output,
+                 d_values_input,
+                 d_values_output,
+                 num_items,
+                 segments,
+                 d_offsets,
+                 &keys_buffer.selector,
+                 &values_buffer.selector);
 
-          AssertTrue(extra_temp_storage_bytes > temp_storage_bytes);
+            AssertTrue(extra_temp_storage_bytes > temp_storage_bytes);
+          }
         }
 
         {
           const std::size_t items_selected =
-            keys_buffer.selector || sort_pointers
-            ? thrust::count(keys_output.begin(), keys_output.end(), target_key)
-            : thrust::count(keys_input.begin(), keys_input.end(), target_key);
+            keys_buffer.selector || !sort_buffers
+              ? thrust::count(keys_output.begin(),
+                              keys_output.end(),
+                              target_key)
+              : thrust::count(keys_input.begin(), keys_input.end(), target_key);
           AssertEquals(items_selected, num_items);
         }
 
-        if (!sort_keys)
+        if (sort_pairs)
         {
           const std::size_t items_selected = [&]() -> std::size_t {
-            if (sort_pointers)
+            if (sort_buffers)
             {
-              return thrust::count(values_output.begin(),
-                                   values_output.end(),
-                                   target_value);
+              return values_buffer.selector
+                       ? thrust::count(values_output.begin(),
+                                       values_output.end(),
+                                       target_value)
+                       : thrust::count(values_input.begin(),
+                                       values_input.end(),
+                                       target_value);
             }
 
-            return values_buffer.selector ? thrust::count(values_input.begin(),
-                                                          values_input.end(),
-                                                          target_value)
-                                          : thrust::count(values_output.begin(),
-                                                          values_output.end(),
-                                                          target_value);
+            return thrust::count(values_output.begin(),
+                                 values_output.end(),
+                                 target_value);
           } ();
 
           AssertEquals(items_selected, num_items);
