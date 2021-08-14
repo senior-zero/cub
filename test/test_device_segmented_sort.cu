@@ -397,10 +397,14 @@ void Sort(bool pairs,
     {
       if (double_buffer)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+        cub::DoubleBuffer<KeyT> keys_buffer(
+          *keys_selector ? output_keys : input_keys,
+          *keys_selector ? input_keys : output_keys);
         keys_buffer.selector = *keys_selector;
 
-        cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
+        cub::DoubleBuffer<ValueT> values_buffer(
+          *values_selector ? output_values : input_values,
+          *values_selector ? input_values : output_values);
         values_buffer.selector = *values_selector;
 
         CubDebugExit(
@@ -439,10 +443,14 @@ void Sort(bool pairs,
     {
       if (double_buffer)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+        cub::DoubleBuffer<KeyT> keys_buffer(
+          *keys_selector ? output_keys : input_keys,
+          *keys_selector ? input_keys : output_keys);
         keys_buffer.selector = *keys_selector;
 
-        cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
+        cub::DoubleBuffer<ValueT> values_buffer(
+          *values_selector ? output_values : input_values,
+          *values_selector ? input_values : output_values);
         values_buffer.selector = *values_selector;
 
         CubDebugExit(cub::DeviceSegmentedSort::SortPairs(tmp_storage,
@@ -482,7 +490,9 @@ void Sort(bool pairs,
     {
       if (double_buffer)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+        cub::DoubleBuffer<KeyT> keys_buffer(
+          *keys_selector ? output_keys : input_keys,
+          *keys_selector ? input_keys : output_keys);
         keys_buffer.selector = *keys_selector;
 
         CubDebugExit(
@@ -517,7 +527,9 @@ void Sort(bool pairs,
     {
       if (double_buffer)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+        cub::DoubleBuffer<KeyT> keys_buffer(
+          *keys_selector ? output_keys : input_keys,
+          *keys_selector ? input_keys : output_keys);
         keys_buffer.selector = *keys_selector;
 
         CubDebugExit(cub::DeviceSegmentedSort::SortKeys(tmp_storage,
@@ -704,564 +716,120 @@ void TestEmptySegments(unsigned int segments)
   }
 }
 
+
 template <typename KeyT,
+          typename ValueT,
           typename OffsetT>
-void TestSameSizeSegments(OffsetT segment_size, OffsetT segments)
+void TestSameSizeSegments(OffsetT segment_size,
+                          unsigned int segments,
+                          bool skip_values = false)
 {
-  thrust::device_vector<OffsetT> offsets(segments + 1);
-  thrust::sequence(offsets.begin(), offsets.end(), OffsetT{}, OffsetT{segment_size});
-
-  const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
-
-  thrust::device_vector<KeyT> keys_input(segments * segment_size, KeyT{42});
-  thrust::device_vector<KeyT> keys_output(segments * segment_size, KeyT{24});
-
-  const KeyT *d_keys_input = thrust::raw_pointer_cast(keys_input.data());
-  KeyT *d_keys_output      = thrust::raw_pointer_cast(keys_output.data());
-
   const OffsetT num_items = segment_size * segments;
 
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeys(nullptr,
-                                                  temp_storage_bytes,
-                                                  d_keys_input,
-                                                  d_keys_output,
-                                                  num_items,
-                                                  segments,
-                                                  d_offsets,
-                                                  d_offsets + 1,
-                                                  0,
-                                                  true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeys(d_tmp_storage,
-                                                  temp_storage_bytes,
-                                                  d_keys_input,
-                                                  d_keys_output,
-                                                  num_items,
-                                                  segments,
-                                                  d_offsets,
-                                                  d_offsets + 1,
-                                                  0,
-                                                  true));
-
-  AssertEquals(keys_input, keys_output);
-}
-
-template <typename KeyT,
-          typename OffsetT>
-void TestSameSizeSegmentsBuffer(OffsetT segment_size, OffsetT segments)
-{
-  thrust::device_vector<OffsetT> offsets(segments + 1);
-  thrust::sequence(offsets.begin(), offsets.end(), OffsetT{}, OffsetT{segment_size});
-
-  const OffsetT num_items = segment_size * segments;
-
-  const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
-
-  thrust::device_vector<KeyT> keys_input(num_items, KeyT{42});
-  thrust::device_vector<KeyT> keys_output(num_items, KeyT{24});
-
-  KeyT *d_keys_input = thrust::raw_pointer_cast(keys_input.data());
-  KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
-
-  cub::DoubleBuffer<KeyT> keys_buffer(d_keys_input, d_keys_output);
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeys(nullptr,
-                                                  temp_storage_bytes,
-                                                  keys_buffer,
-                                                  num_items,
-                                                  segments,
-                                                  d_offsets,
-                                                  d_offsets + 1,
-                                                  0,
-                                                  true));
-
-  // If temporary storage size is defined by extra keys storage
-  if (2 * segments * sizeof(OffsetT) < num_items * sizeof(KeyT))
-  {
-    std::size_t extra_temp_storage_bytes{};
-    CubDebugExit(cub::DeviceSegmentedSort::SortKeys(nullptr,
-                                                    extra_temp_storage_bytes,
-                                                    d_keys_input,
-                                                    d_keys_output,
-                                                    num_items,
-                                                    segments,
-                                                    d_offsets,
-                                                    d_offsets + 1,
-                                                    0,
-                                                    true));
-
-    AssertTrue(extra_temp_storage_bytes > temp_storage_bytes);
-  }
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeys(d_tmp_storage,
-                                                  temp_storage_bytes,
-                                                  keys_buffer,
-                                                  num_items,
-                                                  segments,
-                                                  d_offsets,
-                                                  d_offsets + 1,
-                                                  0,
-                                                  true));
-
-  const std::size_t items_selected =
-    keys_buffer.selector == 1
-      ? thrust::count(keys_output.begin(), keys_output.end(), KeyT{42})
-      : thrust::count(keys_input.begin(), keys_input.end(), KeyT{42});
-  AssertEquals(items_selected, num_items);
-}
-
-template <typename KeyT,
-          typename OffsetT>
-void TestSameSizeSegmentsDescending(OffsetT segment_size, OffsetT segments)
-{
-  thrust::device_vector<OffsetT> offsets(segments + 1);
-  thrust::sequence(offsets.begin(), offsets.end(), OffsetT{}, OffsetT{segment_size});
-
-  const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
-
-  thrust::device_vector<KeyT> keys_input(segments * segment_size, KeyT{42});
-  thrust::device_vector<KeyT> keys_output(segments * segment_size, KeyT{24});
-
-  const KeyT *d_keys_input = thrust::raw_pointer_cast(keys_input.data());
-  KeyT *d_keys_output      = thrust::raw_pointer_cast(keys_output.data());
-
-  const OffsetT num_items = segment_size * segments;
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeysDescending(nullptr,
-                                                            temp_storage_bytes,
-                                                            d_keys_input,
-                                                            d_keys_output,
-                                                            num_items,
-                                                            segments,
-                                                            d_offsets,
-                                                            d_offsets + 1,
-                                                            0,
-                                                            true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeysDescending(d_tmp_storage,
-                                                            temp_storage_bytes,
-                                                            d_keys_input,
-                                                            d_keys_output,
-                                                            num_items,
-                                                            segments,
-                                                            d_offsets,
-                                                            d_offsets + 1,
-                                                            0,
-                                                            true));
-
-  AssertEquals(keys_input, keys_output);
-}
-
-template <typename KeyT,
-          typename OffsetT>
-void TestSameSizeSegmentsDescendingBuffer(
-  OffsetT segment_size,
-  OffsetT segments)
-{
   thrust::device_vector<OffsetT> offsets(segments + 1);
   thrust::sequence(offsets.begin(),
                    offsets.end(),
                    OffsetT{},
                    OffsetT{segment_size});
 
-  const OffsetT num_items = segment_size * segments;
-
   const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
 
-  thrust::device_vector<KeyT> keys_input(num_items, KeyT{42});
-  thrust::device_vector<KeyT> keys_output(num_items, KeyT{24});
+  const KeyT target_key = KeyT{42};
+  const ValueT target_value = ValueT{42};
+
+  thrust::device_vector<KeyT> keys_input(num_items, target_key);
+  thrust::device_vector<KeyT> keys_output(num_items);
 
   KeyT *d_keys_input  = thrust::raw_pointer_cast(keys_input.data());
   KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
 
-  cub::DoubleBuffer<KeyT> keys_buffer(d_keys_input, d_keys_output);
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeysDescending(nullptr,
-                                                            temp_storage_bytes,
-                                                            keys_buffer,
-                                                            num_items,
-                                                            segments,
-                                                            d_offsets,
-                                                            d_offsets + 1,
-                                                            0,
-                                                            true));
-
-  // If temporary storage size is defined by extra keys storage
-  if (2 * segments * sizeof(OffsetT) < num_items * sizeof(KeyT))
-  {
-    std::size_t extra_temp_storage_bytes{};
-    CubDebugExit(
-      cub::DeviceSegmentedSort::SortKeysDescending(nullptr,
-                                                   extra_temp_storage_bytes,
-                                                   d_keys_input,
-                                                   d_keys_output,
-                                                   num_items,
-                                                   segments,
-                                                   d_offsets,
-                                                   d_offsets + 1,
-                                                   0,
-                                                   true));
-
-    AssertTrue(extra_temp_storage_bytes > temp_storage_bytes);
-  }
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeysDescending(d_tmp_storage,
-                                                            temp_storage_bytes,
-                                                            keys_buffer,
-                                                            num_items,
-                                                            segments,
-                                                            d_offsets,
-                                                            d_offsets + 1,
-                                                            0,
-                                                            true));
-
-  const std::size_t items_selected =
-    keys_buffer.selector
-      ? thrust::count(keys_output.begin(), keys_output.end(), KeyT{42})
-      : thrust::count(keys_input.begin(), keys_input.end(), KeyT{42});
-  AssertEquals(items_selected, num_items);
-}
-
-template <typename KeyT,
-          typename ValueT,
-          typename OffsetT>
-void TestSameSizeSegmentsPairs(OffsetT segment_size, OffsetT segments)
-{
-  thrust::device_vector<OffsetT> offsets(segments + 1);
-  thrust::sequence(offsets.begin(),
-                   offsets.end(),
-                   OffsetT{},
-                   OffsetT{segment_size});
-
-  const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
-
-  thrust::device_vector<KeyT> keys_input(segments * segment_size, KeyT{42});
-  thrust::device_vector<KeyT> keys_output(segments * segment_size, KeyT{24});
-
-  const KeyT *d_keys_input = thrust::raw_pointer_cast(keys_input.data());
-  KeyT *d_keys_output      = thrust::raw_pointer_cast(keys_output.data());
-
-  thrust::device_vector<ValueT> values_input(segments * segment_size, ValueT{42});
-  thrust::device_vector<ValueT> values_output(segments * segment_size, ValueT{24});
-
-  const ValueT *d_values_input = thrust::raw_pointer_cast(values_input.data());
-  ValueT *d_values_output      = thrust::raw_pointer_cast(values_output.data());
-
-  const OffsetT num_items = segment_size * segments;
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortPairs(nullptr,
-                                                   temp_storage_bytes,
-                                                   d_keys_input,
-                                                   d_keys_output,
-                                                   d_values_input,
-                                                   d_values_output,
-                                                   num_items,
-                                                   segments,
-                                                   d_offsets,
-                                                   d_offsets + 1,
-                                                   0,
-                                                   true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  CubDebugExit(cub::DeviceSegmentedSort::SortPairs(d_tmp_storage,
-                                                   temp_storage_bytes,
-                                                   d_keys_input,
-                                                   d_keys_output,
-                                                   d_values_input,
-                                                   d_values_output,
-                                                   num_items,
-                                                   segments,
-                                                   d_offsets,
-                                                   d_offsets + 1,
-                                                   0,
-                                                   true));
-
-  AssertEquals(keys_input, keys_output);
-  AssertEquals(values_input, values_output);
-}
-
-template <typename KeyT,
-          typename ValueT,
-          typename OffsetT>
-void TestSameSizeSegmentsPairsBuffer(OffsetT segment_size, OffsetT segments)
-{
-  thrust::device_vector<OffsetT> offsets(segments + 1);
-  thrust::sequence(offsets.begin(),
-                   offsets.end(),
-                   OffsetT{},
-                   OffsetT{segment_size});
-
-  const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
-
-  const OffsetT num_items = segment_size * segments;
-
-  thrust::device_vector<KeyT> keys_input(num_items, KeyT{42});
-  thrust::device_vector<KeyT> keys_output(num_items, KeyT{24});
-
-  KeyT *d_keys_input = thrust::raw_pointer_cast(keys_input.data());
-  KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
-
-  thrust::device_vector<ValueT> values_input(num_items, ValueT{42});
-  thrust::device_vector<ValueT> values_output(num_items, ValueT{24});
-
-  ValueT *d_values_input = thrust::raw_pointer_cast(values_input.data());
-  ValueT *d_values_output = thrust::raw_pointer_cast(values_output.data());
-
-  cub::DoubleBuffer<KeyT> keys_buffer(d_keys_input, d_keys_output);
-  cub::DoubleBuffer<ValueT> values_buffer(d_values_input, d_values_output);
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortPairs(nullptr,
-                                                   temp_storage_bytes,
-                                                   keys_buffer,
-                                                   values_buffer,
-                                                   num_items,
-                                                   segments,
-                                                   d_offsets,
-                                                   d_offsets + 1,
-                                                   0,
-                                                   true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  CubDebugExit(cub::DeviceSegmentedSort::SortPairs(d_tmp_storage,
-                                                   temp_storage_bytes,
-                                                   keys_buffer,
-                                                   values_buffer,
-                                                   num_items,
-                                                   segments,
-                                                   d_offsets,
-                                                   d_offsets + 1,
-                                                   0,
-                                                   true));
-
-  {
-    const std::size_t items_selected =
-      keys_buffer.selector
-      ? thrust::count(keys_output.begin(), keys_output.end(), KeyT{42})
-      : thrust::count(keys_input.begin(), keys_input.end(), KeyT{42});
-    AssertEquals(items_selected, num_items);
-  }
-
-  {
-    const std::size_t items_selected =
-      values_buffer.selector
-      ? thrust::count(values_output.begin(), values_output.end(), ValueT{42})
-      : thrust::count(values_input.begin(), values_input.end(), ValueT{42});
-    AssertEquals(items_selected, num_items);
-  }
-}
-
-template <typename KeyT,
-          typename ValueT,
-          typename OffsetT>
-void TestSameSizeSegmentsDescendingPairs(OffsetT segment_size, OffsetT segments)
-{
-  thrust::device_vector<OffsetT> offsets(segments + 1);
-  thrust::sequence(offsets.begin(),
-                   offsets.end(),
-                   OffsetT{},
-                   OffsetT{segment_size});
-
-  const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
-
-  thrust::device_vector<KeyT> keys_input(segments * segment_size, KeyT{42});
-  thrust::device_vector<KeyT> keys_output(segments * segment_size, KeyT{24});
-
-  const KeyT *d_keys_input = thrust::raw_pointer_cast(keys_input.data());
-  KeyT *d_keys_output      = thrust::raw_pointer_cast(keys_output.data());
-
-  thrust::device_vector<ValueT> values_input(segments * segment_size, ValueT{42});
-  thrust::device_vector<ValueT> values_output(segments * segment_size, ValueT{24});
-
-  const ValueT *d_values_input = thrust::raw_pointer_cast(values_input.data());
-  ValueT *d_values_output      = thrust::raw_pointer_cast(values_output.data());
-
-  const OffsetT num_items = segment_size * segments;
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortPairsDescending(nullptr,
-                                                             temp_storage_bytes,
-                                                             d_keys_input,
-                                                             d_keys_output,
-                                                             d_values_input,
-                                                             d_values_output,
-                                                             num_items,
-                                                             segments,
-                                                             d_offsets,
-                                                             d_offsets + 1,
-                                                             0,
-                                                             true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  CubDebugExit(cub::DeviceSegmentedSort::SortPairsDescending(d_tmp_storage,
-                                                             temp_storage_bytes,
-                                                             d_keys_input,
-                                                             d_keys_output,
-                                                             d_values_input,
-                                                             d_values_output,
-                                                             num_items,
-                                                             segments,
-                                                             d_offsets,
-                                                             d_offsets + 1,
-                                                             0,
-                                                             true));
-
-  AssertEquals(keys_input, keys_output);
-  AssertEquals(values_input, values_output);
-}
-
-template <typename KeyT,
-          typename ValueT,
-          typename OffsetT>
-void TestSameSizeSegmentsDescendingPairsBuffer(
-  OffsetT segment_size,
-  OffsetT segments)
-{
-  thrust::device_vector<OffsetT> offsets(segments + 1);
-  thrust::sequence(offsets.begin(),
-                   offsets.end(),
-                   OffsetT{},
-                   OffsetT{segment_size});
-
-  const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
-
-  const OffsetT num_items = segment_size * segments;
-
-  thrust::device_vector<KeyT> keys_input(num_items, KeyT{42});
-  thrust::device_vector<KeyT> keys_output(num_items, KeyT{24});
-
-  KeyT *d_keys_input  = thrust::raw_pointer_cast(keys_input.data());
-  KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
-
-  thrust::device_vector<ValueT> values_input(num_items, ValueT{42});
-  thrust::device_vector<ValueT> values_output(num_items, ValueT{24});
+  thrust::device_vector<ValueT> values_input(num_items, target_value);
+  thrust::device_vector<ValueT> values_output(num_items);
 
   ValueT *d_values_input  = thrust::raw_pointer_cast(values_input.data());
   ValueT *d_values_output = thrust::raw_pointer_cast(values_output.data());
 
-  cub::DoubleBuffer<KeyT> keys_buffer(d_keys_input, d_keys_output);
-  cub::DoubleBuffer<ValueT> values_buffer(d_values_output, d_values_input);
-  values_buffer.selector = 1;
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortPairsDescending(nullptr,
-                                                             temp_storage_bytes,
-                                                             keys_buffer,
-                                                             values_buffer,
-                                                             num_items,
-                                                             segments,
-                                                             d_offsets,
-                                                             d_offsets + 1,
-                                                             0,
-                                                             true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  CubDebugExit(cub::DeviceSegmentedSort::SortPairsDescending(d_tmp_storage,
-                                                             temp_storage_bytes,
-                                                             keys_buffer,
-                                                             values_buffer,
-                                                             num_items,
-                                                             segments,
-                                                             d_offsets,
-                                                             d_offsets + 1,
-                                                             0,
-                                                             true));
-
+  for (bool sort_keys: { keys, pairs })
   {
-    const std::size_t items_selected =
-      keys_buffer.selector
-        ? thrust::count(keys_output.begin(), keys_output.end(), KeyT{42})
-        : thrust::count(keys_input.begin(), keys_input.end(), KeyT{42});
-    AssertEquals(items_selected, num_items);
+    if (!sort_keys)
+    {
+      if (skip_values)
+      {
+        break;
+      }
+    }
+
+    for (bool sort_ascending: { ascending, descending })
+    {
+      for (bool sort_pointers: { pointers, double_buffer })
+      {
+        cub::DoubleBuffer<KeyT> keys_buffer(nullptr, nullptr);
+        cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
+        values_buffer.selector = 1;
+
+        thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
+
+        if (!sort_keys)
+        {
+          thrust::fill(values_output.begin(), values_output.end(), ValueT{});
+        }
+
+        const std::size_t temp_storage_bytes =
+          Sort<KeyT, ValueT, OffsetT>(sort_keys,
+                                      sort_ascending,
+                                      sort_pointers,
+                                      d_keys_input,
+                                      d_keys_output,
+                                      d_values_input,
+                                      d_values_output,
+                                      num_items,
+                                      segments,
+                                      d_offsets,
+                                      &keys_buffer.selector,
+                                      &values_buffer.selector);
+
+        // If temporary storage size is defined by extra keys storage
+        if (2 * segments * sizeof(OffsetT) < num_items * sizeof(KeyT))
+        {
+          std::size_t extra_temp_storage_bytes{};
+
+          Sort(sort_keys,
+               sort_ascending,
+               sort_pointers,
+               nullptr,
+               extra_temp_storage_bytes,
+               d_keys_input,
+               d_keys_output,
+               d_values_input,
+               d_values_output,
+               num_items,
+               segments,
+               d_offsets,
+               &keys_buffer.selector,
+               &values_buffer.selector);
+
+          AssertTrue(extra_temp_storage_bytes > temp_storage_bytes);
+        }
+
+        {
+          const std::size_t items_selected =
+            keys_buffer.selector || sort_pointers
+            ? thrust::count(keys_output.begin(), keys_output.end(), target_key)
+            : thrust::count(keys_input.begin(), keys_input.end(), target_key);
+          AssertEquals(items_selected, num_items);
+        }
+
+        if (!sort_keys)
+        {
+          const std::size_t items_selected =
+            values_buffer.selector && sort_pointers == double_buffer
+            ? thrust::count(values_input.begin(), values_input.end(), target_value)
+            : thrust::count(values_output.begin(), values_output.end(), target_value);
+          AssertEquals(items_selected, num_items);
+        }
+      }
+    }
   }
-
-  {
-    const std::size_t items_selected =
-      values_buffer.selector
-        ? thrust::count(values_input.begin(), values_input.end(), ValueT{42})
-        : thrust::count(values_output.begin(), values_output.end(), ValueT{42});
-    AssertEquals(items_selected, num_items);
-  }
-}
-
-template <typename KeyT,
-          typename OffsetT>
-void TestSingleItemSegments(OffsetT segments)
-{
-  TestSameSizeSegments<KeyT, OffsetT>(OffsetT{1}, segments);
-  TestSameSizeSegmentsBuffer<KeyT, OffsetT>(OffsetT{1}, segments);
-  TestSameSizeSegmentsDescending<KeyT, OffsetT>(OffsetT{1}, segments);
-  TestSameSizeSegmentsDescendingBuffer<KeyT, OffsetT>(OffsetT{1}, segments);
-}
-
-template <typename KeyT,
-          typename ValueT,
-          typename OffsetT>
-void TestSingleItemSegmentsPairs(OffsetT segments)
-{
-  TestSameSizeSegmentsPairs<KeyT, ValueT, OffsetT>(OffsetT{1}, segments);
-  TestSameSizeSegmentsPairsBuffer<KeyT, ValueT, OffsetT>(OffsetT{1}, segments);
-  TestSameSizeSegmentsDescendingPairs<KeyT, ValueT, OffsetT>(OffsetT{1}, segments);
-  TestSameSizeSegmentsDescendingPairsBuffer<KeyT, ValueT, OffsetT>(OffsetT{1}, segments);
-}
-
-
-template <typename KeyT,
-          typename OffsetT>
-void DependentTest(OffsetT segments)
-{
-  TestSingleItemSegments<KeyT, OffsetT>(segments);
-}
-
-
-template <typename KeyT,
-          typename OffsetT>
-void DependentTest()
-{
-  DependentTest<KeyT, OffsetT>(42);
-  DependentTest<KeyT, OffsetT>(1024);
-}
-
-template <typename KeyT,
-          typename ValueT,
-          typename OffsetT>
-void DependentTestPairs(OffsetT segments)
-{
-  TestSingleItemSegmentsPairs<KeyT, ValueT, OffsetT>(segments);
-}
-
-template <typename KeyT,
-          typename ValueT,
-          typename OffsetT>
-void DependentTestPairs()
-{
-  DependentTestPairs<KeyT, ValueT, OffsetT>(42);
-  DependentTestPairs<KeyT, ValueT, OffsetT>(1024);
 }
 
 template <typename KeyT,
@@ -2531,7 +2099,17 @@ template <typename KeyT,
           typename OffsetT>
 void TestKeys()
 {
-  DependentTest<KeyT, OffsetT>();
+  const bool skip_values = true;
+
+  for (OffsetT segment_size : {1, 1024, 24 * 1024})
+  {
+    for (int segments : {1, 1024})
+    {
+      TestSameSizeSegments<KeyT, KeyT, OffsetT>(segment_size,
+                                                segments,
+                                                skip_values);
+    }
+  }
 
   const bool basic = false;
   EdgePatternsTest<KeyT, OffsetT>(basic);
@@ -2547,7 +2125,13 @@ template <typename KeyT,
           typename OffsetT>
 void TestPairs()
 {
-  DependentTestPairs<KeyT, ValueT, OffsetT>();
+  for (OffsetT segment_size: { 1, 1024, 24 * 1024 })
+  {
+    for (int segments: { 1, 1024 })
+    {
+      TestSameSizeSegments<KeyT, ValueT, OffsetT>(segment_size, segments);
+    }
+  }
 
   const bool basic = false;
   EdgePatternsTestPairs<KeyT, ValueT, OffsetT>(basic);
