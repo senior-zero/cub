@@ -397,14 +397,10 @@ void Sort(bool pairs,
     {
       if (double_buffer)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(
-          *keys_selector ? output_keys : input_keys,
-          *keys_selector ? input_keys : output_keys);
+        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
         keys_buffer.selector = *keys_selector;
 
-        cub::DoubleBuffer<ValueT> values_buffer(
-          *values_selector ? output_values : input_values,
-          *values_selector ? input_values : output_values);
+        cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
         values_buffer.selector = *values_selector;
 
         CubDebugExit(
@@ -443,14 +439,10 @@ void Sort(bool pairs,
     {
       if (double_buffer)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(
-          *keys_selector ? output_keys : input_keys,
-          *keys_selector ? input_keys : output_keys);
+        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
         keys_buffer.selector = *keys_selector;
 
-        cub::DoubleBuffer<ValueT> values_buffer(
-          *values_selector ? output_values : input_values,
-          *values_selector ? input_values : output_values);
+        cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
         values_buffer.selector = *values_selector;
 
         CubDebugExit(cub::DeviceSegmentedSort::SortPairs(tmp_storage,
@@ -490,9 +482,7 @@ void Sort(bool pairs,
     {
       if (double_buffer)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(
-          *keys_selector ? output_keys : input_keys,
-          *keys_selector ? input_keys : output_keys);
+        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
         keys_buffer.selector = *keys_selector;
 
         CubDebugExit(
@@ -527,9 +517,7 @@ void Sort(bool pairs,
     {
       if (double_buffer)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(
-          *keys_selector ? output_keys : input_keys,
-          *keys_selector ? input_keys : output_keys);
+        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
         keys_buffer.selector = *keys_selector;
 
         CubDebugExit(cub::DeviceSegmentedSort::SortKeys(tmp_storage,
@@ -743,7 +731,7 @@ void TestSameSizeSegments(OffsetT segment_size,
   KeyT *d_keys_input  = thrust::raw_pointer_cast(keys_input.data());
   KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
 
-  thrust::device_vector<ValueT> values_input(num_items, target_value);
+  thrust::device_vector<ValueT> values_input(num_items);
   thrust::device_vector<ValueT> values_output(num_items);
 
   ValueT *d_values_input  = thrust::raw_pointer_cast(values_input.data());
@@ -771,7 +759,16 @@ void TestSameSizeSegments(OffsetT segment_size,
 
         if (!sort_keys)
         {
-          thrust::fill(values_output.begin(), values_output.end(), ValueT{});
+          if (sort_pointers)
+          {
+            thrust::fill(values_input.begin(), values_input.end(), target_value);
+            thrust::fill(values_output.begin(), values_output.end(), ValueT{});
+          }
+          else
+          {
+            thrust::fill(values_input.begin(), values_input.end(), ValueT{});
+            thrust::fill(values_output.begin(), values_output.end(), target_value);
+          }
         }
 
         const std::size_t temp_storage_bytes =
@@ -821,10 +818,22 @@ void TestSameSizeSegments(OffsetT segment_size,
 
         if (!sort_keys)
         {
-          const std::size_t items_selected =
-            values_buffer.selector && sort_pointers == double_buffer
-            ? thrust::count(values_input.begin(), values_input.end(), target_value)
-            : thrust::count(values_output.begin(), values_output.end(), target_value);
+          const std::size_t items_selected = [&]() -> std::size_t {
+            if (sort_pointers)
+            {
+              return thrust::count(values_output.begin(),
+                                   values_output.end(),
+                                   target_value);
+            }
+
+            return values_buffer.selector ? thrust::count(values_input.begin(),
+                                                          values_input.end(),
+                                                          target_value)
+                                          : thrust::count(values_output.begin(),
+                                                          values_output.end(),
+                                                          target_value);
+          } ();
+
           AssertEquals(items_selected, num_items);
         }
       }
