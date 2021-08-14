@@ -188,21 +188,20 @@ class Input
     ValueT>::type;
 
   bool reverse {};
-  unsigned int num_items {};
+  OffsetT num_items {};
   thrust::device_vector<KeyT> d_keys;
   thrust::device_vector<MaskedValueT> d_values;
 
 public:
-  Input(
-    bool reverse,
-    const thrust::host_vector<OffsetT> &h_segment_sizes)
-    : d_segment_sizes(h_segment_sizes)
-    , d_offsets(d_segment_sizes.size() + 1)
-    , h_offsets(d_segment_sizes.size() + 1)
-    , reverse(reverse)
-    , num_items(thrust::reduce(d_segment_sizes.begin(), d_segment_sizes.end()))
-    , d_keys(num_items)
-    , d_values(num_items)
+  Input(bool reverse, const thrust::host_vector<OffsetT> &h_segment_sizes)
+      : d_segment_sizes(h_segment_sizes)
+      , d_offsets(d_segment_sizes.size() + 1)
+      , h_offsets(d_segment_sizes.size() + 1)
+      , reverse(reverse)
+      , num_items(static_cast<OffsetT>(
+          thrust::reduce(d_segment_sizes.begin(), d_segment_sizes.end())))
+      , d_keys(num_items)
+      , d_values(num_items)
   {
     update();
   }
@@ -214,7 +213,7 @@ public:
     update();
   }
 
-  std::size_t get_num_items() const
+  OffsetT get_num_items() const
   {
     return num_items;
   }
@@ -295,9 +294,10 @@ public:
                     const MaskedValueT *values_output = nullptr)
   {
     const bool keys_ok = check_output_implementation(keys_output);
-    const bool values_ok = std::is_same<ValueT, cub::NullType>::value
-                         ? true
-                         : check_output_implementation(values_output);
+    const bool values_ok = (std::is_same<ValueT, cub::NullType>::value ||
+                            values_output == nullptr)
+                             ? true
+                             : check_output_implementation(values_output);
 
     return keys_ok && values_ok;
   }
@@ -848,98 +848,12 @@ void TestSameSizeSegments(OffsetT segment_size,
   }
 }
 
-template <typename KeyT,
-          typename OffsetT>
-void InputTest(Input<KeyT, OffsetT> &input)
-{
-  thrust::device_vector<KeyT> keys_output(input.get_num_items());
-  KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeys(nullptr,
-                                                  temp_storage_bytes,
-                                                  input.get_d_keys(),
-                                                  d_keys_output,
-                                                  input.get_num_items(),
-                                                  input.get_num_segments(),
-                                                  input.get_d_offsets(),
-                                                  input.get_d_offsets() + 1,
-                                                  0,
-                                                  true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
-  {
-    thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
-
-    CubDebugExit(cub::DeviceSegmentedSort::SortKeys(d_tmp_storage,
-                                                    temp_storage_bytes,
-                                                    input.get_d_keys(),
-                                                    d_keys_output,
-                                                    input.get_num_items(),
-                                                    input.get_num_segments(),
-                                                    input.get_d_offsets(),
-                                                    input.get_d_offsets() + 1,
-                                                    0,
-                                                    true));
-
-    AssertTrue(input.check_output(d_keys_output));
-
-    input.shuffle();
-  }
-}
-
-template <typename KeyT,
-          typename OffsetT>
-void InputTestBuffer(Input<KeyT, OffsetT> &input)
-{
-  thrust::device_vector<KeyT> keys_output(input.get_num_items());
-  KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
-
-  cub::DoubleBuffer<KeyT> empty_keys(nullptr, nullptr);
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortKeys(nullptr,
-                                                  temp_storage_bytes,
-                                                  empty_keys,
-                                                  input.get_num_items(),
-                                                  input.get_num_segments(),
-                                                  input.get_d_offsets(),
-                                                  input.get_d_offsets() + 1,
-                                                  0,
-                                                  true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
-  {
-    thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
-
-    cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(), d_keys_output);
-
-    CubDebugExit(cub::DeviceSegmentedSort::SortKeys(d_tmp_storage,
-                                                    temp_storage_bytes,
-                                                    keys_buffer,
-                                                    input.get_num_items(),
-                                                    input.get_num_segments(),
-                                                    input.get_d_offsets(),
-                                                    input.get_d_offsets() + 1,
-                                                    0,
-                                                    true));
-
-    AssertTrue(input.check_output(keys_buffer.Current()));
-
-    input.shuffle();
-  }
-}
 
 template <typename KeyT,
           typename ValueT,
           typename OffsetT>
-void InputTestPairs(Input<KeyT, OffsetT, ValueT> &input)
+void InputTest(bool sort_descending,
+               Input<KeyT, OffsetT, ValueT> &input)
 {
   thrust::device_vector<KeyT> keys_output(input.get_num_items());
   KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
@@ -947,191 +861,56 @@ void InputTestPairs(Input<KeyT, OffsetT, ValueT> &input)
   thrust::device_vector<ValueT> values_output(input.get_num_items());
   ValueT *d_values_output = thrust::raw_pointer_cast(values_output.data());
 
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(cub::DeviceSegmentedSort::SortPairs(nullptr,
-                                                   temp_storage_bytes,
-                                                   input.get_d_keys(),
-                                                   d_keys_output,
-                                                   input.get_d_values(),
-                                                   d_values_output,
-                                                   input.get_num_items(),
-                                                   input.get_num_segments(),
-                                                   input.get_d_offsets(),
-                                                   input.get_d_offsets() + 1,
-                                                   0,
-                                                   true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
+  for (bool sort_pairs: { keys, pairs })
   {
-    thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
+    for (bool sort_buffers: { pointers, double_buffer })
+    {
+      thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
+      thrust::fill(values_output.begin(), values_output.end(), ValueT{});
 
-    CubDebugExit(cub::DeviceSegmentedSort::SortPairs(d_tmp_storage,
-                                                     temp_storage_bytes,
-                                                     input.get_d_keys(),
-                                                     d_keys_output,
-                                                     input.get_d_values(),
-                                                     d_values_output,
-                                                     input.get_num_items(),
-                                                     input.get_num_segments(),
-                                                     input.get_d_offsets(),
-                                                     input.get_d_offsets() + 1,
-                                                     0,
-                                                     true));
+      cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(), d_keys_output);
+      cub::DoubleBuffer<ValueT> values_buffer(input.get_d_values(), d_values_output);
 
-    AssertTrue(input.check_output(d_keys_output, d_values_output));
+      Sort<KeyT, ValueT, OffsetT>(
+        sort_pairs,
+        sort_descending,
+        sort_buffers,
+        input.get_d_keys(),
+        d_keys_output,
+        input.get_d_values(),
+        d_values_output,
+        input.get_num_items(),
+        input.get_num_segments(),
+        input.get_d_offsets(),
+        &keys_buffer.selector,
+        &values_buffer.selector);
 
-    input.shuffle();
-  }
-}
+      if (sort_buffers)
+      {
+        if (sort_pairs)
+        {
+          AssertTrue(input.check_output(keys_buffer.Current(),
+                                        values_buffer.Current()));
+        }
+        else
+        {
+          AssertTrue(input.check_output(keys_buffer.Current()));
+        }
+      }
+      else
+      {
+        if (sort_pairs)
+        {
+          AssertTrue(input.check_output(d_keys_output, d_values_output));
+        }
+        else
+        {
+          AssertTrue(input.check_output(d_keys_output));
+        }
+      }
 
-template <typename KeyT,
-          typename ValueT,
-          typename OffsetT>
-void InputTestPairsBuffer(Input<KeyT, OffsetT, ValueT> &input)
-{
-  thrust::device_vector<KeyT> keys_output(input.get_num_items());
-  KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
-
-  thrust::device_vector<ValueT> values_output(input.get_num_items());
-  ValueT *d_values_output = thrust::raw_pointer_cast(values_output.data());
-
-  cub::DoubleBuffer<KeyT> empty_keys(nullptr, nullptr);
-  cub::DoubleBuffer<ValueT> empty_values(nullptr, nullptr);
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(
-    cub::DeviceSegmentedSort::SortPairs(nullptr,
-                                        temp_storage_bytes,
-                                        empty_keys,
-                                        empty_values,
-                                        input.get_num_items(),
-                                        input.get_num_segments(),
-                                        input.get_d_offsets(),
-                                        input.get_d_offsets() + 1,
-                                        0,
-                                        true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
-  {
-    thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
-    thrust::fill(values_output.begin(), values_output.end(), ValueT{});
-
-    cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(), d_keys_output);
-    cub::DoubleBuffer<ValueT> values_buffer(input.get_d_values(), d_values_output);
-
-    CubDebugExit(
-      cub::DeviceSegmentedSort::SortPairs(d_tmp_storage,
-                                          temp_storage_bytes,
-                                          keys_buffer,
-                                          values_buffer,
-                                          input.get_num_items(),
-                                          input.get_num_segments(),
-                                          input.get_d_offsets(),
-                                          input.get_d_offsets() + 1,
-                                          0,
-                                          true));
-
-    AssertTrue(input.check_output(keys_buffer.Current(), values_buffer.Current()));
-
-    input.shuffle();
-  }
-}
-
-template <typename KeyT,
-          typename OffsetT>
-void InputTestDescending(Input<KeyT, OffsetT> &input)
-{
-  thrust::device_vector<KeyT> keys_output(input.get_num_items());
-  KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(
-    cub::DeviceSegmentedSort::SortKeysDescending(nullptr,
-                                                 temp_storage_bytes,
-                                                 input.get_d_keys(),
-                                                 d_keys_output,
-                                                 input.get_num_items(),
-                                                 input.get_num_segments(),
-                                                 input.get_d_offsets(),
-                                                 input.get_d_offsets() + 1,
-                                                 0,
-                                                 true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
-  {
-    thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
-
-    CubDebugExit(
-      cub::DeviceSegmentedSort::SortKeysDescending(d_tmp_storage,
-                                                   temp_storage_bytes,
-                                                   input.get_d_keys(),
-                                                   d_keys_output,
-                                                   input.get_num_items(),
-                                                   input.get_num_segments(),
-                                                   input.get_d_offsets(),
-                                                   input.get_d_offsets() + 1,
-                                                   0,
-                                                   true));
-
-    AssertTrue(input.check_output(d_keys_output));
-
-    input.shuffle();
-  }
-}
-
-template <typename KeyT,
-          typename OffsetT>
-void InputTestDescendingBuffer(Input<KeyT, OffsetT> &input)
-{
-  thrust::device_vector<KeyT> keys_output(input.get_num_items());
-  KeyT *d_keys_output = thrust::raw_pointer_cast(keys_output.data());
-
-  cub::DoubleBuffer<KeyT> empty_keys(nullptr, nullptr);
-
-  std::size_t temp_storage_bytes{};
-  CubDebugExit(
-    cub::DeviceSegmentedSort::SortKeysDescending(nullptr,
-                                                 temp_storage_bytes,
-                                                 empty_keys,
-                                                 input.get_num_items(),
-                                                 input.get_num_segments(),
-                                                 input.get_d_offsets(),
-                                                 input.get_d_offsets() + 1,
-                                                 0,
-                                                 true));
-
-  thrust::device_vector<std::uint8_t> tmp_storage(temp_storage_bytes);
-  std::uint8_t *d_tmp_storage = thrust::raw_pointer_cast(tmp_storage.data());
-
-  for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
-  {
-    thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
-
-    cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(), d_keys_output);
-
-    CubDebugExit(
-      cub::DeviceSegmentedSort::SortKeysDescending(d_tmp_storage,
-                                                   temp_storage_bytes,
-                                                   keys_buffer,
-                                                   input.get_num_items(),
-                                                   input.get_num_segments(),
-                                                   input.get_d_offsets(),
-                                                   input.get_d_offsets() + 1,
-                                                   0,
-                                                   true));
-
-    AssertTrue(input.check_output(keys_buffer.Current()));
-
-    input.shuffle();
+      input.shuffle();
+    }
   }
 }
 
@@ -1950,86 +1729,41 @@ void InputTestDescendingPairsBuffer(Input<KeyT, OffsetT, ValueT> &input)
   }
 }
 
-template <typename KeyT,
-          typename OffsetT>
-void EdgePatternsTest(bool descending)
-{
-  Input<KeyT, OffsetT> edge_cases = InputDescription<KeyT, OffsetT>()
-                                      .add({420, 0})
-                                      .add({420, 1})
-                                      .add({420, 2})
-                                      .add({420, 8})
-                                      .add({420, 9})
-                                      .add({420, 10})
-                                      .add({420, 17})
-                                      .add({42,  18})
-                                      .add({42,  19})
-                                      .add({42,  26})
-                                      .add({42,  27})
-                                      .add({42,  28})
-                                      .add({42,  35})
-                                      .add({42,  36})
-                                      .add({42,  37})
-                                      .add({42,  286})
-                                      .add({42,  287})
-                                      .add({42,  288})
-                                      .add({42,  5887})
-                                      .add({42,  5888})
-                                      .add({42,  5889})
-                                      .add({2,  23552})
-                                      .gen(descending);
-
-  if (descending)
-  {
-    InputTestDescending(edge_cases);
-    InputTestDescendingBuffer(edge_cases);
-  }
-  else
-  {
-    InputTest(edge_cases);
-    InputTestBuffer(edge_cases);
-  }
-}
 
 template <typename KeyT,
           typename ValueT,
           typename OffsetT>
-void EdgePatternsTestPairs(bool descending)
+void EdgePatternsTest()
 {
-  Input<KeyT, OffsetT, ValueT> edge_cases = InputDescription<KeyT, OffsetT>()
-                                      .add({420, 0})
-                                      .add({420, 1})
-                                      .add({420, 2})
-                                      .add({420, 8})
-                                      .add({420, 9})
-                                      .add({420, 10})
-                                      .add({420, 17})
-                                      .add({42, 18})
-                                      .add({42, 19})
-                                      .add({42, 26})
-                                      .add({42, 27})
-                                      .add({42, 28})
-                                      .add({42, 35})
-                                      .add({42, 36})
-                                      .add({42, 37})
-                                      .add({42, 286})
-                                      .add({42, 287})
-                                      .add({42, 288})
-                                      .add({42, 5887})
-                                      .add({42, 5888})
-                                      .add({42, 5889})
-                                      .add({2, 23552})
-                                      .template gen<ValueT>(descending);
+  for (bool sort_descending: { ascending, descending })
+  {
+    Input<KeyT, OffsetT, ValueT> edge_cases =
+      InputDescription<KeyT, OffsetT>()
+        .add({420, 0})
+        .add({420, 1})
+        .add({420, 2})
+        .add({420, 8})
+        .add({420, 9})
+        .add({420, 10})
+        .add({420, 17})
+        .add({42, 18})
+        .add({42, 19})
+        .add({42, 26})
+        .add({42, 27})
+        .add({42, 28})
+        .add({42, 35})
+        .add({42, 36})
+        .add({42, 37})
+        .add({42, 286})
+        .add({42, 287})
+        .add({42, 288})
+        .add({42, 5887})
+        .add({42, 5888})
+        .add({42, 5889})
+        .add({2, 23552})
+        .template gen<ValueT>(sort_descending);
 
-  if (descending)
-  {
-    InputTestDescendingPairs<KeyT, ValueT, OffsetT>(edge_cases);
-    InputTestDescendingPairsBuffer<KeyT, ValueT, OffsetT>(edge_cases);
-  }
-  else
-  {
-    InputTestPairs<KeyT, ValueT, OffsetT>(edge_cases);
-    InputTestPairsBuffer<KeyT, ValueT, OffsetT>(edge_cases);
+    InputTest<KeyT, ValueT, OffsetT>(sort_descending, edge_cases);
   }
 }
 
@@ -2128,11 +1862,9 @@ void TestKeys()
   }
 
   const bool basic = false;
-  EdgePatternsTest<KeyT, OffsetT>(basic);
   RandomTest<KeyT, OffsetT>(basic);
 
   const bool sort_descending = true;
-  EdgePatternsTest<KeyT, OffsetT>(sort_descending);
   RandomTest<KeyT, OffsetT>(sort_descending);
 }
 
@@ -2150,12 +1882,12 @@ void TestPairs()
   }
 
   const bool basic = false;
-  EdgePatternsTestPairs<KeyT, ValueT, OffsetT>(basic);
   RandomPairsTest<KeyT, ValueT, OffsetT>(basic);
 
   const bool sort_descending = true;
-  EdgePatternsTestPairs<KeyT, ValueT, OffsetT>(sort_descending);
   RandomPairsTest<KeyT, ValueT, OffsetT>(sort_descending);
+
+  EdgePatternsTest<KeyT, ValueT, OffsetT>();
 }
 
 template <typename T,
