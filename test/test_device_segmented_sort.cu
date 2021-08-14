@@ -865,51 +865,54 @@ void InputTest(bool sort_descending,
   {
     for (bool sort_buffers: { pointers, double_buffer })
     {
-      thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
-      thrust::fill(values_output.begin(), values_output.end(), ValueT{});
-
-      cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(), d_keys_output);
-      cub::DoubleBuffer<ValueT> values_buffer(input.get_d_values(), d_values_output);
-
-      Sort<KeyT, ValueT, OffsetT>(
-        sort_pairs,
-        sort_descending,
-        sort_buffers,
-        input.get_d_keys(),
-        d_keys_output,
-        input.get_d_values(),
-        d_values_output,
-        input.get_num_items(),
-        input.get_num_segments(),
-        input.get_d_offsets(),
-        &keys_buffer.selector,
-        &values_buffer.selector);
-
-      if (sort_buffers)
+      for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
       {
-        if (sort_pairs)
+        thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
+        thrust::fill(values_output.begin(), values_output.end(), ValueT{});
+
+        cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(), d_keys_output);
+        cub::DoubleBuffer<ValueT> values_buffer(input.get_d_values(), d_values_output);
+
+        Sort<KeyT, ValueT, OffsetT>(
+          sort_pairs,
+          sort_descending,
+          sort_buffers,
+          input.get_d_keys(),
+          d_keys_output,
+          input.get_d_values(),
+          d_values_output,
+          input.get_num_items(),
+          input.get_num_segments(),
+          input.get_d_offsets(),
+          &keys_buffer.selector,
+          &values_buffer.selector);
+
+        if (sort_buffers)
         {
-          AssertTrue(input.check_output(keys_buffer.Current(),
-                                        values_buffer.Current()));
+          if (sort_pairs)
+          {
+            AssertTrue(input.check_output(keys_buffer.Current(),
+                                          values_buffer.Current()));
+          }
+          else
+          {
+            AssertTrue(input.check_output(keys_buffer.Current()));
+          }
         }
         else
         {
-          AssertTrue(input.check_output(keys_buffer.Current()));
+          if (sort_pairs)
+          {
+            AssertTrue(input.check_output(d_keys_output, d_values_output));
+          }
+          else
+          {
+            AssertTrue(input.check_output(d_keys_output));
+          }
         }
-      }
-      else
-      {
-        if (sort_pairs)
-        {
-          AssertTrue(input.check_output(d_keys_output, d_values_output));
-        }
-        else
-        {
-          AssertTrue(input.check_output(d_keys_output));
-        }
-      }
 
-      input.shuffle();
+        input.shuffle();
+      }
     }
   }
 }
