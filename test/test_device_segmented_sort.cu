@@ -1043,7 +1043,7 @@ void InputTestRandom(Input<KeyT, OffsetT, ValueT> &input)
     {
       for (bool sort_buffers: { pointers, double_buffer })
       {
-        for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
+        for (int iteration = 0; iteration < MAX_ITERATIONS / 10; iteration++)
         {
           RandomizeInput(h_keys, h_values);
 
@@ -1156,18 +1156,21 @@ template <typename KeyT,
           typename ValueT,
           typename OffsetT>
 Input<KeyT, OffsetT, ValueT> GenRandomInput(OffsetT max_items,
+                                            OffsetT min_segments,
                                             OffsetT max_segments,
                                             bool descending)
 {
   std::size_t items_generated {};
-  const std::size_t segments_num = RandomValue(max_segments) + 1;
+  const std::size_t segments_num = RandomValue(max_segments) + min_segments;
 
   thrust::host_vector<OffsetT> segment_sizes;
   segment_sizes.reserve(segments_num);
 
+  const OffsetT max_segment_size = 6000;
+
   for (std::size_t segment_id = 0; segment_id < segments_num; segment_id++)
   {
-    const OffsetT segment_size_raw = RandomValue(max_items / 100);
+    const OffsetT segment_size_raw = RandomValue(max_segment_size);
     const OffsetT segment_size = segment_size_raw > OffsetT{0} ? segment_size_raw
                                                                : OffsetT{0};
 
@@ -1186,15 +1189,18 @@ Input<KeyT, OffsetT, ValueT> GenRandomInput(OffsetT max_items,
 template <typename KeyT,
           typename ValueT,
           typename OffsetT>
-void RandomTest()
+void RandomTest(OffsetT min_segments,
+                OffsetT max_segments)
 {
-  const OffsetT max_items    = 1000000;
-  const OffsetT max_segments = 42000;
+  const OffsetT max_items = 10000000;
 
-  for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
+  for (int iteration = 0; iteration < 10 * MAX_ITERATIONS; iteration++)
   {
     Input<KeyT, OffsetT, ValueT> edge_cases =
-      GenRandomInput<KeyT, ValueT, OffsetT>(max_items, max_segments, descending);
+      GenRandomInput<KeyT, ValueT, OffsetT>(max_items,
+                                            min_segments,
+                                            max_segments,
+                                            descending);
 
     InputTestRandom(edge_cases);
   }
@@ -1231,7 +1237,8 @@ void TestPairs()
     }
   }
 
-  RandomTest<KeyT, ValueT, OffsetT>();
+  RandomTest<KeyT, ValueT, OffsetT>(1 << 2, 1 << 8);
+  RandomTest<KeyT, ValueT, OffsetT>(1 << 9, 1 << 19);
 }
 
 template <typename T,
@@ -1253,17 +1260,13 @@ int main(int argc, char** argv)
   TestEmptySegments(1 << 2);
   TestEmptySegments(1 << 22);
 
-  /*
   TestKeysAndPairs<std::uint8_t,  std::uint32_t>();
   TestKeysAndPairs<std::uint16_t, std::uint32_t>();
-   */
   TestKeysAndPairs<std::uint32_t, std::uint32_t>();
-  /*
   TestKeysAndPairs<std::uint64_t, std::uint32_t>();
   TestKeysAndPairs<std::uint64_t, std::uint64_t>();
   TestPairs<std::uint8_t, std::uint64_t, std::uint32_t>();
   TestPairs<std::int64_t, std::uint64_t, std::uint32_t>();
-   */
 
   return 0;
 }
