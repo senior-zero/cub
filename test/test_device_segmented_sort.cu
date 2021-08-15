@@ -28,6 +28,8 @@
 // Ensure printing of CUDA runtime errors to console
 #define CUB_STDERR
 
+#include <fstream>
+
 #include <cub/device/device_segmented_sort.cuh>
 #include <test_util.h>
 
@@ -204,6 +206,16 @@ public:
       , d_values(num_items)
   {
     update();
+  }
+
+  Input(thrust::host_vector<OffsetT> &h_offsets)
+    : d_offsets(h_offsets)
+    , h_offsets(h_offsets)
+    , reverse(false)
+    , num_items(h_offsets.back())
+    , d_keys(num_items)
+    , d_values(num_items)
+  {
   }
 
   void shuffle()
@@ -942,8 +954,9 @@ bool compare_two_outputs(const thrust::host_vector<OffsetT> &offsets,
       std::cerr << "Mismatch in segment " << segment_id
                 << " at position " << idx << " / " << segment_size
                 << ": "
-                << static_cast<std::int64_t>(lhs_begin[idx]) << " vs "
-                << static_cast<std::int64_t>(rhs_begin[idx]) << std::endl;
+                << static_cast<std::uint64_t>(lhs_begin[idx]) << " vs "
+                << static_cast<std::uint64_t>(rhs_begin[idx]) << " ("
+                << typeid(lhs_begin[idx]).name() << ")" << std::endl;
 
       return false;
     }
@@ -971,13 +984,13 @@ template <typename KeyT,
           typename OffsetT>
 void HostReferenceSort(bool sort_pairs,
                        bool sort_descending,
-                       Input<KeyT, OffsetT, ValueT> &input,
+                       unsigned int num_segments,
                        const thrust::host_vector<OffsetT> &h_offsets,
                        thrust::host_vector<KeyT> &h_keys,
                        thrust::host_vector<ValueT> &h_values)
 {
   for (unsigned int segment_i = 0;
-       segment_i < input.get_num_segments();
+       segment_i < num_segments;
        segment_i++)
   {
     const OffsetT segment_begin = h_offsets[segment_i];
@@ -1017,6 +1030,43 @@ void HostReferenceSort(bool sort_pairs,
 }
 
 
+template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
+void DumpInput(bool sort_pairs,
+               bool sort_descending,
+               bool sort_buffers,
+               Input<KeyT, OffsetT, ValueT> &input,
+               thrust::host_vector<KeyT> &h_keys,
+               thrust::host_vector<ValueT> &h_values)
+{
+  const thrust::host_vector<OffsetT> &h_offsets = input.get_h_offsets();
+
+  std::cout << "sort pairs: " << sort_pairs << "\n";
+  std::cout << "sort descending: " << sort_descending << "\n";
+  std::cout << "sort buffers: " << sort_buffers << "\n";
+  std::cout << "num_items: " << input.get_num_items() << "\n";
+  std::cout << "num_segments: " << input.get_num_segments() << "\n";
+  std::cout << "key type: " << typeid(h_keys[0]).name() << "\n";
+  std::cout << "value type: " << typeid(h_values[0]).name() << "\n";
+  std::cout << "offset type: " << typeid(h_offsets[0]).name() << "\n";
+
+  std::ofstream offsets_dump("offsets", std::ios::binary);
+  offsets_dump.write(reinterpret_cast<const char *>(
+                       thrust::raw_pointer_cast(h_offsets.data())),
+                     sizeof(OffsetT) * h_offsets.size());
+
+  std::ofstream keys_dump("keys", std::ios::binary);
+  keys_dump.write(reinterpret_cast<const char *>(
+                    thrust::raw_pointer_cast(h_keys.data())),
+                  sizeof(KeyT) * h_keys.size());
+
+  std::ofstream values_dump("values", std::ios::binary);
+  values_dump.write(reinterpret_cast<const char *>(
+                      thrust::raw_pointer_cast(h_values.data())),
+                    sizeof(ValueT) * h_values.size());
+}
+
 
 template <typename KeyT,
           typename ValueT,
@@ -1047,6 +1097,9 @@ void InputTestRandom(Input<KeyT, OffsetT, ValueT> &input)
         {
           RandomizeInput(h_keys, h_values);
 
+          auto h_keys_backup = h_keys;
+          auto h_values_backup = h_values;
+
           input.get_d_keys_vec()   = h_keys;
           input.get_d_values_vec() = h_values;
 
@@ -1069,7 +1122,7 @@ void InputTestRandom(Input<KeyT, OffsetT, ValueT> &input)
 
           HostReferenceSort(sort_pairs,
                             sort_descending,
-                            input,
+                            input.get_num_segments(),
                             h_offsets,
                             h_keys,
                             h_values);
@@ -1100,12 +1153,26 @@ void InputTestRandom(Input<KeyT, OffsetT, ValueT> &input)
             h_values_output = values_output;
           }
 
-          AssertTrue(compare_two_outputs(h_offsets, h_keys, h_keys_output));
+          const bool keys_ok =
+            compare_two_outputs(h_offsets, h_keys, h_keys_output);
 
-          if (sort_pairs)
+          const bool values_ok =
+            sort_pairs
+              ? compare_two_outputs(h_offsets, h_values, h_values_output)
+              : true;
+
+          if (!keys_ok || !values_ok)
           {
-            AssertTrue(compare_two_outputs(h_offsets, h_values, h_values_output));
+            DumpInput<KeyT, ValueT, OffsetT>(sort_pairs,
+                                             sort_descending,
+                                             sort_buffers,
+                                             input,
+                                             h_keys_backup,
+                                             h_values_backup);
           }
+
+          AssertTrue(keys_ok);
+          AssertTrue(values_ok);
 
           input.shuffle();
         }
@@ -1249,6 +1316,113 @@ void TestKeysAndPairs()
   TestPairs<T, T, OffsetT>();
 }
 
+
+template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
+void InputTestFromFiles()
+{
+  (void)MAX_ITERATIONS;
+
+  const bool sort_pairs      = true;
+  const bool sort_descending = true;
+  const bool sort_buffers    = false;
+
+  const OffsetT num_items    = 9998991;
+  const unsigned int num_segments = 3298;
+
+  thrust::host_vector<OffsetT> h_offsets(num_segments + 1);
+  std::ifstream offsets_file("offsets", std::ios::binary);
+  offsets_file.read(reinterpret_cast<char *>(
+                      thrust::raw_pointer_cast(h_offsets.data())),
+                    sizeof(OffsetT) * (num_segments + 1));
+  thrust::device_vector<OffsetT> d_offsets = h_offsets;
+
+  thrust::host_vector<KeyT> h_keys(num_items);
+  std::ifstream keys_file("keys", std::ios::binary);
+  keys_file.read(reinterpret_cast<char *>(
+                   thrust::raw_pointer_cast(h_keys.data())),
+                 sizeof(KeyT) * num_items);
+
+  thrust::host_vector<ValueT> h_values(num_items);
+  std::ifstream values_file("values", std::ios::binary);
+  values_file.read(reinterpret_cast<char *>(
+                     thrust::raw_pointer_cast(h_values.data())),
+                   sizeof(ValueT) * num_items);
+
+  thrust::host_vector<KeyT> h_keys_output(num_items);
+  thrust::device_vector<KeyT> keys_output(num_items);
+
+  thrust::host_vector<ValueT> h_values_output(num_items);
+  thrust::device_vector<ValueT> values_output(num_items);
+
+  thrust::device_vector<KeyT> d_keys = h_keys;
+  thrust::device_vector<ValueT> d_values = h_values;
+
+  KeyT *d_keys_input = thrust::raw_pointer_cast(d_keys.data());
+  ValueT *d_values_input = thrust::raw_pointer_cast(d_values.data());
+  KeyT *d_keys_output     = thrust::raw_pointer_cast(keys_output.data());
+  ValueT *d_values_output = thrust::raw_pointer_cast(values_output.data());
+
+  cub::DoubleBuffer<KeyT> keys_buffer(d_keys_input, d_keys_output);
+  cub::DoubleBuffer<ValueT> values_buffer(d_values_input, d_values_output);
+
+  Sort<KeyT, ValueT, OffsetT>(sort_pairs,
+                              sort_descending,
+                              sort_buffers,
+                              d_keys_input,
+                              d_keys_output,
+                              d_values_input,
+                              d_values_output,
+                              num_items,
+                              num_segments,
+                              thrust::raw_pointer_cast(d_offsets.data()),
+                              &keys_buffer.selector,
+                              &values_buffer.selector);
+
+  HostReferenceSort(sort_pairs,
+                    sort_descending,
+                    num_segments,
+                    h_offsets,
+                    h_keys,
+                    h_values);
+
+  if (sort_buffers)
+  {
+    if (keys_buffer.selector)
+    {
+      h_keys_output = keys_output;
+    }
+    else
+    {
+      h_keys_output = d_keys;
+    }
+
+    if (values_buffer.selector)
+    {
+      h_values_output = values_output;
+    }
+    else
+    {
+      h_values_output = d_values;
+    }
+  }
+  else
+  {
+    h_keys_output   = keys_output;
+    h_values_output = values_output;
+  }
+
+  const bool keys_ok = compare_two_outputs(h_offsets, h_keys, h_keys_output);
+
+  const bool values_ok =
+    sort_pairs ? compare_two_outputs(h_offsets, h_values, h_values_output)
+               : true;
+
+  AssertTrue(keys_ok);
+  AssertTrue(values_ok);
+}
+
 int main(int argc, char** argv)
 {
   CommandLineArgs args(argc, argv);
@@ -1256,6 +1430,9 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
+  InputTestFromFiles<std::uint8_t, std::uint64_t, std::uint32_t>();
+
+  /*
   TestZeroSegments();
   TestEmptySegments(1 << 2);
   TestEmptySegments(1 << 22);
@@ -1267,6 +1444,7 @@ int main(int argc, char** argv)
   TestKeysAndPairs<std::uint64_t, std::uint64_t>();
   TestPairs<std::uint8_t, std::uint64_t, std::uint32_t>();
   TestPairs<std::int64_t, std::uint64_t, std::uint32_t>();
+   */
 
   return 0;
 }
