@@ -57,6 +57,9 @@ class WarpLoad
   constexpr static bool IS_ARCH_WARP = LOGICAL_WARP_THREADS ==
                                        CUB_WARP_THREADS(PTX_ARCH);
 
+  static_assert(PowerOfTwo<LOGICAL_WARP_THREADS>::VALUE,
+                "LOGICAL_WARP_THREADS must be a power of two");
+
 private:
 
   /******************************************************************************

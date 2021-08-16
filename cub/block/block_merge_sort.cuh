@@ -119,7 +119,7 @@ template <
 class BlockMergeSortStrategy
 {
   static_assert(PowerOfTwo<THREADS_NUMBER>::VALUE,
-                "LOGICAL_WARP_THREADS must be a power of two");
+                "THREADS_NUMBER must be a power of two");
 
 private:
 

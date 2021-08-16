@@ -47,6 +47,9 @@ template <typename InputT,
           int PTX_ARCH              = CUB_PTX_ARCH>
 class WarpExchange
 {
+  static_assert(PowerOfTwo<LOGICAL_WARP_THREADS>::VALUE,
+                "LOGICAL_WARP_THREADS must be a power of two");
+
   constexpr static int ITEMS_PER_TILE =
     ITEMS_PER_THREAD * LOGICAL_WARP_THREADS + 1;
 
