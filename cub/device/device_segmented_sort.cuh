@@ -26,7 +26,7 @@
  ******************************************************************************/
 
 /**
- * \file
+ * @file
  * cub::DeviceSegmentedSort provides device-wide, parallel operations for
  * computing a batched sort across multiple, non-overlapping sequences of
  * data items residing within device-accessible memory.
@@ -191,7 +191,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -202,7 +202,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename OffsetT,
@@ -316,7 +316,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -327,7 +327,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename OffsetT,
@@ -394,7 +394,7 @@ struct DeviceSegmentedSort
    *
    * @par Snippet
    * The code snippet below illustrates the batched sorting of three segments
-   * (with one zero-length segment) of \p int keys.
+   * (with one zero-length segment) of @p int keys.
    *
    * @par
    * @code
@@ -451,7 +451,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -462,7 +462,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename OffsetT,
@@ -528,7 +528,7 @@ struct DeviceSegmentedSort
    *
    * @par Snippet
    * The code snippet below illustrates the batched sorting of three segments
-   * (with one zero-length segment) of \p int keys.
+   * (with one zero-length segment) of @p int keys.
    *
    * @par
    * @code
@@ -585,7 +585,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -596,7 +596,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename OffsetT,
@@ -710,7 +710,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -721,7 +721,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename OffsetT,
@@ -824,7 +824,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -835,7 +835,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename OffsetT,
@@ -893,7 +893,7 @@ struct DeviceSegmentedSort
    *
    * @par Snippet
    * The code snippet below illustrates the batched sorting of three segments
-   * (with one zero-length segment) of \p int keys.
+   * (with one zero-length segment) of @p int keys.
    *
    * @par
    * @code
@@ -950,7 +950,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -961,7 +961,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename OffsetT,
@@ -1015,7 +1015,7 @@ struct DeviceSegmentedSort
    *
    * @par Snippet
    * The code snippet below illustrates the batched sorting of three segments
-   * (with one zero-length segment) of \p int keys.
+   * (with one zero-length segment) of @p int keys.
    *
    * @par
    * @code
@@ -1072,7 +1072,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -1083,7 +1083,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename OffsetT,
@@ -1203,7 +1203,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -1214,7 +1214,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename ValueT,
@@ -1343,7 +1343,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -1354,7 +1354,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename ValueT,
@@ -1426,7 +1426,7 @@ struct DeviceSegmentedSort
    *
    * @par Snippet
    * The code snippet below illustrates the batched sorting of three segments
-   * (with one zero-length segment) of \p int keys with associated vector of
+   * (with one zero-length segment) of @p int keys with associated vector of
    * @p int values.
    *
    * @par
@@ -1494,7 +1494,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -1505,7 +1505,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename ValueT,
@@ -1572,7 +1572,7 @@ struct DeviceSegmentedSort
    *
    * @par Snippet
    * The code snippet below illustrates the batched sorting of three segments
-   * (with one zero-length segment) of \p int keys with associated vector of
+   * (with one zero-length segment) of @p int keys with associated vector of
    * @p int values.
    *
    * @par
@@ -1640,7 +1640,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -1651,7 +1651,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename ValueT,
@@ -1776,7 +1776,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -1787,7 +1787,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename ValueT,
@@ -1911,7 +1911,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -1922,7 +1922,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename ValueT,
@@ -1988,7 +1988,7 @@ struct DeviceSegmentedSort
    *
    * @par Snippet
    * The code snippet below illustrates the batched sorting of three segments
-   * (with one zero-length segment) of \p int keys with associated vector of
+   * (with one zero-length segment) of @p int keys with associated vector of
    * @p int values.
    *
    * @par
@@ -2056,7 +2056,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -2067,7 +2067,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename ValueT,
@@ -2129,7 +2129,7 @@ struct DeviceSegmentedSort
    *
    * @par Snippet
    * The code snippet below illustrates the batched sorting of three segments
-   * (with one zero-length segment) of \p int keys with associated vector of
+   * (with one zero-length segment) of @p int keys with associated vector of
    * @p int values.
    *
    * @par
@@ -2196,7 +2196,7 @@ struct DeviceSegmentedSort
    *                            element of the <em>i</em><sup>th</sup> data
    *                            segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
    * @param[in] d_end_offsets Random-access input iterator to the sequence of
-   *                          ending offsets of length \p num_segments, such that
+   *                          ending offsets of length @p num_segments, such that
    *                          <tt>d_end_offsets[i]-1</tt> is the last element of
    *                          the <em>i</em><sup>th</sup> data segment in
    *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -2207,7 +2207,7 @@ struct DeviceSegmentedSort
    * @param[in] debug_synchronous <b>[optional]</b> Whether or not to synchronize
    *                              the stream after every kernel launch to check
    *                              for errors. Also causes launch configurations
-   *                              to be printed to the console. Default is \p false.
+   *                              to be printed to the console. Default is @p false.
    */
   template <typename KeyT,
             typename ValueT,

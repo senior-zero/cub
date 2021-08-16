@@ -68,8 +68,8 @@ __global__ void DeviceSegmentedSortFallbackKernel(
   const ValueT                    *d_values_in_origin,            ///< [in] Input values buffer
   ValueT                          *d_values_out_origin,           ///< [out] Output values buffer
   cub::DeviceDoubleBuffer<ValueT>  d_values_remaining_passes,     ///< [in,out] Double values buffer
-  BeginOffsetIteratorT             d_begin_offsets,               ///< [in] Random-access input iterator to the sequence of beginning offsets of length \p num_segments, such that <tt>d_begin_offsets[i]</tt> is the first element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
-  EndOffsetIteratorT               d_end_offsets)                 ///< [in] Random-access input iterator to the sequence of ending offsets of length \p num_segments, such that <tt>d_end_offsets[i]-1</tt> is the last element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>.  If <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>, the <em>i</em><sup>th</sup> is considered empty.
+  BeginOffsetIteratorT             d_begin_offsets,               ///< [in] Random-access input iterator to the sequence of beginning offsets of length @p num_segments, such that <tt>d_begin_offsets[i]</tt> is the first element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
+  EndOffsetIteratorT               d_end_offsets)                 ///< [in] Random-access input iterator to the sequence of ending offsets of length @p num_segments, such that <tt>d_end_offsets[i]-1</tt> is the last element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>.  If <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>, the <em>i</em><sup>th</sup> is considered empty.
 {
   const unsigned int segment_id = blockIdx.x;
   OffsetT segment_begin         = d_begin_offsets[segment_id];
@@ -197,7 +197,7 @@ __global__ void DeviceSegmentedSortFallbackKernel(
  *                            of the <em>i</em><sup>th</sup> data segment in
  *                            <tt>d_keys_*</tt> and <tt>d_values_*</tt>
  * @param[in] d_end_offsets Random-access input iterator to the sequence of ending
- *                          offsets of length \p num_segments, such that
+ *                          offsets of length @p num_segments, such that
  *                          <tt>d_end_offsets[i]-1</tt> is the last element of the
  *                          <em>i</em><sup>th</sup> data segment in
  *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
@@ -212,7 +212,7 @@ template <bool IS_DESCENDING,
           typename EndOffsetIteratorT,
           typename OffsetT>
 __launch_bounds__(SegmentedPolicyT::BLOCK_THREADS) __global__
-  void DeviceSegmentedSortKernelWithReorderingSmall(
+void DeviceSegmentedSortKernelWithReorderingSmall(
     unsigned int small_segments,
     unsigned int medium_segments,
     unsigned int medium_blocks,
@@ -313,7 +313,7 @@ __launch_bounds__(SegmentedPolicyT::BLOCK_THREADS) __global__
  *                            of the <em>i</em><sup>th</sup> data segment in
  *                            <tt>d_keys_*</tt> and <tt>d_values_*</tt>
  * @param[in] d_end_offsets Random-access input iterator to the sequence of ending
- *                          offsets of length \p num_segments, such that
+ *                          offsets of length @p num_segments, such that
  *                          <tt>d_end_offsets[i]-1</tt> is the last element of the
  *                          <em>i</em><sup>th</sup> data segment in
  *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If

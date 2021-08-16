@@ -1,7 +1,6 @@
-
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
- * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -257,6 +256,134 @@ struct DevicePartition
             debug_synchronous);
     }
 
+
+    /**
+     * @brief Uses two functors to split the corresponding items from @p d_in
+     *        into a three partitioned sequences @p d_first_part_out
+     *        @p d_second_part_out and @p d_unselected_out.
+     *        The total number of items copied into the first partition is written
+     *        to <tt>d_num_selected_out[0]</tt>, while the total number of
+     *        items copied into the second partition is written to
+     *        <tt>d_num_selected_out[1]</tt>.
+     *
+     * @par
+     * - Copies of the selected by @p select_first_part_op items are compacted
+     *   into @p d_first_part_out and maintain their original relative ordering.
+     * - Copies of the selected by @p select_second_part_op items are compacted
+     *   into @p d_second_part_out and maintain their original relative ordering.
+     * - Copies of the unselected items are compacted into the
+     *   @p d_unselected_out in reverse order.
+     *
+     * @par Snippet
+     * The code snippet below illustrates the compaction of items selected from
+     * an @p int device vector.
+     *
+     * @par
+     * @code
+     * #include <cub/cub.cuh>   // or equivalently <cub/device/device_partition.cuh>
+     *
+     * // Functor type for selecting values less than some criteria
+     * struct LessThan
+     * {
+     *     int compare;
+     *
+     *     CUB_RUNTIME_FUNCTION __forceinline__
+     *     LessThan(int compare) : compare(compare) {}
+     *
+     *     CUB_RUNTIME_FUNCTION __forceinline__
+     *     bool operator()(const int &a) const
+     *     {
+     *         return a < compare;
+     *     }
+     * };
+     *
+     * // Functor type for selecting values greater than some criteria
+     * struct GreaterThan
+     * {
+     *     int compare;
+     *
+     *     CUB_RUNTIME_FUNCTION __forceinline__
+     *     GreaterThan(int compare) : compare(compare) {}
+     *
+     *     CUB_RUNTIME_FUNCTION __forceinline__
+     *     bool operator()(const int &a) const
+     *     {
+     *         return a > compare;
+     *     }
+     * };
+     *
+     * // Declare, allocate, and initialize device-accessible pointers for input and output
+     * int      num_items;                   // e.g., 8
+     * int      *d_in;                       // e.g., [0, 2, 3, 9, 5, 2, 81, 8]
+     * int      *d_large_and_unselected_out; // e.g., [ ,  ,  ,  ,  ,  ,  ,  ]
+     * int      *d_small_out;                // e.g., [ ,  ,  ,  ,  ,  ,  ,  ]
+     * int      *d_num_selected_out;         // e.g., [ , ]
+     * thrust::reverse_iterator<T> unselected_out(d_large_and_unselected_out + num_items);
+     * LessThan small_items_selector(7);
+     * GreaterThan large_items_selector(50);
+     * ...
+     *
+     * // Determine temporary device storage requirements
+     * void     *d_temp_storage = NULL;
+     * size_t   temp_storage_bytes = 0;
+     * cub::DevicePartition::If(
+     *      d_temp_storage, temp_storage_bytes,
+     *      d_in, d_large_and_medium_out, d_small_out, unselected_out,
+     *      d_num_selected_out, num_items,
+     *      large_items_selector, small_items_selector);
+     *
+     * // Allocate temporary storage
+     * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+     *
+     * // Run selection
+     * cub::DevicePartition::If(
+     *      d_temp_storage, temp_storage_bytes,
+     *      d_in, d_large_and_medium_out, d_small_out, unselected_out,
+     *      d_num_selected_out, num_items,
+     *      large_items_selector, small_items_selector);
+     *
+     * // d_large_and_unselected_out  <-- [ 81,  ,  ,  ,  ,  , 8, 9 ]
+     * // d_small_out                 <-- [  0, 2, 3, 5, 2,  ,  ,   ]
+     * // d_num_selected_out          <-- [  1, 5 ]
+     * @endcode
+     *
+     * @tparam InputIteratorT <b>[inferred]</b> Random-access input iterator
+     *                        type for reading input items \iterator
+     * @tparam FirstOutputIteratorT <b>[inferred]</b> Random-access output iterator
+     *                              type for writing output items selected by first
+     *                              operator \iterator
+     * @tparam SecondOutputIteratorT <b>[inferred]</b> Random-access output iterator
+     *                               type for writing output items selected by second
+     *                               operator \iterator
+     * @tparam UnselectedOutputIteratorT <b>[inferred]</b> Random-access output iterator
+     *                                   type for writing unselected items \iterator
+     * @tparam NumSelectedIteratorT <b>[inferred]</b> Output iterator type for
+     *                              recording the number of items selected \iterator
+     * @tparam SelectFirstPartOp <b>[inferred]</b> Selection functor type having member
+     *                           <tt>bool operator()(const T &a)</tt>
+     * @tparam SelectSecondPartOp <b>[inferred]</b> Selection functor type having member
+     *                            <tt>bool operator()(const T &a)</tt>
+     *
+     * @param[in] d_temp_storage  Device-accessible allocation of temporary storage.
+     *                            When nullptr, the required allocation size is written
+     *                            to @p temp_storage_bytes and no work is done.
+     * @param[in,out] temp_storage_bytes Reference to size in bytes of
+     *                                   @p d_temp_storage allocation
+     * @param[in] d_in Pointer to the input sequence of data items
+     * @param[out] d_first_part_out Pointer to the output sequence of data items
+     *                              selected by @p select_first_part_op
+     * @param[out] d_second_part_out Pointer to the output sequence of data items
+     *                               selected by @p select_second_part_op
+     * @param[out] d_unselected_out Pointer to the output sequence of unselected
+     *                              data items
+     * @param[out] d_num_selected_out Pointer to the output array with two elements,
+     *                                where total number of items selected by
+     *                                @p select_first_part_op is stored as
+     *                                <tt>d_num_selected_out[0]</tt> and total
+     *                                number of items selected by
+     *                                @p select_second_part_op is stored as
+     *                                <tt>d_num_selected_out[1]</tt>, respectively
+     */
     template <typename InputIteratorT,
               typename FirstOutputIteratorT,
               typename SecondOutputIteratorT,
@@ -264,20 +391,19 @@ struct DevicePartition
               typename NumSelectedIteratorT,
               typename SelectFirstPartOp,
               typename SelectSecondPartOp>
-    CUB_RUNTIME_FUNCTION __forceinline__
-    static cudaError_t If(
-      void*                       d_temp_storage,
-      std::size_t&                temp_storage_bytes,
-      InputIteratorT              d_in,
-      FirstOutputIteratorT        d_first_part_out,
-      SecondOutputIteratorT       d_second_part_out,
-      UnselectedOutputIteratorT   d_unselected_out,
-      NumSelectedIteratorT        d_num_selected_out,
-      int                         num_items,
-      SelectFirstPartOp           select_first_part_op,
-      SelectSecondPartOp          select_second_part_op,
-      cudaStream_t                stream             = 0,
-      bool                        debug_synchronous  = false)
+    CUB_RUNTIME_FUNCTION __forceinline__ static cudaError_t
+    If(void *d_temp_storage,
+       std::size_t &temp_storage_bytes,
+       InputIteratorT d_in,
+       FirstOutputIteratorT d_first_part_out,
+       SecondOutputIteratorT d_second_part_out,
+       UnselectedOutputIteratorT d_unselected_out,
+       NumSelectedIteratorT d_num_selected_out,
+       int num_items,
+       SelectFirstPartOp select_first_part_op,
+       SelectSecondPartOp select_second_part_op,
+       cudaStream_t stream    = 0,
+       bool debug_synchronous = false)
     {
       using OffsetT = int;
 
