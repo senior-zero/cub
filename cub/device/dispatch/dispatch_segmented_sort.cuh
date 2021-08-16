@@ -50,6 +50,8 @@
 CUB_NAMESPACE_BEGIN
 
 
+// Fallback kernel, in case there's not enough segments to
+// take advantage of partitioning.
 template <bool IS_DESCENDING,
           typename SegmentedPolicyT,
           typename MediumPolicyT,
@@ -140,7 +142,8 @@ __global__ void DeviceSegmentedSortFallbackKernel(
   {
     // Sort by a CTA with multiple reads from global memory
     int current_bit = begin_bit;
-    int pass_bits = CUB_MIN(SegmentedPolicyT::RADIX_BITS, (end_bit - current_bit));
+    int pass_bits = (cub::min)(int{SegmentedPolicyT::RADIX_BITS},
+                               (end_bit - current_bit));
 
     agent.ProcessLargeSegment(current_bit,
                               pass_bits,
@@ -153,7 +156,8 @@ __global__ void DeviceSegmentedSortFallbackKernel(
     #pragma unroll 1
     while (current_bit < end_bit)
     {
-      pass_bits = CUB_MIN(SegmentedPolicyT::RADIX_BITS, (end_bit - current_bit));
+      pass_bits = (cub::min)(int{SegmentedPolicyT::RADIX_BITS},
+                             (end_bit - current_bit));
 
       CTA_SYNC();
       agent.ProcessLargeSegment(current_bit,
@@ -171,27 +175,55 @@ __global__ void DeviceSegmentedSortFallbackKernel(
 }
 
 
-template <
-  bool                    IS_DESCENDING,
-  typename                SegmentedPolicyT,               ///< Active tuning policy
-  typename                KeyT,                           ///< Key type
-  typename                ValueT,                         ///< Value type
-  typename                BeginOffsetIteratorT,           ///< Random-access input iterator type for reading segment beginning offsets \iterator
-  typename                EndOffsetIteratorT,             ///< Random-access input iterator type for reading segment ending offsets \iterator
-  typename                OffsetT>                        ///< Signed integer type for global offsets
-__launch_bounds__ (SegmentedPolicyT::BLOCK_THREADS)
-__global__ void DeviceSegmentedSortKernelWithReorderingSmall(
-  unsigned int                     small_segments,
-  unsigned int                     medium_segments,
-  unsigned int                     medium_blocks,
-  const unsigned int              *d_small_segments_reordering,
-  const unsigned int              *d_medium_segments_reordering,
-  const KeyT                      *d_keys_in_origin,              ///< [in] Input keys buffer
-  KeyT                            *d_keys_out_orig,               ///< [out] Output keys buffer
-  const ValueT                    *d_values_in_origin,            ///< [in] Input values buffer
-  ValueT                          *d_values_out_origin,           ///< [out] Output values buffer
-  BeginOffsetIteratorT             d_begin_offsets,               ///< [in] Random-access input iterator to the sequence of beginning offsets of length \p num_segments, such that <tt>d_begin_offsets[i]</tt> is the first element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
-  EndOffsetIteratorT               d_end_offsets)                 ///< [in] Random-access input iterator to the sequence of ending offsets of length \p num_segments, such that <tt>d_end_offsets[i]-1</tt> is the last element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>.  If <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>, the <em>i</em><sup>th</sup> is considered empty.
+/**
+ * @brief Single kernel for moderate size (less than a few thousand items) segments.
+ *
+ * @param[in] small_segments Number of segments with a few dozens items
+ * @param[in] medium_segments Number of segments with a few hundred items
+ * @param[in] medium_blocks Number of CTAs assigned to process medium segments
+ * @param[in] d_small_segments_reordering Small segments mapping of length @p small_segments,
+ *                                        such that <tt>d_small_segments_reordering[i]</tt>
+ *                                        is the input segment index
+ * @param[in] d_medium_segments_reordering Medium segments mapping of length @p medium_segments,
+ *                                         such that <tt>d_medium_segments_reordering[i]</tt>
+ *                                         is the input segment index
+ * @param[in] d_keys_in_origin Input keys buffer
+ * @param[out] d_keys_out_orig Output keys buffer
+ * @param[in] d_values_in_origin Input values buffer
+ * @param[out] d_values_out_origin Output values buffer
+ * @param[in] d_begin_offsets Random-access input iterator to the sequence of
+ *                            beginning offsets of length @p num_segments, such
+ *                            that <tt>d_begin_offsets[i]</tt> is the first element
+ *                            of the <em>i</em><sup>th</sup> data segment in
+ *                            <tt>d_keys_*</tt> and <tt>d_values_*</tt>
+ * @param[in] d_end_offsets Random-access input iterator to the sequence of ending
+ *                          offsets of length \p num_segments, such that
+ *                          <tt>d_end_offsets[i]-1</tt> is the last element of the
+ *                          <em>i</em><sup>th</sup> data segment in
+ *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
+ *                          <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>,
+ *                          the <em>i</em><sup>th</sup> is considered empty.
+ */
+template <bool IS_DESCENDING,
+          typename SegmentedPolicyT,
+          typename KeyT,
+          typename ValueT,
+          typename BeginOffsetIteratorT,
+          typename EndOffsetIteratorT,
+          typename OffsetT>
+__launch_bounds__(SegmentedPolicyT::BLOCK_THREADS) __global__
+  void DeviceSegmentedSortKernelWithReorderingSmall(
+    unsigned int small_segments,
+    unsigned int medium_segments,
+    unsigned int medium_blocks,
+    const unsigned int *d_small_segments_reordering,
+    const unsigned int *d_medium_segments_reordering,
+    const KeyT *d_keys_in,
+    KeyT *d_keys_out,
+    const ValueT *d_values_in,
+    ValueT *d_values_out,
+    BeginOffsetIteratorT d_begin_offsets,
+    EndOffsetIteratorT d_end_offsets)
 {
   const unsigned int tid = threadIdx.x;
   const unsigned int bid = blockIdx.x;
@@ -237,10 +269,10 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
 
       MediumAgentWarpMergeSortT(temp_storage.medium[sid_within_block])
         .ProcessSegment(num_items,
-                        d_keys_in_origin + segment_begin,
-                        d_keys_out_orig + segment_begin,
-                        d_values_in_origin + segment_begin,
-                        d_values_out_origin + segment_begin);
+                        d_keys_in + segment_begin,
+                        d_keys_out + segment_begin,
+                        d_values_in + segment_begin,
+                        d_values_out + segment_begin);
     }
   }
   else
@@ -260,33 +292,52 @@ __global__ void DeviceSegmentedSortKernelWithReorderingSmall(
 
       SmallAgentWarpMergeSortT(temp_storage.small[sid_within_block])
         .ProcessSegment(num_items,
-                        d_keys_in_origin + segment_begin,
-                        d_keys_out_orig + segment_begin,
-                        d_values_in_origin + segment_begin,
-                        d_values_out_origin + segment_begin);
+                        d_keys_in + segment_begin,
+                        d_keys_out + segment_begin,
+                        d_values_in + segment_begin,
+                        d_values_out + segment_begin);
     }
   }
 }
 
-template <
-  bool                    IS_DESCENDING,
-  typename                SegmentedPolicyT,               ///< Active tuning policy
-  typename                KeyT,                           ///< Key type
-  typename                ValueT,                         ///< Value type
-  typename                BeginOffsetIteratorT,           ///< Random-access input iterator type for reading segment beginning offsets \iterator
-  typename                EndOffsetIteratorT,             ///< Random-access input iterator type for reading segment ending offsets \iterator
-  typename                OffsetT>                        ///< Signed integer type for global offsets
-__launch_bounds__ (SegmentedPolicyT::BLOCK_THREADS)
-__global__ void DeviceSegmentedSortKernelWithReorderingLarge(
-  const unsigned int              *d_segments_reordering,
-  const KeyT                      *d_keys_in_origin,              ///< [in] Input keys buffer
-  KeyT                            *d_keys_out_orig,               ///< [out] Output keys buffer
-  cub::DeviceDoubleBuffer<KeyT>    d_keys_remaining_passes,       ///< [in,out] Double keys buffer
-  const ValueT                    *d_values_in_origin,            ///< [in] Input values buffer
-  ValueT                          *d_values_out_origin,           ///< [out] Output values buffer
-  cub::DeviceDoubleBuffer<ValueT>  d_values_remaining_passes,     ///< [in,out] Double values buffer
-  BeginOffsetIteratorT             d_begin_offsets,               ///< [in] Random-access input iterator to the sequence of beginning offsets of length \p num_segments, such that <tt>d_begin_offsets[i]</tt> is the first element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>
-  EndOffsetIteratorT               d_end_offsets)                 ///< [in] Random-access input iterator to the sequence of ending offsets of length \p num_segments, such that <tt>d_end_offsets[i]-1</tt> is the last element of the <em>i</em><sup>th</sup> data segment in <tt>d_keys_*</tt> and <tt>d_values_*</tt>.  If <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>, the <em>i</em><sup>th</sup> is considered empty.
+/**
+ * @brief Single kernel for large size (more than a few thousand items) segments.
+ *
+ * @param[in] d_keys_in_origin Input keys buffer
+ * @param[out] d_keys_out_orig Output keys buffer
+ * @param[in] d_values_in_origin Input values buffer
+ * @param[out] d_values_out_origin Output values buffer
+ * @param[in] d_begin_offsets Random-access input iterator to the sequence of
+ *                            beginning offsets of length @p num_segments, such
+ *                            that <tt>d_begin_offsets[i]</tt> is the first element
+ *                            of the <em>i</em><sup>th</sup> data segment in
+ *                            <tt>d_keys_*</tt> and <tt>d_values_*</tt>
+ * @param[in] d_end_offsets Random-access input iterator to the sequence of ending
+ *                          offsets of length \p num_segments, such that
+ *                          <tt>d_end_offsets[i]-1</tt> is the last element of the
+ *                          <em>i</em><sup>th</sup> data segment in
+ *                          <tt>d_keys_*</tt> and <tt>d_values_*</tt>. If
+ *                          <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>,
+ *                          the <em>i</em><sup>th</sup> is considered empty.
+ */
+template <bool IS_DESCENDING,
+          typename SegmentedPolicyT,
+          typename KeyT,
+          typename ValueT,
+          typename BeginOffsetIteratorT,
+          typename EndOffsetIteratorT,
+          typename OffsetT>
+__launch_bounds__(SegmentedPolicyT::BLOCK_THREADS) __global__
+  void DeviceSegmentedSortKernelWithReorderingLarge(
+    const unsigned int *d_segments_reordering,
+    const KeyT *d_keys_in_origin,
+    KeyT *d_keys_out_orig,
+    cub::DeviceDoubleBuffer<KeyT> d_keys_remaining_passes,
+    const ValueT *d_values_in_origin,
+    ValueT *d_values_out_origin,
+    cub::DeviceDoubleBuffer<ValueT> d_values_remaining_passes,
+    BeginOffsetIteratorT d_begin_offsets,
+    EndOffsetIteratorT d_end_offsets)
 {
   constexpr int small_tile_size = SegmentedPolicyT::BLOCK_THREADS *
                                   SegmentedPolicyT::ITEMS_PER_THREAD;
@@ -317,6 +368,7 @@ __global__ void DeviceSegmentedSortKernelWithReorderingLarge(
 
   if (num_items < small_tile_size)
   {
+    // Sort in shared memory if the segment fits into it
     agent.ProcessSmallSegment(begin_bit,
                               end_bit,
                               d_keys_in_origin,
@@ -326,9 +378,10 @@ __global__ void DeviceSegmentedSortKernelWithReorderingLarge(
   }
   else
   {
+    // Sort reading global memory multiple times
     int current_bit = begin_bit;
-    int pass_bits   = CUB_MIN(SegmentedPolicyT::RADIX_BITS,
-                              (end_bit - current_bit));
+    int pass_bits = (cub::min)(int{SegmentedPolicyT::RADIX_BITS},
+                               (end_bit - current_bit));
 
     agent.ProcessLargeSegment(current_bit,
                               pass_bits,
@@ -341,10 +394,10 @@ __global__ void DeviceSegmentedSortKernelWithReorderingLarge(
 #pragma unroll 1
     while (current_bit < end_bit)
     {
-      pass_bits = CUB_MIN(SegmentedPolicyT::RADIX_BITS,
-                          (end_bit - current_bit));
+      pass_bits = (cub::min)(int{SegmentedPolicyT::RADIX_BITS},
+                             (end_bit - current_bit));
 
-      __syncthreads();
+      CTA_SYNC();
       agent.ProcessLargeSegment(current_bit,
                                 pass_bits,
                                 d_keys_remaining_passes.Current(),
@@ -916,6 +969,7 @@ struct DispatchSegmentedSort : SelectedPolicy
         d_end_offsets);
 
       auto device_partition_temp_storage = keys_slot->GetAlias<std::uint8_t>();
+
       if (reorder_segments)
       {
         large_and_medium_segments_reordering.Grow(num_segments);
@@ -975,6 +1029,8 @@ struct DispatchSegmentedSort : SelectedPolicy
 
       if (reorder_segments)
       {
+        // Partition input segments into size groups and assign specialized
+        // kernels for each of them.
         error =
           SortWithReordering<LargeSegmentPolicyT, SmallAndMediumPolicyT>(
             three_way_partition_temp_storage_bytes,
@@ -989,6 +1045,8 @@ struct DispatchSegmentedSort : SelectedPolicy
       }
       else
       {
+        // If there are not enough segments, there's no reason to spend time
+        // on extra partitioning steps.
         using MediumPolicyT = typename SmallAndMediumPolicyT::MediumPolicyT;
         error = SortWithoutReordering<LargeSegmentPolicyT, MediumPolicyT>(
           d_keys_remaining_passes,
