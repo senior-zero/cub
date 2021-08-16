@@ -25,6 +25,11 @@
  *
  ******************************************************************************/
 
+/**
+ * @file
+ * Operations for reading linear tiles of data into the CUDA warp.
+ */
+
 #pragma once
 
 #include <iterator>
@@ -39,9 +44,35 @@
 
 CUB_NAMESPACE_BEGIN
 
+/**
+ * @brief cub::WarpLoadAlgorithm enumerates alternative algorithms for
+ *        cub::WarpLoad to read a linear segment of data from memory into a
+ *        a CUDA warp.
+ */
 enum WarpLoadAlgorithm
 {
+  /**
+   * @par Overview
+   *
+   * A [<em>blocked arrangement</em>](index.html#sec5sec3) of data is read
+   * directly from memory.
+   *
+   * @par Performance Considerations
+   * The utilization of memory transactions (coalescing) decreases as the
+   * access stride between threads increases (i.e., the number items per thread).
+   */
   WARP_LOAD_DIRECT,
+
+  /**
+   * @par Overview
+   *
+   * A [<em>striped arrangement</em>](index.html#sec5sec3) of data is read
+   * directly from memory.
+   *
+   * @par Performance Considerations
+   * The utilization of memory transactions (coalescing) doesn't depend on
+   * the number of items per thread.
+   */
   WARP_LOAD_STRIPED,
   WARP_LOAD_VECTORIZE,
   WARP_LOAD_TRANSPOSE
