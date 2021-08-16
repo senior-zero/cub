@@ -386,6 +386,7 @@ template <typename KeyT,
 void Sort(bool pairs,
           bool descending,
           bool double_buffer,
+          bool stable_sort,
 
           void *tmp_storage,
           std::size_t &temp_storage_bytes,
@@ -403,159 +404,325 @@ void Sort(bool pairs,
           int *keys_selector = nullptr,
           int *values_selector = nullptr)
 {
-  if (pairs)
+  if (stable_sort)
   {
-    if (descending)
+    if (pairs)
     {
-      if (double_buffer)
+      if (descending)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
-        keys_buffer.selector = *keys_selector;
+        if (double_buffer)
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+          keys_buffer.selector = *keys_selector;
 
-        cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
-        values_buffer.selector = *values_selector;
+          cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
+          values_buffer.selector = *values_selector;
 
-        CubDebugExit(
-          cub::DeviceSegmentedSort::SortPairsDescending(tmp_storage,
-                                                        temp_storage_bytes,
-                                                        keys_buffer,
-                                                        values_buffer,
-                                                        num_items,
-                                                        num_segments,
-                                                        d_offsets,
-                                                        d_offsets + 1,
-                                                        0,
-                                                        true));
+          CubDebugExit(cub::DeviceSegmentedSort::StableSortPairsDescending(
+            tmp_storage,
+            temp_storage_bytes,
+            keys_buffer,
+            values_buffer,
+            num_items,
+            num_segments,
+            d_offsets,
+            d_offsets + 1,
+            0,
+            true));
 
-        *keys_selector = keys_buffer.selector;
-        *values_selector = values_buffer.selector;
+          *keys_selector   = keys_buffer.selector;
+          *values_selector = values_buffer.selector;
+        }
+        else
+        {
+          CubDebugExit(cub::DeviceSegmentedSort::StableSortPairsDescending(
+            tmp_storage,
+            temp_storage_bytes,
+            input_keys,
+            output_keys,
+            input_values,
+            output_values,
+            num_items,
+            num_segments,
+            d_offsets,
+            d_offsets + 1,
+            0,
+            true));
+        }
       }
       else
       {
-        CubDebugExit(
-          cub::DeviceSegmentedSort::SortPairsDescending(tmp_storage,
-                                                        temp_storage_bytes,
-                                                        input_keys,
-                                                        output_keys,
-                                                        input_values,
-                                                        output_values,
-                                                        num_items,
-                                                        num_segments,
-                                                        d_offsets,
-                                                        d_offsets + 1,
-                                                        0,
-                                                        true));
+        if (double_buffer)
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+          keys_buffer.selector = *keys_selector;
+
+          cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
+          values_buffer.selector = *values_selector;
+
+          CubDebugExit(
+            cub::DeviceSegmentedSort::StableSortPairs(tmp_storage,
+                                                      temp_storage_bytes,
+                                                      keys_buffer,
+                                                      values_buffer,
+                                                      num_items,
+                                                      num_segments,
+                                                      d_offsets,
+                                                      d_offsets + 1,
+                                                      0,
+                                                      true));
+
+          *keys_selector   = keys_buffer.selector;
+          *values_selector = values_buffer.selector;
+        }
+        else
+        {
+          CubDebugExit(
+            cub::DeviceSegmentedSort::StableSortPairs(tmp_storage,
+                                                      temp_storage_bytes,
+                                                      input_keys,
+                                                      output_keys,
+                                                      input_values,
+                                                      output_values,
+                                                      num_items,
+                                                      num_segments,
+                                                      d_offsets,
+                                                      d_offsets + 1,
+                                                      0,
+                                                      true));
+        }
       }
     }
     else
     {
-      if (double_buffer)
+      if (descending)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
-        keys_buffer.selector = *keys_selector;
+        if (double_buffer)
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+          keys_buffer.selector = *keys_selector;
 
-        cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
-        values_buffer.selector = *values_selector;
+          CubDebugExit(cub::DeviceSegmentedSort::StableSortKeysDescending(
+            tmp_storage,
+            temp_storage_bytes,
+            keys_buffer,
+            num_items,
+            num_segments,
+            d_offsets,
+            d_offsets + 1,
+            0,
+            true));
 
-        CubDebugExit(cub::DeviceSegmentedSort::SortPairs(tmp_storage,
-                                                         temp_storage_bytes,
-                                                         keys_buffer,
-                                                         values_buffer,
-                                                         num_items,
-                                                         num_segments,
-                                                         d_offsets,
-                                                         d_offsets + 1,
-                                                         0,
-                                                         true));
-
-        *keys_selector = keys_buffer.selector;
-        *values_selector = values_buffer.selector;
+          *keys_selector = keys_buffer.selector;
+        }
+        else
+        {
+          CubDebugExit(cub::DeviceSegmentedSort::StableSortKeysDescending(
+            tmp_storage,
+            temp_storage_bytes,
+            input_keys,
+            output_keys,
+            num_items,
+            num_segments,
+            d_offsets,
+            d_offsets + 1,
+            0,
+            true));
+        }
       }
       else
       {
-        CubDebugExit(cub::DeviceSegmentedSort::SortPairs(tmp_storage,
-                                                         temp_storage_bytes,
-                                                         input_keys,
-                                                         output_keys,
-                                                         input_values,
-                                                         output_values,
-                                                         num_items,
-                                                         num_segments,
-                                                         d_offsets,
-                                                         d_offsets + 1,
-                                                         0,
-                                                         true));
+        if (double_buffer)
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+          keys_buffer.selector = *keys_selector;
+
+          CubDebugExit(
+            cub::DeviceSegmentedSort::StableSortKeys(tmp_storage,
+                                                     temp_storage_bytes,
+                                                     keys_buffer,
+                                                     num_items,
+                                                     num_segments,
+                                                     d_offsets,
+                                                     d_offsets + 1,
+                                                     0,
+                                                     true));
+
+          *keys_selector = keys_buffer.selector;
+        }
+        else
+        {
+          CubDebugExit(
+            cub::DeviceSegmentedSort::StableSortKeys(tmp_storage,
+                                                     temp_storage_bytes,
+                                                     input_keys,
+                                                     output_keys,
+                                                     num_items,
+                                                     num_segments,
+                                                     d_offsets,
+                                                     d_offsets + 1,
+                                                     0,
+                                                     true));
+        }
       }
     }
   }
   else
   {
-    if (descending)
+    if (pairs)
     {
-      if (double_buffer)
+      if (descending)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
-        keys_buffer.selector = *keys_selector;
+        if (double_buffer)
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+          keys_buffer.selector = *keys_selector;
 
-        CubDebugExit(
-          cub::DeviceSegmentedSort::SortKeysDescending(tmp_storage,
-                                                       temp_storage_bytes,
-                                                       keys_buffer,
-                                                       num_items,
-                                                       num_segments,
-                                                       d_offsets,
-                                                       d_offsets + 1,
-                                                       0,
-                                                       true));
+          cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
+          values_buffer.selector = *values_selector;
 
-        *keys_selector = keys_buffer.selector;
+          CubDebugExit(
+            cub::DeviceSegmentedSort::SortPairsDescending(tmp_storage,
+                                                          temp_storage_bytes,
+                                                          keys_buffer,
+                                                          values_buffer,
+                                                          num_items,
+                                                          num_segments,
+                                                          d_offsets,
+                                                          d_offsets + 1,
+                                                          0,
+                                                          true));
+
+          *keys_selector   = keys_buffer.selector;
+          *values_selector = values_buffer.selector;
+        }
+        else
+        {
+          CubDebugExit(
+            cub::DeviceSegmentedSort::SortPairsDescending(tmp_storage,
+                                                          temp_storage_bytes,
+                                                          input_keys,
+                                                          output_keys,
+                                                          input_values,
+                                                          output_values,
+                                                          num_items,
+                                                          num_segments,
+                                                          d_offsets,
+                                                          d_offsets + 1,
+                                                          0,
+                                                          true));
+        }
       }
       else
       {
-        CubDebugExit(
-          cub::DeviceSegmentedSort::SortKeysDescending(tmp_storage,
-                                                       temp_storage_bytes,
-                                                       input_keys,
-                                                       output_keys,
-                                                       num_items,
-                                                       num_segments,
-                                                       d_offsets,
-                                                       d_offsets + 1,
-                                                       0,
-                                                       true));
+        if (double_buffer)
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+          keys_buffer.selector = *keys_selector;
+
+          cub::DoubleBuffer<ValueT> values_buffer(input_values, output_values);
+          values_buffer.selector = *values_selector;
+
+          CubDebugExit(cub::DeviceSegmentedSort::SortPairs(tmp_storage,
+                                                           temp_storage_bytes,
+                                                           keys_buffer,
+                                                           values_buffer,
+                                                           num_items,
+                                                           num_segments,
+                                                           d_offsets,
+                                                           d_offsets + 1,
+                                                           0,
+                                                           true));
+
+          *keys_selector   = keys_buffer.selector;
+          *values_selector = values_buffer.selector;
+        }
+        else
+        {
+          CubDebugExit(cub::DeviceSegmentedSort::SortPairs(tmp_storage,
+                                                           temp_storage_bytes,
+                                                           input_keys,
+                                                           output_keys,
+                                                           input_values,
+                                                           output_values,
+                                                           num_items,
+                                                           num_segments,
+                                                           d_offsets,
+                                                           d_offsets + 1,
+                                                           0,
+                                                           true));
+        }
       }
     }
     else
     {
-      if (double_buffer)
+      if (descending)
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
-        keys_buffer.selector = *keys_selector;
+        if (double_buffer)
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+          keys_buffer.selector = *keys_selector;
 
-        CubDebugExit(cub::DeviceSegmentedSort::SortKeys(tmp_storage,
-                                                        temp_storage_bytes,
-                                                        keys_buffer,
-                                                        num_items,
-                                                        num_segments,
-                                                        d_offsets,
-                                                        d_offsets + 1,
-                                                        0,
-                                                        true));
+          CubDebugExit(
+            cub::DeviceSegmentedSort::SortKeysDescending(tmp_storage,
+                                                         temp_storage_bytes,
+                                                         keys_buffer,
+                                                         num_items,
+                                                         num_segments,
+                                                         d_offsets,
+                                                         d_offsets + 1,
+                                                         0,
+                                                         true));
 
-        *keys_selector = keys_buffer.selector;
+          *keys_selector = keys_buffer.selector;
+        }
+        else
+        {
+          CubDebugExit(
+            cub::DeviceSegmentedSort::SortKeysDescending(tmp_storage,
+                                                         temp_storage_bytes,
+                                                         input_keys,
+                                                         output_keys,
+                                                         num_items,
+                                                         num_segments,
+                                                         d_offsets,
+                                                         d_offsets + 1,
+                                                         0,
+                                                         true));
+        }
       }
       else
       {
-        CubDebugExit(cub::DeviceSegmentedSort::SortKeys(tmp_storage,
-                                                        temp_storage_bytes,
-                                                        input_keys,
-                                                        output_keys,
-                                                        num_items,
-                                                        num_segments,
-                                                        d_offsets,
-                                                        d_offsets + 1,
-                                                        0,
-                                                        true));
+        if (double_buffer)
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(input_keys, output_keys);
+          keys_buffer.selector = *keys_selector;
+
+          CubDebugExit(cub::DeviceSegmentedSort::SortKeys(tmp_storage,
+                                                          temp_storage_bytes,
+                                                          keys_buffer,
+                                                          num_items,
+                                                          num_segments,
+                                                          d_offsets,
+                                                          d_offsets + 1,
+                                                          0,
+                                                          true));
+
+          *keys_selector = keys_buffer.selector;
+        }
+        else
+        {
+          CubDebugExit(cub::DeviceSegmentedSort::SortKeys(tmp_storage,
+                                                          temp_storage_bytes,
+                                                          input_keys,
+                                                          output_keys,
+                                                          num_items,
+                                                          num_segments,
+                                                          d_offsets,
+                                                          d_offsets + 1,
+                                                          0,
+                                                          true));
+        }
       }
     }
   }
@@ -567,6 +734,7 @@ template <typename KeyT,
 std::size_t Sort(bool pairs,
                  bool descending,
                  bool double_buffer,
+                 bool stable_sort,
 
                  KeyT *input_keys,
                  KeyT *output_keys,
@@ -586,6 +754,7 @@ std::size_t Sort(bool pairs,
   Sort<KeyT, ValueT, OffsetT>(pairs,
                               descending,
                               double_buffer,
+                              stable_sort,
                               nullptr,
                               temp_storage_bytes,
                               input_keys,
@@ -604,6 +773,7 @@ std::size_t Sort(bool pairs,
   Sort<KeyT, ValueT, OffsetT>(pairs,
                               descending,
                               double_buffer,
+                              stable_sort,
                               d_temp_storage,
                               temp_storage_bytes,
                               input_keys,
@@ -629,6 +799,9 @@ constexpr bool descending = true;
 constexpr bool pointers = false;
 constexpr bool double_buffer = true;
 
+constexpr bool unstable = false;
+constexpr bool stable = true;
+
 
 void TestZeroSegments()
 {
@@ -639,33 +812,37 @@ void TestZeroSegments()
   using ValueT = std::uint64_t;
   using OffsetT = std::uint32_t;
 
-  for (bool sort_keys: { keys, pairs })
+  for (bool stable_sort: { unstable, stable })
   {
-    for (bool sort_ascending: { ascending, descending })
+    for (bool sort_pairs: { keys, pairs })
     {
-      for (bool sort_pointers: { pointers, double_buffer })
+      for (bool sort_descending: { ascending, descending })
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(nullptr, nullptr);
-        cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
-        values_buffer.selector = 1;
+        for (bool sort_buffer: { pointers, double_buffer })
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(nullptr, nullptr);
+          cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
+          values_buffer.selector = 1;
 
-        const std::size_t temp_storage_bytes =
-          Sort<KeyT, ValueT, OffsetT>(sort_keys,
-                                      sort_ascending,
-                                      sort_pointers,
-                                      nullptr,
-                                      nullptr,
-                                      nullptr,
-                                      nullptr,
-                                      OffsetT{},
-                                      OffsetT{},
-                                      nullptr,
-                                      &keys_buffer.selector,
-                                      &values_buffer.selector);
+          const std::size_t temp_storage_bytes =
+            Sort<KeyT, ValueT, OffsetT>(sort_pairs,
+                                        sort_descending,
+                                        sort_buffer,
+                                        stable_sort,
+                                        nullptr,
+                                        nullptr,
+                                        nullptr,
+                                        nullptr,
+                                        OffsetT{},
+                                        OffsetT{},
+                                        nullptr,
+                                        &keys_buffer.selector,
+                                        &values_buffer.selector);
 
-        AssertEquals(keys_buffer.selector, 0);
-        AssertEquals(values_buffer.selector, 1);
-        AssertEquals(temp_storage_bytes, 0ul);
+          AssertEquals(keys_buffer.selector, 0);
+          AssertEquals(values_buffer.selector, 1);
+          AssertEquals(temp_storage_bytes, 0ul);
+        }
       }
     }
   }
@@ -684,33 +861,37 @@ void TestEmptySegments(unsigned int segments)
   thrust::device_vector<OffsetT> offsets(segments + 1, OffsetT{});
   const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
 
-  for (bool sort_keys: { keys, pairs })
+  for (bool sort_stable: { unstable, stable })
   {
-    for (bool sort_ascending: { ascending, descending })
+    for (bool sort_pairs: { keys, pairs })
     {
-      for (bool sort_pointers: { pointers, double_buffer })
+      for (bool sort_descending: { ascending, descending })
       {
-        cub::DoubleBuffer<KeyT> keys_buffer(nullptr, nullptr);
-        cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
-        values_buffer.selector = 1;
+        for (bool sort_buffer: { pointers, double_buffer })
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(nullptr, nullptr);
+          cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
+          values_buffer.selector = 1;
 
-        const std::size_t temp_storage_bytes =
-          Sort<KeyT, ValueT, OffsetT>(sort_keys,
-                                      sort_ascending,
-                                      sort_pointers,
-                                      nullptr,
-                                      nullptr,
-                                      nullptr,
-                                      nullptr,
-                                      OffsetT{},
-                                      segments,
-                                      d_offsets,
-                                      &keys_buffer.selector,
-                                      &values_buffer.selector);
+          const std::size_t temp_storage_bytes =
+            Sort<KeyT, ValueT, OffsetT>(sort_pairs,
+                                        sort_descending,
+                                        sort_buffer,
+                                        sort_stable,
+                                        nullptr,
+                                        nullptr,
+                                        nullptr,
+                                        nullptr,
+                                        OffsetT{},
+                                        segments,
+                                        d_offsets,
+                                        &keys_buffer.selector,
+                                        &values_buffer.selector);
 
-        AssertEquals(keys_buffer.selector, 0);
-        AssertEquals(values_buffer.selector, 1);
-        AssertEquals(temp_storage_bytes, 0ul);
+          AssertEquals(keys_buffer.selector, 0);
+          AssertEquals(values_buffer.selector, 1);
+          AssertEquals(temp_storage_bytes, 0ul);
+        }
       }
     }
   }
@@ -749,111 +930,116 @@ void TestSameSizeSegments(OffsetT segment_size,
   ValueT *d_values_input  = thrust::raw_pointer_cast(values_input.data());
   ValueT *d_values_output = thrust::raw_pointer_cast(values_output.data());
 
-  for (bool sort_pairs: { keys, pairs })
+  for (bool stable_sort: { unstable, stable })
   {
-    if (sort_pairs)
+    for (bool sort_pairs: { keys, pairs })
     {
-      if (skip_values)
+      if (sort_pairs)
       {
-        continue;
-      }
-    }
-
-    for (bool sort_descending: { ascending, descending })
-    {
-      for (bool sort_buffers: { pointers, double_buffer })
-      {
-        cub::DoubleBuffer<KeyT> keys_buffer(nullptr, nullptr);
-        cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
-        values_buffer.selector = 1;
-
-        thrust::fill(keys_input.begin(), keys_input.end(), target_key);
-        thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
-
-        if (sort_pairs)
+        if (skip_values)
         {
+          continue;
+        }
+      }
+
+      for (bool sort_descending: { ascending, descending })
+      {
+        for (bool sort_buffers: { pointers, double_buffer })
+        {
+          cub::DoubleBuffer<KeyT> keys_buffer(nullptr, nullptr);
+          cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
+          values_buffer.selector = 1;
+
+          thrust::fill(keys_input.begin(), keys_input.end(), target_key);
+          thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
+
+          if (sort_pairs)
+          {
+            if (sort_buffers)
+            {
+              thrust::fill(values_input.begin(), values_input.end(), ValueT{});
+              thrust::fill(values_output.begin(), values_output.end(), target_value);
+            }
+            else
+            {
+              thrust::fill(values_input.begin(), values_input.end(), target_value);
+              thrust::fill(values_output.begin(), values_output.end(), ValueT{});
+            }
+          }
+
+          const std::size_t temp_storage_bytes =
+            Sort<KeyT, ValueT, OffsetT>(sort_pairs,
+                                        sort_descending,
+                                        sort_buffers,
+                                        stable_sort,
+                                        d_keys_input,
+                                        d_keys_output,
+                                        d_values_input,
+                                        d_values_output,
+                                        num_items,
+                                        segments,
+                                        d_offsets,
+                                        &keys_buffer.selector,
+                                        &values_buffer.selector);
+
+          // If temporary storage size is defined by extra keys storage
           if (sort_buffers)
           {
-            thrust::fill(values_input.begin(), values_input.end(), ValueT{});
-            thrust::fill(values_output.begin(), values_output.end(), target_value);
+            if (2 * segments * sizeof(unsigned int) < num_items * sizeof(KeyT))
+            {
+              std::size_t extra_temp_storage_bytes{};
+
+              Sort(sort_pairs,
+                   sort_descending,
+                   pointers,
+                   stable_sort,
+                   nullptr,
+                   extra_temp_storage_bytes,
+                   d_keys_input,
+                   d_keys_output,
+                   d_values_input,
+                   d_values_output,
+                   num_items,
+                   segments,
+                   d_offsets,
+                   &keys_buffer.selector,
+                   &values_buffer.selector);
+
+              AssertTrue(extra_temp_storage_bytes > temp_storage_bytes);
+            }
           }
-          else
+
           {
-            thrust::fill(values_input.begin(), values_input.end(), target_value);
-            thrust::fill(values_output.begin(), values_output.end(), ValueT{});
-          }
-        }
-
-        const std::size_t temp_storage_bytes =
-          Sort<KeyT, ValueT, OffsetT>(sort_pairs,
-                                      sort_descending,
-                                      sort_buffers,
-                                      d_keys_input,
-                                      d_keys_output,
-                                      d_values_input,
-                                      d_values_output,
-                                      num_items,
-                                      segments,
-                                      d_offsets,
-                                      &keys_buffer.selector,
-                                      &values_buffer.selector);
-
-        // If temporary storage size is defined by extra keys storage
-        if (sort_buffers)
-        {
-          if (2 * segments * sizeof(unsigned int) < num_items * sizeof(KeyT))
-          {
-            std::size_t extra_temp_storage_bytes{};
-
-            Sort(sort_pairs,
-                 sort_descending,
-                 pointers,
-                 nullptr,
-                 extra_temp_storage_bytes,
-                 d_keys_input,
-                 d_keys_output,
-                 d_values_input,
-                 d_values_output,
-                 num_items,
-                 segments,
-                 d_offsets,
-                 &keys_buffer.selector,
-                 &values_buffer.selector);
-
-            AssertTrue(extra_temp_storage_bytes > temp_storage_bytes);
-          }
-        }
-
-        {
-          const std::size_t items_selected =
-            keys_buffer.selector || !sort_buffers
+            const std::size_t items_selected =
+              keys_buffer.selector || !sort_buffers
               ? thrust::count(keys_output.begin(),
                               keys_output.end(),
                               target_key)
               : thrust::count(keys_input.begin(), keys_input.end(), target_key);
-          AssertEquals(items_selected, num_items);
-        }
+            AssertEquals(items_selected, num_items);
+          }
 
-        if (sort_pairs)
-        {
-          const std::size_t items_selected = [&]() -> std::size_t {
-            if (sort_buffers)
-            {
-              return values_buffer.selector
+          if (sort_pairs)
+          {
+            const std::size_t items_selected = [&]() -> std::size_t {
+              if (sort_buffers)
+              {
+                return values_buffer.selector
                        ? thrust::count(values_output.begin(),
                                        values_output.end(),
                                        target_value)
                        : thrust::count(values_input.begin(),
                                        values_input.end(),
                                        target_value);
-            }
+              }
 
-            return thrust::count(values_output.begin(),
-                                 values_output.end(),
-                                 target_value);
-          } ();
+              return thrust::count(values_output.begin(),
+                                   values_output.end(),
+                                   target_value);
+            } ();
 
-          AssertEquals(items_selected, num_items);
+            AssertEquals(items_selected, num_items);
+          }
         }
       }
     }
@@ -873,57 +1059,62 @@ void InputTest(bool sort_descending,
   thrust::device_vector<ValueT> values_output(input.get_num_items());
   ValueT *d_values_output = thrust::raw_pointer_cast(values_output.data());
 
-  for (bool sort_pairs: { keys, pairs })
+  for (bool stable_sort: { unstable, stable })
   {
-    for (bool sort_buffers: { pointers, double_buffer })
+    for (bool sort_pairs : {keys, pairs})
     {
-      for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
+      for (bool sort_buffers : {pointers, double_buffer})
       {
-        thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
-        thrust::fill(values_output.begin(), values_output.end(), ValueT{});
-
-        cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(), d_keys_output);
-        cub::DoubleBuffer<ValueT> values_buffer(input.get_d_values(), d_values_output);
-
-        Sort<KeyT, ValueT, OffsetT>(
-          sort_pairs,
-          sort_descending,
-          sort_buffers,
-          input.get_d_keys(),
-          d_keys_output,
-          input.get_d_values(),
-          d_values_output,
-          input.get_num_items(),
-          input.get_num_segments(),
-          input.get_d_offsets(),
-          &keys_buffer.selector,
-          &values_buffer.selector);
-
-        if (sort_buffers)
+        for (int iteration = 0; iteration < MAX_ITERATIONS; iteration++)
         {
-          if (sort_pairs)
+          thrust::fill(keys_output.begin(), keys_output.end(), KeyT{});
+          thrust::fill(values_output.begin(), values_output.end(), ValueT{});
+
+          cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(),
+                                              d_keys_output);
+          cub::DoubleBuffer<ValueT> values_buffer(input.get_d_values(),
+                                                  d_values_output);
+
+          Sort<KeyT, ValueT, OffsetT>(sort_pairs,
+                                      sort_descending,
+                                      sort_buffers,
+                                      stable_sort,
+                                      input.get_d_keys(),
+                                      d_keys_output,
+                                      input.get_d_values(),
+                                      d_values_output,
+                                      input.get_num_items(),
+                                      input.get_num_segments(),
+                                      input.get_d_offsets(),
+                                      &keys_buffer.selector,
+                                      &values_buffer.selector);
+
+          if (sort_buffers)
           {
-            AssertTrue(input.check_output(keys_buffer.Current(),
-                                          values_buffer.Current()));
+            if (sort_pairs)
+            {
+              AssertTrue(input.check_output(keys_buffer.Current(),
+                                            values_buffer.Current()));
+            }
+            else
+            {
+              AssertTrue(input.check_output(keys_buffer.Current()));
+            }
           }
           else
           {
-            AssertTrue(input.check_output(keys_buffer.Current()));
+            if (sort_pairs)
+            {
+              AssertTrue(input.check_output(d_keys_output, d_values_output));
+            }
+            else
+            {
+              AssertTrue(input.check_output(d_keys_output));
+            }
           }
-        }
-        else
-        {
-          if (sort_pairs)
-          {
-            AssertTrue(input.check_output(d_keys_output, d_values_output));
-          }
-          else
-          {
-            AssertTrue(input.check_output(d_keys_output));
-          }
-        }
 
-        input.shuffle();
+          input.shuffle();
+        }
       }
     }
   }
@@ -1000,36 +1191,37 @@ void HostReferenceSort(bool sort_pairs,
     {
       if (sort_descending)
       {
-        thrust::sort_by_key(h_keys.begin() + segment_begin,
-                            h_keys.begin() + segment_end,
-                            h_values.begin() + segment_begin,
-                            thrust::greater<KeyT>{});
+        thrust::stable_sort_by_key(h_keys.begin() + segment_begin,
+                                   h_keys.begin() + segment_end,
+                                   h_values.begin() + segment_begin,
+                                   thrust::greater<KeyT>{});
       }
       else
       {
-        thrust::sort_by_key(h_keys.begin() + segment_begin,
-                            h_keys.begin() + segment_end,
-                            h_values.begin() + segment_begin);
+        thrust::stable_sort_by_key(h_keys.begin() + segment_begin,
+                                   h_keys.begin() + segment_end,
+                                   h_values.begin() + segment_begin);
       }
     }
     else
     {
       if (sort_descending)
       {
-        thrust::sort(h_keys.begin() + segment_begin,
-                     h_keys.begin() + segment_end,
-                     thrust::greater<KeyT>{});
+        thrust::stable_sort(h_keys.begin() + segment_begin,
+                            h_keys.begin() + segment_end,
+                            thrust::greater<KeyT>{});
       }
       else
       {
-        thrust::sort(h_keys.begin() + segment_begin,
-                     h_keys.begin() + segment_end);
+        thrust::stable_sort(h_keys.begin() + segment_begin,
+                            h_keys.begin() + segment_end);
       }
     }
   }
 }
 
 
+#if STORE_ON_FAILURE
 template <typename KeyT,
           typename ValueT,
           typename OffsetT>
@@ -1066,6 +1258,7 @@ void DumpInput(bool sort_pairs,
                       thrust::raw_pointer_cast(h_values.data())),
                     sizeof(ValueT) * h_values.size());
 }
+#endif
 
 
 template <typename KeyT,
@@ -1087,98 +1280,102 @@ void InputTestRandom(Input<KeyT, OffsetT, ValueT> &input)
 
   const thrust::host_vector<OffsetT> &h_offsets = input.get_h_offsets();
 
-  for (bool sort_pairs: { keys, pairs })
+  for (bool stable_sort: { unstable, stable })
   {
-    for (bool sort_descending: { ascending, descending })
+    for (bool sort_pairs: { keys, pairs })
     {
-      for (bool sort_buffers: { pointers, double_buffer })
+      for (bool sort_descending: { ascending, descending })
       {
-        for (int iteration = 0; iteration < MAX_ITERATIONS / 10; iteration++)
+        for (bool sort_buffers: { pointers, double_buffer })
         {
-          RandomizeInput(h_keys, h_values);
+          for (int iteration = 0; iteration < MAX_ITERATIONS / 10; iteration++)
+          {
+            RandomizeInput(h_keys, h_values);
 
 #if STORE_ON_FAILURE
-          auto h_keys_backup = h_keys;
-          auto h_values_backup = h_values;
+            auto h_keys_backup = h_keys;
+            auto h_values_backup = h_values;
 #endif
 
-          input.get_d_keys_vec()   = h_keys;
-          input.get_d_values_vec() = h_values;
+            input.get_d_keys_vec()   = h_keys;
+            input.get_d_values_vec() = h_values;
 
-          cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(), d_keys_output);
-          cub::DoubleBuffer<ValueT> values_buffer(input.get_d_values(), d_values_output);
+            cub::DoubleBuffer<KeyT> keys_buffer(input.get_d_keys(), d_keys_output);
+            cub::DoubleBuffer<ValueT> values_buffer(input.get_d_values(), d_values_output);
 
-          Sort<KeyT, ValueT, OffsetT>(
-            sort_pairs,
-            sort_descending,
-            sort_buffers,
-            input.get_d_keys(),
-            d_keys_output,
-            input.get_d_values(),
-            d_values_output,
-            input.get_num_items(),
-            input.get_num_segments(),
-            input.get_d_offsets(),
-            &keys_buffer.selector,
-            &values_buffer.selector);
+            Sort<KeyT, ValueT, OffsetT>(
+              sort_pairs,
+              sort_descending,
+              sort_buffers,
+              stable_sort,
+              input.get_d_keys(),
+              d_keys_output,
+              input.get_d_values(),
+              d_values_output,
+              input.get_num_items(),
+              input.get_num_segments(),
+              input.get_d_offsets(),
+              &keys_buffer.selector,
+              &values_buffer.selector);
 
-          HostReferenceSort(sort_pairs,
-                            sort_descending,
-                            input.get_num_segments(),
-                            h_offsets,
-                            h_keys,
-                            h_values);
+            HostReferenceSort(sort_pairs,
+                              sort_descending,
+                              input.get_num_segments(),
+                              h_offsets,
+                              h_keys,
+                              h_values);
 
-          if (sort_buffers)
-          {
-            if (keys_buffer.selector)
+            if (sort_buffers)
+            {
+              if (keys_buffer.selector)
+              {
+                h_keys_output = keys_output;
+              }
+              else
+              {
+                h_keys_output = input.get_d_keys_vec();
+              }
+
+              if (values_buffer.selector)
+              {
+                h_values_output = values_output;
+              }
+              else
+              {
+                h_values_output = input.get_d_values_vec();
+              }
+            }
+            else
             {
               h_keys_output = keys_output;
-            }
-            else
-            {
-              h_keys_output = input.get_d_keys_vec();
-            }
-
-            if (values_buffer.selector)
-            {
               h_values_output = values_output;
             }
-            else
-            {
-              h_values_output = input.get_d_values_vec();
-            }
-          }
-          else
-          {
-            h_keys_output = keys_output;
-            h_values_output = values_output;
-          }
 
-          const bool keys_ok =
-            compare_two_outputs(h_offsets, h_keys, h_keys_output);
+            const bool keys_ok =
+              compare_two_outputs(h_offsets, h_keys, h_keys_output);
 
-          const bool values_ok =
-            sort_pairs
+            const bool values_ok =
+              sort_pairs
               ? compare_two_outputs(h_offsets, h_values, h_values_output)
               : true;
 
 #if STORE_ON_FAILURE
-          if (!keys_ok || !values_ok)
-          {
-            DumpInput<KeyT, ValueT, OffsetT>(sort_pairs,
-                                             sort_descending,
-                                             sort_buffers,
-                                             input,
-                                             h_keys_backup,
-                                             h_values_backup);
-          }
+            if (!keys_ok || !values_ok)
+            {
+              DumpInput<KeyT, ValueT, OffsetT>(sort_pairs,
+                                               sort_descending,
+                                               sort_buffers,
+                                               input,
+                                               h_keys_backup,
+                                               h_values_backup);
+            }
 #endif
 
-          AssertTrue(keys_ok);
-          AssertTrue(values_ok);
+AssertTrue(keys_ok);
+            AssertTrue(values_ok);
 
-          input.shuffle();
+            input.shuffle();
+          }
         }
       }
     }
@@ -1312,6 +1509,7 @@ void TestPairs()
   RandomTest<KeyT, ValueT, OffsetT>(1 << 9, 1 << 19);
 }
 
+
 template <typename T,
           typename OffsetT>
 void TestKeysAndPairs()
@@ -1320,112 +1518,6 @@ void TestKeysAndPairs()
   TestPairs<T, T, OffsetT>();
 }
 
-
-template <typename KeyT,
-          typename ValueT,
-          typename OffsetT>
-void InputTestFromFiles()
-{
-  (void)MAX_ITERATIONS;
-
-  const bool sort_pairs      = true;
-  const bool sort_descending = true;
-  const bool sort_buffers    = false;
-
-  const OffsetT num_items    = 9998991;
-  const unsigned int num_segments = 3298;
-
-  thrust::host_vector<OffsetT> h_offsets(num_segments + 1);
-  std::ifstream offsets_file("offsets", std::ios::binary);
-  offsets_file.read(reinterpret_cast<char *>(
-                      thrust::raw_pointer_cast(h_offsets.data())),
-                    sizeof(OffsetT) * (num_segments + 1));
-  thrust::device_vector<OffsetT> d_offsets = h_offsets;
-
-  thrust::host_vector<KeyT> h_keys(num_items);
-  std::ifstream keys_file("keys", std::ios::binary);
-  keys_file.read(reinterpret_cast<char *>(
-                   thrust::raw_pointer_cast(h_keys.data())),
-                 sizeof(KeyT) * num_items);
-
-  thrust::host_vector<ValueT> h_values(num_items);
-  std::ifstream values_file("values", std::ios::binary);
-  values_file.read(reinterpret_cast<char *>(
-                     thrust::raw_pointer_cast(h_values.data())),
-                   sizeof(ValueT) * num_items);
-
-  thrust::host_vector<KeyT> h_keys_output(num_items);
-  thrust::device_vector<KeyT> keys_output(num_items);
-
-  thrust::host_vector<ValueT> h_values_output(num_items);
-  thrust::device_vector<ValueT> values_output(num_items);
-
-  thrust::device_vector<KeyT> d_keys = h_keys;
-  thrust::device_vector<ValueT> d_values = h_values;
-
-  KeyT *d_keys_input = thrust::raw_pointer_cast(d_keys.data());
-  ValueT *d_values_input = thrust::raw_pointer_cast(d_values.data());
-  KeyT *d_keys_output     = thrust::raw_pointer_cast(keys_output.data());
-  ValueT *d_values_output = thrust::raw_pointer_cast(values_output.data());
-
-  cub::DoubleBuffer<KeyT> keys_buffer(d_keys_input, d_keys_output);
-  cub::DoubleBuffer<ValueT> values_buffer(d_values_input, d_values_output);
-
-  Sort<KeyT, ValueT, OffsetT>(sort_pairs,
-                              sort_descending,
-                              sort_buffers,
-                              d_keys_input,
-                              d_keys_output,
-                              d_values_input,
-                              d_values_output,
-                              num_items,
-                              num_segments,
-                              thrust::raw_pointer_cast(d_offsets.data()),
-                              &keys_buffer.selector,
-                              &values_buffer.selector);
-
-  HostReferenceSort(sort_pairs,
-                    sort_descending,
-                    num_segments,
-                    h_offsets,
-                    h_keys,
-                    h_values);
-
-  if (sort_buffers)
-  {
-    if (keys_buffer.selector)
-    {
-      h_keys_output = keys_output;
-    }
-    else
-    {
-      h_keys_output = d_keys;
-    }
-
-    if (values_buffer.selector)
-    {
-      h_values_output = values_output;
-    }
-    else
-    {
-      h_values_output = d_values;
-    }
-  }
-  else
-  {
-    h_keys_output   = keys_output;
-    h_values_output = values_output;
-  }
-
-  const bool keys_ok = compare_two_outputs(h_offsets, h_keys, h_keys_output);
-
-  const bool values_ok =
-    sort_pairs ? compare_two_outputs(h_offsets, h_values, h_values_output)
-               : true;
-
-  AssertTrue(keys_ok);
-  AssertTrue(values_ok);
-}
 
 int main(int argc, char** argv)
 {
