@@ -1000,10 +1000,22 @@ void HostReferenceSort(bool sort_pairs,
     {
       if (sort_descending)
       {
+        if (segment_end - segment_begin == 2)
+        {
+          std::cout << segment_i << ":\n";
+          std::cout << "\t" << (int)h_keys[segment_begin] << " => " << h_values[segment_begin] << std::endl;
+          std::cout << "\t" << (int)h_keys[segment_begin + 1] << " => " << h_values[segment_begin + 1] << std::endl;
+        }
         thrust::sort_by_key(h_keys.begin() + segment_begin,
                             h_keys.begin() + segment_end,
                             h_values.begin() + segment_begin,
                             thrust::greater<KeyT>{});
+        if (segment_end - segment_begin == 2)
+        {
+          std::cout << segment_i << ":\n";
+          std::cout << "\t" << (int)h_keys[segment_begin] << " => " << h_values[segment_begin] << std::endl;
+          std::cout << "\t" << (int)h_keys[segment_begin + 1] << " => " << h_values[segment_begin + 1] << std::endl;
+        }
       }
       else
       {
