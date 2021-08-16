@@ -69,13 +69,45 @@ CUB_NAMESPACE_BEGIN
  *   according to their bit representations after any transformations.
  *
  * @par A simple example
+ * @code
+ * #include <cub/cub.cuh>   // or equivalently <cub/device/device_segmented_sort.cuh>
  *
+ * // Declare, allocate, and initialize device-accessible pointers for sorting data
+ * int  num_items;          // e.g., 7
+ * int  num_segments;       // e.g., 3
+ * int  *d_offsets;         // e.g., [0, 3, 3, 7]
+ * int  *d_keys_in;         // e.g., [8, 6, 7, 5, 3, 0, 9]
+ * int  *d_keys_out;        // e.g., [-, -, -, -, -, -, -]
+ * int  *d_values_in;       // e.g., [0, 1, 2, 3, 4, 5, 6]
+ * int  *d_values_out;      // e.g., [-, -, -, -, -, -, -]
+ * ...
+ *
+ * // Determine temporary device storage requirements
+ * void     *d_temp_storage = NULL;
+ * size_t   temp_storage_bytes = 0;
+ * cub::DeviceSegmentedSort::SortPairs(
+ *     d_temp_storage, temp_storage_bytes,
+ *     d_keys_in, d_keys_out, d_values_in, d_values_out,
+ *     num_items, num_segments, d_offsets, d_offsets + 1);
+ *
+ * // Allocate temporary storage
+ * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+ *
+ * // Run sorting operation
+ * cub::DeviceSegmentedSort::SortPairs(
+ *     d_temp_storage, temp_storage_bytes,
+ *     d_keys_in, d_keys_out, d_values_in, d_values_out,
+ *     num_items, num_segments, d_offsets, d_offsets + 1);
+ *
+ * // d_keys_out            <-- [6, 7, 8, 0, 3, 5, 9]
+ * // d_values_out          <-- [1, 2, 0, 5, 4, 3, 6]
+ * @endcode
  */
 struct DeviceSegmentedSort
 {
 
   /*************************************************************************//**
-   * \name Keys-only
+   * @name Keys-only
    ****************************************************************************/
   //@{
 
@@ -359,7 +391,7 @@ struct DeviceSegmentedSort
 
   //@}  end member group
   /*************************************************************************//**
-   * \name Key-value pairs
+   * @name Key-value pairs
    ****************************************************************************/
   //@{
 
