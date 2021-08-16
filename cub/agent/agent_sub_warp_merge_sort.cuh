@@ -226,7 +226,7 @@ private:
         KeyT lhs = keys_input[0];
         KeyT rhs = keys_input[1];
 
-        if (binary_op(lhs, rhs))
+        if (lhs == rhs || binary_op(lhs, rhs))
         {
           keys_output[0] = lhs;
           keys_output[1] = rhs;
