@@ -111,6 +111,60 @@ struct DeviceSegmentedSort
    ****************************************************************************/
   //@{
 
+  /**
+   * @brief Sorts segments of keys into ascending order. Approximately
+   *        <tt>2*num_items + 2*num_segments</tt> auxiliary storage required.
+   *
+   * @par
+   * - The contents of the input data are not altered by the sorting operation
+   * - When input a contiguous sequence of segments, a single sequence
+   *   @p segment_offsets (of length <tt>num_segments+1</tt>) can be aliased
+   *   for both the @p d_begin_offsets and @p d_end_offsets parameters (where
+   *   the latter is specified as <tt>segment_offsets+1</tt>).
+   * - SortKeys is not guaranteed to be stable. That is, suppose that @p i and
+   *   @p j are equivalent: neither one is less than the other. It is not
+   *   guaranteed that the relative order of these two elements will be
+   *   preserved by sort.
+   *
+   * @par Snippet
+   * The code snippet below illustrates the batched sorting of three segments
+   * (with one zero-length segment) of @p int keys.
+   *
+   * @par
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/device/device_segmented_sort.cuh>
+   *
+   * // Declare, allocate, and initialize device-accessible pointers for sorting data
+   * int  num_items;          // e.g., 7
+   * int  num_segments;       // e.g., 3
+   * int  *d_offsets;         // e.g., [0, 3, 3, 7]
+   * int  *d_keys_in;         // e.g., [8, 6, 7, 5, 3, 0, 9]
+   * int  *d_keys_out;        // e.g., [-, -, -, -, -, -, -]
+   * ...
+   *
+   * // Determine temporary device storage requirements
+   * void    *d_temp_storage = NULL;
+   * size_t   temp_storage_bytes = 0;
+   * cub::DeviceSegmentedSort::SortKeys(
+   *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // Allocate temporary storage
+   * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+   *
+   * // Run sorting operation
+   * cub::DeviceSegmentedSort::SortKeys(
+   *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // d_keys_out            <-- [6, 7, 8, 0, 3, 5, 9]
+   * @endcode
+   *
+   * @tparam KeyT                  <b>[inferred]</b> Key type
+   * @tparam OffsetT               <b>[inferred]</b> Integer type for global offsets
+   * @tparam BeginOffsetIteratorT  <b>[inferred]</b> Random-access input iterator type for reading segment beginning offsets \iterator
+   * @tparam EndOffsetIteratorT    <b>[inferred]</b> Random-access input iterator type for reading segment ending offsets \iterator
+   */
   template <typename KeyT,
             typename OffsetT,
             typename BeginOffsetIteratorT,
@@ -152,6 +206,60 @@ struct DeviceSegmentedSort
                                debug_synchronous);
   }
 
+  /**
+   * @brief Sorts segments of keys into descending order. Approximately
+   *        <tt>2*num_items + 2*num_segments</tt> auxiliary storage required.
+   *
+   * @par
+   * - The contents of the input data are not altered by the sorting operation
+   * - When input a contiguous sequence of segments, a single sequence
+   *   @p segment_offsets (of length <tt>num_segments+1</tt>) can be aliased
+   *   for both the @p d_begin_offsets and @p d_end_offsets parameters (where
+   *   the latter is specified as <tt>segment_offsets+1</tt>).
+   * - SortKeysDescending is not guaranteed to be stable. That is, suppose that
+   *   @p i and @p j are equivalent: neither one is less than the other. It is
+   *   not guaranteed that the relative order of these two elements will be
+   *   preserved by sort.
+   *
+   * @par Snippet
+   * The code snippet below illustrates the batched sorting of three segments
+   * (with one zero-length segment) of @p int keys.
+   *
+   * @par
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/device/device_segmented_sort.cuh>
+   *
+   * // Declare, allocate, and initialize device-accessible pointers for sorting data
+   * int  num_items;          // e.g., 7
+   * int  num_segments;       // e.g., 3
+   * int  *d_offsets;         // e.g., [0, 3, 3, 7]
+   * int  *d_keys_in;         // e.g., [8, 6, 7, 5, 3, 0, 9]
+   * int  *d_keys_out;        // e.g., [-, -, -, -, -, -, -]
+   * ...
+   *
+   * // Determine temporary device storage requirements
+   * void    *d_temp_storage = NULL;
+   * size_t   temp_storage_bytes = 0;
+   * cub::DeviceSegmentedSort::SortKeysDescending(
+   *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // Allocate temporary storage
+   * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+   *
+   * // Run sorting operation
+   * cub::DeviceSegmentedSort::SortKeysDescending(
+   *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // d_keys_out            <-- [6, 7, 8, 0, 3, 5, 9]
+   * @endcode
+   *
+   * @tparam KeyT                  <b>[inferred]</b> Key type
+   * @tparam OffsetT               <b>[inferred]</b> Integer type for global offsets
+   * @tparam BeginOffsetIteratorT  <b>[inferred]</b> Random-access input iterator type for reading segment beginning offsets \iterator
+   * @tparam EndOffsetIteratorT    <b>[inferred]</b> Random-access input iterator type for reading segment ending offsets \iterator
+   */
   template <typename KeyT,
             typename OffsetT,
             typename BeginOffsetIteratorT,
@@ -193,6 +301,70 @@ struct DeviceSegmentedSort
                                debug_synchronous);
   }
 
+  /**
+   * @brief Sorts segments of keys into ascending order. Approximately
+   *        <tt>2*num_segments</tt> auxiliary storage required.
+   *
+   * @par
+   * - The sorting operation is given a pair of key buffers managed by a
+   *   DoubleBuffer structure that indicates which of the two buffers is
+   *   "current" (and thus contains the input data to be sorted).
+   * - The contents of both buffers may be altered by the sorting operation.
+   * - Upon completion, the sorting operation will update the "current"
+   *   indicator within the DoubleBuffer wrapper to reference which of the two
+   *   buffers now contains the sorted output sequence (a function of the number
+   *   of key bits and the targeted device architecture).
+   * - When input a contiguous sequence of segments, a single sequence
+   *   @p segment_offsets (of length <tt>num_segments+1</tt>) can be aliased
+   *   for both the @p d_begin_offsets and @p d_end_offsets parameters (where
+   *   the latter is specified as <tt>segment_offsets+1</tt>).
+   * - SortKeys is not guaranteed to be stable. That is, suppose that
+   *   @p i and @p j are equivalent: neither one is less than the other. It is
+   *   not guaranteed that the relative order of these two elements will be
+   *   preserved by sort.
+   *
+   * @par Snippet
+   * The code snippet below illustrates the batched sorting of three segments
+   * (with one zero-length segment) of \p int keys.
+   *
+   * @par
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/device/device_segmented_sort.cuh>
+   *
+   * // Declare, allocate, and initialize device-accessible pointers for sorting data
+   * int  num_items;          // e.g., 7
+   * int  num_segments;       // e.g., 3
+   * int  *d_offsets;         // e.g., [0, 3, 3, 7]
+   * int  *d_key_buf;         // e.g., [8, 6, 7, 5, 3, 0, 9]
+   * int  *d_key_alt_buf;     // e.g., [-, -, -, -, -, -, -]
+   * ...
+   *
+   * // Create a DoubleBuffer to wrap the pair of device pointers
+   * cub::DoubleBuffer<int> d_keys(d_key_buf, d_key_alt_buf);
+   *
+   * // Determine temporary device storage requirements
+   * void     *d_temp_storage = NULL;
+   * size_t   temp_storage_bytes = 0;
+   * cub::DeviceSegmentedSort::SortKeys(
+   *     d_temp_storage, temp_storage_bytes, d_keys,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // Allocate temporary storage
+   * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+   *
+   * // Run sorting operation
+   * cub::DeviceSegmentedSort::SortKeys(
+   *     d_temp_storage, temp_storage_bytes, d_keys,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // d_keys.Current()      <-- [6, 7, 8, 0, 3, 5, 9]
+   * @endcode
+   *
+   * @tparam KeyT                  <b>[inferred]</b> Key type
+   * @tparam OffsetT               <b>[inferred]</b> Integer type for global offsets
+   * @tparam BeginOffsetIteratorT  <b>[inferred]</b> Random-access input iterator type for reading segment beginning offsets \iterator
+   * @tparam EndOffsetIteratorT    <b>[inferred]</b> Random-access input iterator type for reading segment ending offsets \iterator
+   */
   template <typename KeyT,
             typename OffsetT,
             typename BeginOffsetIteratorT,
@@ -233,6 +405,70 @@ struct DeviceSegmentedSort
                                debug_synchronous);
   }
 
+  /**
+   * @brief Sorts segments of keys into descending order. Approximately
+   *        <tt>2*num_segments</tt> auxiliary storage required.
+   *
+   * @par
+   * - The sorting operation is given a pair of key buffers managed by a
+   *   DoubleBuffer structure that indicates which of the two buffers is
+   *   "current" (and thus contains the input data to be sorted).
+   * - The contents of both buffers may be altered by the sorting operation.
+   * - Upon completion, the sorting operation will update the "current"
+   *   indicator within the DoubleBuffer wrapper to reference which of the two
+   *   buffers now contains the sorted output sequence (a function of the number
+   *   of key bits and the targeted device architecture).
+   * - When input a contiguous sequence of segments, a single sequence
+   *   @p segment_offsets (of length <tt>num_segments+1</tt>) can be aliased
+   *   for both the @p d_begin_offsets and @p d_end_offsets parameters (where
+   *   the latter is specified as <tt>segment_offsets+1</tt>).
+   * - SortKeysDescending is not guaranteed to be stable. That is, suppose that
+   *   @p i and @p j are equivalent: neither one is less than the other. It is
+   *   not guaranteed that the relative order of these two elements will be
+   *   preserved by sort.
+   *
+   * @par Snippet
+   * The code snippet below illustrates the batched sorting of three segments
+   * (with one zero-length segment) of \p int keys.
+   *
+   * @par
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/device/device_segmented_sort.cuh>
+   *
+   * // Declare, allocate, and initialize device-accessible pointers for sorting data
+   * int  num_items;          // e.g., 7
+   * int  num_segments;       // e.g., 3
+   * int  *d_offsets;         // e.g., [0, 3, 3, 7]
+   * int  *d_key_buf;         // e.g., [8, 6, 7, 5, 3, 0, 9]
+   * int  *d_key_alt_buf;     // e.g., [-, -, -, -, -, -, -]
+   * ...
+   *
+   * // Create a DoubleBuffer to wrap the pair of device pointers
+   * cub::DoubleBuffer<int> d_keys(d_key_buf, d_key_alt_buf);
+   *
+   * // Determine temporary device storage requirements
+   * void     *d_temp_storage = NULL;
+   * size_t   temp_storage_bytes = 0;
+   * cub::DeviceSegmentedSort::SortKeysDescending(
+   *     d_temp_storage, temp_storage_bytes, d_keys,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // Allocate temporary storage
+   * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+   *
+   * // Run sorting operation
+   * cub::DeviceSegmentedSort::SortKeysDescending(
+   *     d_temp_storage, temp_storage_bytes, d_keys,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // d_keys.Current()      <-- [6, 7, 8, 0, 3, 5, 9]
+   * @endcode
+   *
+   * @tparam KeyT                  <b>[inferred]</b> Key type
+   * @tparam OffsetT               <b>[inferred]</b> Integer type for global offsets
+   * @tparam BeginOffsetIteratorT  <b>[inferred]</b> Random-access input iterator type for reading segment beginning offsets \iterator
+   * @tparam EndOffsetIteratorT    <b>[inferred]</b> Random-access input iterator type for reading segment ending offsets \iterator
+   */
   template <typename KeyT,
             typename OffsetT,
             typename BeginOffsetIteratorT,
@@ -273,6 +509,61 @@ struct DeviceSegmentedSort
                                debug_synchronous);
   }
 
+  /**
+   * @brief Sorts segments of keys into ascending order. Approximately
+   *        <tt>2*num_items + 2*num_segments</tt> auxiliary storage required.
+   *
+   * @par
+   * - The contents of the input data are not altered by the sorting operation
+   * - When input a contiguous sequence of segments, a single sequence
+   *   @p segment_offsets (of length <tt>num_segments+1</tt>) can be aliased
+   *   for both the @p d_begin_offsets and @p d_end_offsets parameters (where
+   *   the latter is specified as <tt>segment_offsets+1</tt>).
+   * - StableSortKeys is stable: it preserves the relative ordering of
+   *   equivalent elements. That is, if @p x and @p y are elements such that
+   *   @p x precedes @p y, and if the two elements are equivalent (neither
+   *   @p x < @p y nor @p y < @p x) then a postcondition of stable sort is that
+   *   @p x still precedes @p y.
+   *
+   * @par Snippet
+   * The code snippet below illustrates the batched sorting of three segments
+   * (with one zero-length segment) of @p int keys.
+   *
+   * @par
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/device/device_segmented_sort.cuh>
+   *
+   * // Declare, allocate, and initialize device-accessible pointers for sorting data
+   * int  num_items;          // e.g., 7
+   * int  num_segments;       // e.g., 3
+   * int  *d_offsets;         // e.g., [0, 3, 3, 7]
+   * int  *d_keys_in;         // e.g., [8, 6, 7, 5, 3, 0, 9]
+   * int  *d_keys_out;        // e.g., [-, -, -, -, -, -, -]
+   * ...
+   *
+   * // Determine temporary device storage requirements
+   * void    *d_temp_storage = NULL;
+   * size_t   temp_storage_bytes = 0;
+   * cub::DeviceSegmentedSort::StableSortKeys(
+   *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // Allocate temporary storage
+   * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+   *
+   * // Run sorting operation
+   * cub::DeviceSegmentedSort::StableSortKeys(
+   *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // d_keys_out            <-- [6, 7, 8, 0, 3, 5, 9]
+   * @endcode
+   *
+   * @tparam KeyT                  <b>[inferred]</b> Key type
+   * @tparam OffsetT               <b>[inferred]</b> Integer type for global offsets
+   * @tparam BeginOffsetIteratorT  <b>[inferred]</b> Random-access input iterator type for reading segment beginning offsets \iterator
+   * @tparam EndOffsetIteratorT    <b>[inferred]</b> Random-access input iterator type for reading segment ending offsets \iterator
+   */
   template <typename KeyT,
             typename OffsetT,
             typename BeginOffsetIteratorT,
@@ -302,6 +593,61 @@ struct DeviceSegmentedSort
       debug_synchronous);
   }
 
+  /**
+   * @brief Sorts segments of keys into descending order. Approximately
+   *        <tt>2*num_items + 2*num_segments</tt> auxiliary storage required.
+   *
+   * @par
+   * - The contents of the input data are not altered by the sorting operation
+   * - When input a contiguous sequence of segments, a single sequence
+   *   @p segment_offsets (of length <tt>num_segments+1</tt>) can be aliased
+   *   for both the @p d_begin_offsets and @p d_end_offsets parameters (where
+   *   the latter is specified as <tt>segment_offsets+1</tt>).
+   * - StableSortKeysDescending is stable: it preserves the relative ordering of
+   *   equivalent elements. That is, if @p x and @p y are elements such that
+   *   @p x precedes @p y, and if the two elements are equivalent (neither
+   *   @p x < @p y nor @p y < @p x) then a postcondition of stable sort is that
+   *   @p x still precedes @p y.
+   *
+   * @par Snippet
+   * The code snippet below illustrates the batched sorting of three segments
+   * (with one zero-length segment) of @p int keys.
+   *
+   * @par
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/device/device_segmented_sort.cuh>
+   *
+   * // Declare, allocate, and initialize device-accessible pointers for sorting data
+   * int  num_items;          // e.g., 7
+   * int  num_segments;       // e.g., 3
+   * int  *d_offsets;         // e.g., [0, 3, 3, 7]
+   * int  *d_keys_in;         // e.g., [8, 6, 7, 5, 3, 0, 9]
+   * int  *d_keys_out;        // e.g., [-, -, -, -, -, -, -]
+   * ...
+   *
+   * // Determine temporary device storage requirements
+   * void    *d_temp_storage = NULL;
+   * size_t   temp_storage_bytes = 0;
+   * cub::DeviceSegmentedSort::StableSortKeysDescending(
+   *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // Allocate temporary storage
+   * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+   *
+   * // Run sorting operation
+   * cub::DeviceSegmentedSort::StableSortKeysDescending(
+   *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // d_keys_out            <-- [6, 7, 8, 0, 3, 5, 9]
+   * @endcode
+   *
+   * @tparam KeyT                  <b>[inferred]</b> Key type
+   * @tparam OffsetT               <b>[inferred]</b> Integer type for global offsets
+   * @tparam BeginOffsetIteratorT  <b>[inferred]</b> Random-access input iterator type for reading segment beginning offsets \iterator
+   * @tparam EndOffsetIteratorT    <b>[inferred]</b> Random-access input iterator type for reading segment ending offsets \iterator
+   */
   template <typename KeyT,
             typename OffsetT,
             typename BeginOffsetIteratorT,
@@ -333,6 +679,71 @@ struct DeviceSegmentedSort
                                                   debug_synchronous);
   }
 
+  /**
+   * @brief Sorts segments of keys into ascending order. Approximately
+   *        <tt>2*num_segments</tt> auxiliary storage required.
+   *
+   * @par
+   * - The sorting operation is given a pair of key buffers managed by a
+   *   DoubleBuffer structure that indicates which of the two buffers is
+   *   "current" (and thus contains the input data to be sorted).
+   * - The contents of both buffers may be altered by the sorting operation.
+   * - Upon completion, the sorting operation will update the "current"
+   *   indicator within the DoubleBuffer wrapper to reference which of the two
+   *   buffers now contains the sorted output sequence (a function of the number
+   *   of key bits and the targeted device architecture).
+   * - When input a contiguous sequence of segments, a single sequence
+   *   @p segment_offsets (of length <tt>num_segments+1</tt>) can be aliased
+   *   for both the @p d_begin_offsets and @p d_end_offsets parameters (where
+   *   the latter is specified as <tt>segment_offsets+1</tt>).
+   * - StableSortKeys is stable: it preserves the relative ordering of
+   *   equivalent elements. That is, if @p x and @p y are elements such that
+   *   @p x precedes @p y, and if the two elements are equivalent (neither
+   *   @p x < @p y nor @p y < @p x) then a postcondition of stable sort is that
+   *   @p x still precedes @p y.
+   *
+   * @par Snippet
+   * The code snippet below illustrates the batched sorting of three segments
+   * (with one zero-length segment) of \p int keys.
+   *
+   * @par
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/device/device_segmented_sort.cuh>
+   *
+   * // Declare, allocate, and initialize device-accessible pointers for sorting data
+   * int  num_items;          // e.g., 7
+   * int  num_segments;       // e.g., 3
+   * int  *d_offsets;         // e.g., [0, 3, 3, 7]
+   * int  *d_key_buf;         // e.g., [8, 6, 7, 5, 3, 0, 9]
+   * int  *d_key_alt_buf;     // e.g., [-, -, -, -, -, -, -]
+   * ...
+   *
+   * // Create a DoubleBuffer to wrap the pair of device pointers
+   * cub::DoubleBuffer<int> d_keys(d_key_buf, d_key_alt_buf);
+   *
+   * // Determine temporary device storage requirements
+   * void     *d_temp_storage = NULL;
+   * size_t   temp_storage_bytes = 0;
+   * cub::DeviceSegmentedSort::StableSortKeys(
+   *     d_temp_storage, temp_storage_bytes, d_keys,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // Allocate temporary storage
+   * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+   *
+   * // Run sorting operation
+   * cub::DeviceSegmentedSort::StableSortKeys(
+   *     d_temp_storage, temp_storage_bytes, d_keys,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // d_keys.Current()      <-- [6, 7, 8, 0, 3, 5, 9]
+   * @endcode
+   *
+   * @tparam KeyT                  <b>[inferred]</b> Key type
+   * @tparam OffsetT               <b>[inferred]</b> Integer type for global offsets
+   * @tparam BeginOffsetIteratorT  <b>[inferred]</b> Random-access input iterator type for reading segment beginning offsets \iterator
+   * @tparam EndOffsetIteratorT    <b>[inferred]</b> Random-access input iterator type for reading segment ending offsets \iterator
+   */
   template <typename KeyT,
             typename OffsetT,
             typename BeginOffsetIteratorT,
@@ -360,6 +771,71 @@ struct DeviceSegmentedSort
       debug_synchronous);
   }
 
+  /**
+   * @brief Sorts segments of keys into descending order. Approximately
+   *        <tt>2*num_segments</tt> auxiliary storage required.
+   *
+   * @par
+   * - The sorting operation is given a pair of key buffers managed by a
+   *   DoubleBuffer structure that indicates which of the two buffers is
+   *   "current" (and thus contains the input data to be sorted).
+   * - The contents of both buffers may be altered by the sorting operation.
+   * - Upon completion, the sorting operation will update the "current"
+   *   indicator within the DoubleBuffer wrapper to reference which of the two
+   *   buffers now contains the sorted output sequence (a function of the number
+   *   of key bits and the targeted device architecture).
+   * - When input a contiguous sequence of segments, a single sequence
+   *   @p segment_offsets (of length <tt>num_segments+1</tt>) can be aliased
+   *   for both the @p d_begin_offsets and @p d_end_offsets parameters (where
+   *   the latter is specified as <tt>segment_offsets+1</tt>).
+   * - StableSortKeysDescending is stable: it preserves the relative ordering of
+   *   equivalent elements. That is, if @p x and @p y are elements such that
+   *   @p x precedes @p y, and if the two elements are equivalent (neither
+   *   @p x < @p y nor @p y < @p x) then a postcondition of stable sort is that
+   *   @p x still precedes @p y.
+   *
+   * @par Snippet
+   * The code snippet below illustrates the batched sorting of three segments
+   * (with one zero-length segment) of \p int keys.
+   *
+   * @par
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/device/device_segmented_sort.cuh>
+   *
+   * // Declare, allocate, and initialize device-accessible pointers for sorting data
+   * int  num_items;          // e.g., 7
+   * int  num_segments;       // e.g., 3
+   * int  *d_offsets;         // e.g., [0, 3, 3, 7]
+   * int  *d_key_buf;         // e.g., [8, 6, 7, 5, 3, 0, 9]
+   * int  *d_key_alt_buf;     // e.g., [-, -, -, -, -, -, -]
+   * ...
+   *
+   * // Create a DoubleBuffer to wrap the pair of device pointers
+   * cub::DoubleBuffer<int> d_keys(d_key_buf, d_key_alt_buf);
+   *
+   * // Determine temporary device storage requirements
+   * void     *d_temp_storage = NULL;
+   * size_t   temp_storage_bytes = 0;
+   * cub::DeviceSegmentedSort::StableSortKeysDescending(
+   *     d_temp_storage, temp_storage_bytes, d_keys,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // Allocate temporary storage
+   * cudaMalloc(&d_temp_storage, temp_storage_bytes);
+   *
+   * // Run sorting operation
+   * cub::DeviceSegmentedSort::StableSortKeysDescending(
+   *     d_temp_storage, temp_storage_bytes, d_keys,
+   *     num_items, num_segments, d_offsets, d_offsets + 1);
+   *
+   * // d_keys.Current()      <-- [6, 7, 8, 0, 3, 5, 9]
+   * @endcode
+   *
+   * @tparam KeyT                  <b>[inferred]</b> Key type
+   * @tparam OffsetT               <b>[inferred]</b> Integer type for global offsets
+   * @tparam BeginOffsetIteratorT  <b>[inferred]</b> Random-access input iterator type for reading segment beginning offsets \iterator
+   * @tparam EndOffsetIteratorT    <b>[inferred]</b> Random-access input iterator type for reading segment ending offsets \iterator
+   */
   template <typename KeyT,
             typename OffsetT,
             typename BeginOffsetIteratorT,
