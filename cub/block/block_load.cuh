@@ -451,10 +451,6 @@ __device__ __forceinline__ void LoadDirectWarpStriped(
 /**
  * \brief cub::BlockLoadAlgorithm enumerates alternative algorithms for cub::BlockLoad to read a linear segment of data from memory into a blocked arrangement across a CUDA thread block.
  */
-
-/**
- * \brief cub::BlockLoadAlgorithm enumerates alternative algorithms for cub::BlockLoad to read a linear segment of data from memory into a blocked arrangement across a CUDA thread block.
- */
 enum BlockLoadAlgorithm
 {
     /**
@@ -464,21 +460,21 @@ enum BlockLoadAlgorithm
      * directly from memory.
      *
      * \par Performance Considerations
-     * - The utilization of memory transactions (coalescing) decreases as the
-     *   access stride between threads increases (i.e., the number items per thread).
+     * The utilization of memory transactions (coalescing) decreases as the
+     * access stride between threads increases (i.e., the number items per thread).
      */
     BLOCK_LOAD_DIRECT,
 
     /**
-    * \par Overview
-    *
-    * A [<em>striped arrangement</em>](index.html#sec5sec3) of data is read
-    * directly from memory.
-    *
-    * \par Performance Considerations
-    * - The utilization of memory transactions (coalescing) decreases as the
-    *   access stride between threads increases (i.e., the number items per thread).
-    */
+     * \par Overview
+     *
+     * A [<em>striped arrangement</em>](index.html#sec5sec3) of data is read
+     * directly from memory.
+     *
+     * \par Performance Considerations
+     * The utilization of memory transactions (coalescing) doesn't depend on
+     * the number of items per thread.
+     */
     BLOCK_LOAD_STRIPED,
 
     /**
