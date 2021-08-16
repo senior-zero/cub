@@ -359,60 +359,6 @@ __global__ void DeviceSegmentedSortKernelWithReorderingLarge(
     }
 }
 
-template <typename T,
-  typename BeginOffsetIteratorT,
-  typename EndOffsetIteratorT>
-struct SegmentSizeGreaterThan
-{
-  T value {};
-  BeginOffsetIteratorT d_offset_begin {};
-  EndOffsetIteratorT d_offset_end {};
-
-  __host__ __device__ __forceinline__
-  SegmentSizeGreaterThan(
-    T value,
-    BeginOffsetIteratorT d_offset_begin,
-    EndOffsetIteratorT d_offset_end)
-    : value(value)
-    , d_offset_begin(d_offset_begin)
-    , d_offset_end(d_offset_end)
-  {}
-
-  __host__ __device__ __forceinline__
-  bool operator()(unsigned int segment_id) const
-  {
-    const T segment_size = d_offset_end[segment_id] - d_offset_begin[segment_id];
-    return segment_size > value;
-  }
-};
-
-template <typename T,
-          typename BeginOffsetIteratorT,
-          typename EndOffsetIteratorT>
-struct SegmentSizeLessThan
-{
-  T value {};
-  BeginOffsetIteratorT d_offset_begin {};
-  EndOffsetIteratorT d_offset_end {};
-
-  __host__ __device__ __forceinline__
-  SegmentSizeLessThan(
-    T value,
-    BeginOffsetIteratorT d_offset_begin,
-    EndOffsetIteratorT d_offset_end)
-    : value(value)
-    , d_offset_begin(d_offset_begin)
-    , d_offset_end(d_offset_end)
-  {}
-
-  __host__ __device__ __forceinline__
-  bool operator()(unsigned int segment_id) const
-  {
-    const T segment_size = d_offset_end[segment_id] - d_offset_begin[segment_id];
-    return segment_size < value;
-  }
-};
-
 
 template <typename KeyT,
           typename ValueT>
@@ -792,29 +738,94 @@ struct DispatchSegmentedSort : SelectedPolicy
 {
   static constexpr int KEYS_ONLY = Equals<ValueT, NullType>::VALUE;
 
-  using LargeSegmentsSelectorT =
-    SegmentSizeGreaterThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>;
+  struct LargeSegmentsSelectorT
+  {
+    OffsetT value{};
+    BeginOffsetIteratorT d_offset_begin{};
+    EndOffsetIteratorT d_offset_end{};
 
-  using SmallSegmentsSelectorT =
-    SegmentSizeLessThan<OffsetT, BeginOffsetIteratorT, EndOffsetIteratorT>;
+    __host__ __device__ __forceinline__
+    LargeSegmentsSelectorT(OffsetT value,
+                           BeginOffsetIteratorT d_offset_begin,
+                           EndOffsetIteratorT d_offset_end)
+        : value(value)
+        , d_offset_begin(d_offset_begin)
+        , d_offset_end(d_offset_end)
+    {}
+
+    __host__ __device__ __forceinline__ bool
+    operator()(unsigned int segment_id) const
+    {
+      const OffsetT segment_size = d_offset_end[segment_id] -
+                                   d_offset_begin[segment_id];
+      return segment_size > value;
+    }
+  };
+
+  struct SmallSegmentsSelectorT
+  {
+    OffsetT value{};
+    BeginOffsetIteratorT d_offset_begin{};
+    EndOffsetIteratorT d_offset_end{};
+
+    __host__ __device__ __forceinline__
+    SmallSegmentsSelectorT(OffsetT value,
+                           BeginOffsetIteratorT d_offset_begin,
+                           EndOffsetIteratorT d_offset_end)
+        : value(value)
+        , d_offset_begin(d_offset_begin)
+        , d_offset_end(d_offset_end)
+    {}
+
+    __host__ __device__ __forceinline__ bool
+    operator()(unsigned int segment_id) const
+    {
+      const OffsetT segment_size = d_offset_end[segment_id] -
+                                   d_offset_begin[segment_id];
+      return segment_size < value;
+    }
+  };
 
   // Partition selects large and small groups.
   // The middle group is unselected.
   constexpr static std::size_t num_selected_groups = 2;
 
-  void *d_temp_storage;
-  std::size_t &temp_storage_bytes;
-  DoubleBuffer<KeyT> &d_keys;
-  DoubleBuffer<ValueT> &d_values;
-  OffsetT num_items;
-  unsigned int num_segments;
-  BeginOffsetIteratorT d_begin_offsets;
-  EndOffsetIteratorT d_end_offsets;
-  bool is_overwrite_okay;
-  cudaStream_t stream;
-  bool debug_synchronous;
+  void *d_temp_storage; ///< Reference to size in bytes of @p d_temp_storage allocation
+  std::size_t &temp_storage_bytes; /**< [in,out] Reference to size in bytes of
+                                                 @p d_temp_storage allocation */
+  DoubleBuffer<KeyT> &d_keys; /**< [in,out] Double-buffer whose current buffer
+                                            contains the unsorted input keys and,
+                                            upon return, is updated to point to
+                                            the sorted output keys */
+  DoubleBuffer<ValueT> &d_values; /**< [in,out] Double-buffer whose current buffer
+                                                contains the unsorted input values and,
+                                                upon return, is updated to point to
+                                                the sorted output values */
+  OffsetT num_items; ///< [in] Number of items to sort
+  unsigned int num_segments; ///< [in] The number of segments that comprise the sorting data
+  BeginOffsetIteratorT d_begin_offsets; /**< [in] Random-access input iterator to
+                                                  the sequence of beginning offsets
+                                                  of length @p num_segments, such that
+                                                  <tt>d_begin_offsets[i]</tt> is the first
+                                                  element of the <em>i</em><sup>th</sup>
+                                                  data segment in <tt>d_keys_*</tt> and
+                                                  <tt>d_values_*</tt> */
+  EndOffsetIteratorT d_end_offsets; /**< [in] Random-access input iterator to the
+                                              sequence of ending offsets of length
+                                              @p num_segments, such that
+                                              <tt>d_end_offsets[i]-1</tt> is the
+                                              last element of the <em>i</em><sup>th</sup>
+                                              data segment in <tt>d_keys_*</tt> and
+                                              <tt>d_values_*</tt>. If
+                                              <tt>d_end_offsets[i]-1</tt> <= <tt>d_begin_offsets[i]</tt>,
+                                              the <em>i</em><sup>th</sup> is considered empty. */
+  bool is_overwrite_okay; ///< [in] Whether is okay to overwrite source buffers
+  cudaStream_t stream; ///< [in] CUDA stream to launch kernels within.
+  bool debug_synchronous; /**< [in] Whether or not to synchronize the stream after
+                                    every kernel launch to check for errors.
+                                    Also causes launch configurations to be
+                                    printed to the console. */
 
-  /// Constructor
   CUB_RUNTIME_FUNCTION __forceinline__
   DispatchSegmentedSort(void *d_temp_storage,
                         std::size_t &temp_storage_bytes,
@@ -840,7 +851,6 @@ struct DispatchSegmentedSort : SelectedPolicy
       , debug_synchronous(debug_synchronous)
   {}
 
-  /// Invocation
   template <typename ActivePolicyT>
   CUB_RUNTIME_FUNCTION __forceinline__ cudaError_t Invoke()
   {
