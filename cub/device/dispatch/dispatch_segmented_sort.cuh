@@ -1178,7 +1178,7 @@ private:
       return error;
     }
 
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__>= 350)
     unsigned int *h_group_sizes = group_sizes.Get();
 #else
     unsigned int h_group_sizes[num_selected_groups];
