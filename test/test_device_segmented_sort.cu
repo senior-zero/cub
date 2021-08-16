@@ -1000,22 +1000,10 @@ void HostReferenceSort(bool sort_pairs,
     {
       if (sort_descending)
       {
-        if (segment_end - segment_begin == 2)
-        {
-          std::cout << segment_i << ":\n";
-          std::cout << "\t" << (int)h_keys[segment_begin] << " => " << h_values[segment_begin] << std::endl;
-          std::cout << "\t" << (int)h_keys[segment_begin + 1] << " => " << h_values[segment_begin + 1] << std::endl;
-        }
         thrust::sort_by_key(h_keys.begin() + segment_begin,
                             h_keys.begin() + segment_end,
                             h_values.begin() + segment_begin,
                             thrust::greater<KeyT>{});
-        if (segment_end - segment_begin == 2)
-        {
-          std::cout << segment_i << ":\n";
-          std::cout << "\t" << (int)h_keys[segment_begin] << " => " << h_values[segment_begin] << std::endl;
-          std::cout << "\t" << (int)h_keys[segment_begin + 1] << " => " << h_values[segment_begin + 1] << std::endl;
-        }
       }
       else
       {
@@ -1109,8 +1097,10 @@ void InputTestRandom(Input<KeyT, OffsetT, ValueT> &input)
         {
           RandomizeInput(h_keys, h_values);
 
+#if STORE_ON_FAILURE
           auto h_keys_backup = h_keys;
           auto h_values_backup = h_values;
+#endif
 
           input.get_d_keys_vec()   = h_keys;
           input.get_d_values_vec() = h_values;
@@ -1173,6 +1163,7 @@ void InputTestRandom(Input<KeyT, OffsetT, ValueT> &input)
               ? compare_two_outputs(h_offsets, h_values, h_values_output)
               : true;
 
+#if STORE_ON_FAILURE
           if (!keys_ok || !values_ok)
           {
             DumpInput<KeyT, ValueT, OffsetT>(sort_pairs,
@@ -1182,6 +1173,7 @@ void InputTestRandom(Input<KeyT, OffsetT, ValueT> &input)
                                              h_keys_backup,
                                              h_values_backup);
           }
+#endif
 
           AssertTrue(keys_ok);
           AssertTrue(values_ok);
@@ -1442,9 +1434,6 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  InputTestFromFiles<std::uint8_t, std::uint64_t, std::uint32_t>();
-
-  /*
   TestZeroSegments();
   TestEmptySegments(1 << 2);
   TestEmptySegments(1 << 22);
@@ -1456,7 +1445,6 @@ int main(int argc, char** argv)
   TestKeysAndPairs<std::uint64_t, std::uint64_t>();
   TestPairs<std::uint8_t, std::uint64_t, std::uint32_t>();
   TestPairs<std::int64_t, std::uint64_t, std::uint32_t>();
-   */
 
   return 0;
 }
