@@ -252,7 +252,7 @@ struct DeviceSegmentedSort
    *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
    *     num_items, num_segments, d_offsets, d_offsets + 1);
    *
-   * // d_keys_out            <-- [6, 7, 8, 0, 3, 5, 9]
+   * // d_keys_out            <-- [8, 7, 6, 9, 5, 3, 0]
    * @endcode
    *
    * @tparam KeyT                  <b>[inferred]</b> Key type
@@ -461,7 +461,7 @@ struct DeviceSegmentedSort
    *     d_temp_storage, temp_storage_bytes, d_keys,
    *     num_items, num_segments, d_offsets, d_offsets + 1);
    *
-   * // d_keys.Current()      <-- [6, 7, 8, 0, 3, 5, 9]
+   * // d_keys.Current()      <-- [8, 7, 6, 9, 5, 3, 0]
    * @endcode
    *
    * @tparam KeyT                  <b>[inferred]</b> Key type
@@ -640,7 +640,7 @@ struct DeviceSegmentedSort
    *     d_temp_storage, temp_storage_bytes, d_keys_in, d_keys_out,
    *     num_items, num_segments, d_offsets, d_offsets + 1);
    *
-   * // d_keys_out            <-- [6, 7, 8, 0, 3, 5, 9]
+   * // d_keys_out            <-- [8, 7, 6, 9, 5, 3, 0]
    * @endcode
    *
    * @tparam KeyT                  <b>[inferred]</b> Key type
@@ -828,7 +828,7 @@ struct DeviceSegmentedSort
    *     d_temp_storage, temp_storage_bytes, d_keys,
    *     num_items, num_segments, d_offsets, d_offsets + 1);
    *
-   * // d_keys.Current()      <-- [6, 7, 8, 0, 3, 5, 9]
+   * // d_keys.Current()      <-- [8, 7, 6, 9, 5, 3, 0]
    * @endcode
    *
    * @tparam KeyT                  <b>[inferred]</b> Key type
@@ -1027,8 +1027,8 @@ struct DeviceSegmentedSort
    *     d_keys_in, d_keys_out, d_values_in, d_values_out,
    *     num_items, num_segments, d_offsets, d_offsets + 1);
    *
-   * // d_keys_out            <-- [6, 7, 8, 0, 3, 5, 9]
-   * // d_values_out          <-- [1, 2, 0, 5, 4, 3, 6]
+   * // d_keys_out            <-- [8, 7, 6, 9, 5, 3, 0]
+   * // d_values_out          <-- [0, 2, 1, 6, 3, 4, 5]
    * @endcode
    *
    * @tparam KeyT                  <b>[inferred]</b> Key type
@@ -1255,8 +1255,8 @@ struct DeviceSegmentedSort
    *     d_temp_storage, temp_storage_bytes, d_keys, d_values,
    *     num_items, num_segments, d_offsets, d_offsets + 1);
    *
-   * // d_keys.Current()      <-- [6, 7, 8, 0, 3, 5, 9]
-   * // d_values.Current()    <-- [5, 4, 3, 1, 2, 0, 6]
+   * // d_keys.Current()      <-- [8, 7, 6, 9, 5, 3, 0]
+   * // d_values.Current()    <-- [0, 2, 1, 6, 3, 4, 5]
    *
    * @endcode
    *
@@ -1457,8 +1457,8 @@ struct DeviceSegmentedSort
    *     d_keys_in, d_keys_out, d_values_in, d_values_out,
    *     num_items, num_segments, d_offsets, d_offsets + 1);
    *
-   * // d_keys_out            <-- [6, 7, 8, 0, 3, 5, 9]
-   * // d_values_out          <-- [1, 2, 0, 5, 4, 3, 6]
+   * // d_keys_out            <-- [8, 7, 6, 9, 5, 3, 0]
+   * // d_values_out          <-- [0, 2, 1, 6, 3, 4, 5]
    * @endcode
    *
    * @tparam KeyT                  <b>[inferred]</b> Key type
@@ -1674,9 +1674,8 @@ struct DeviceSegmentedSort
    *     d_temp_storage, temp_storage_bytes, d_keys, d_values,
    *     num_items, num_segments, d_offsets, d_offsets + 1);
    *
-   * // d_keys.Current()      <-- [6, 7, 8, 0, 3, 5, 9]
-   * // d_values.Current()    <-- [5, 4, 3, 1, 2, 0, 6]
-   *
+   * // d_keys.Current()      <-- [8, 7, 6, 9, 5, 3, 0]
+   * // d_values.Current()    <-- [0, 2, 1, 6, 3, 4, 5]
    * @endcode
    *
    * @tparam KeyT                  <b>[inferred]</b> Key type
