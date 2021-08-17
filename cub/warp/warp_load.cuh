@@ -74,10 +74,125 @@ enum WarpLoadAlgorithm
    * the number of items per thread.
    */
   WARP_LOAD_STRIPED,
+
+  /**
+   * @par Overview
+   *
+   * A [<em>blocked arrangement</em>](index.html#sec5sec3) of data is read
+   * from memory using CUDA's built-in vectorized loads as a coalescing optimization.
+   * For example, <tt>ld.global.v4.s32</tt> instructions will be generated
+   * when @p T = @p int and @p ITEMS_PER_THREAD % 4 == 0.
+   *
+   * @par Performance Considerations
+   * - The utilization of memory transactions (coalescing) remains high until the the
+   *   access stride between threads (i.e., the number items per thread) exceeds the
+   *   maximum vector load width (typically 4 items or 64B, whichever is lower).
+   * - The following conditions will prevent vectorization and loading will fall
+   *   back to cub::WARP_LOAD_DIRECT:
+   *   - @p ITEMS_PER_THREAD is odd
+   *   - The @p InputIteratorT is not a simple pointer type
+   *   - The block input offset is not quadword-aligned
+   *   - The data type @p T is not a built-in primitive or CUDA vector type
+   *     (e.g., @p short, @p int2, @p double, @p float2, etc.)
+   */
   WARP_LOAD_VECTORIZE,
+
+  /**
+   * @par Overview
+   *
+   * A [<em>striped arrangement</em>](index.html#sec5sec3) of data is read
+   * efficiently from memory and then locally transposed into a
+   * [<em>blocked arrangement</em>](index.html#sec5sec3).
+   *
+   * @par Performance Considerations
+   * - The utilization of memory transactions (coalescing) remains high
+   *   regardless of items loaded per thread.
+   * - The local reordering incurs slightly longer latencies and throughput than
+   *   the direct cub::WARP_LOAD_DIRECT and cub::WARP_LOAD_VECTORIZE
+   *   alternatives.
+   */
   WARP_LOAD_TRANSPOSE
 };
 
+/**
+ * @brief The WarpLoad class provides [<em>collective</em>](index.html#sec0)
+ *        data movement methods for loading a linear segment of items from
+ *        memory into a [<em>blocked arrangement</em>](index.html#sec5sec3)
+ *        across a CUDA thread block.
+ * @ingroup WarpModule
+ * @ingroup UtilIo
+ *
+ * @tparam InputT The data type to read into (which must be convertible from the
+ *                input iterator's value type).
+ * @tparam ITEMS_PER_THREAD The number of consecutive items partitioned onto
+ *                          each thread.
+ * @tparam ALGORITHM <b>[optional]</b> cub::WarpLoadAlgorithm tuning policy.
+ *                   default: cub::WARP_LOAD_DIRECT.
+ * @tparam LOGICAL_WARP_THREADS <b>[optional]</b> The number of threads per
+ *                              "logical" warp (may be less than the number of
+ *                              hardware warp threads). Default is the warp size
+ *                              of the targeted CUDA compute-capability (e.g.,
+ *                              32 threads for SM86).
+ * @tparam PTX_ARCH <b>[optional]</b> \ptxversion
+ *
+ * @par Overview
+ * - The WarpLoad class provides a single data movement abstraction that can be
+ *   specialized to implement different cub::WarpLoadAlgorithm strategies. This
+ *   facilitates different performance policies for different architectures, data
+ *   types, granularity sizes, etc.
+ * - WarpLoad can be optionally specialized by different data movement strategies:
+ *   -# <b>cub::WARP_LOAD_DIRECT</b>. A [<em>blocked arrangement</em>](index.html#sec5sec3)
+ *      of data is read directly from memory. [More...](@ref cub::WarpLoadAlgorithm)
+*    -# <b>cub::WARP_LOAD_STRIPED,</b>. A [<em>striped arrangement</em>](index.html#sec5sec3)
+ *      of data is read directly from memory.  [More...](@ref cub::WarpLoadAlgorithm)
+ *   -# <b>cub::WARP_LOAD_VECTORIZE</b>. A [<em>blocked arrangement</em>](index.html#sec5sec3)
+ *      of data is read directly from memory using CUDA's built-in vectorized
+ *      loads as a coalescing optimization. [More...](@ref cub::WarpLoadAlgorithm)
+ *   -# <b>cub::WARP_LOAD_TRANSPOSE</b>. A [<em>striped arrangement</em>](index.html#sec5sec3)
+ *      of data is read directly from memory and is then locally transposed into a
+ *      [<em>blocked arrangement</em>](index.html#sec5sec3). [More...](@ref cub::WarpLoadAlgorithm)
+ *
+ * @par A Simple Example
+ * @par
+ * The code snippet below illustrates the loading of a linear segment of 64
+ * integers into a "blocked" arrangement across 16 threads where each thread
+ * owns 4 consecutive items. The load is specialized for @p WARP_LOAD_TRANSPOSE,
+ * meaning memory references are efficiently coalesced using a warp-striped access
+ * pattern (after which items are locally reordered among threads).
+ * @par
+ * @code
+ * #include <cub/cub.cuh>   // or equivalently <cub/warp/warp_load.cuh>
+ *
+ * __global__ void ExampleKernel(int *d_data, ...)
+ * {
+ *     constexpr int warp_threads = 16;
+ *     constexpr int block_threads = 256;
+ *     constexpr int items_per_thread = 4;
+ *
+ *     // Specialize WarpLoad for a warp of 16 threads owning 4 integer items each
+ *     using WarpLoadT = WarpLoad<int,
+ *                                items_per_thread,
+ *                                cub::WARP_LOAD_TRANSPOSE,
+ *                                warp_threads>;
+ *
+ *     constexpr int warps_in_block = block_threads / warp_threads;
+ *     constexpr int tile_size = items_per_thread * warp_threads;
+ *     const int warp_id = static_cast<int>(threadIdx.x) / warp_threads;
+ *
+ *     // Allocate shared memory for WarpLoad
+ *     __shared__ typename WarpLoadT::TempStorage temp_storage[warps_in_block];
+ *
+ *     // Load a segment of consecutive items that are blocked across threads
+ *     int thread_data[items_per_thread];
+ *     WarpLoadT(temp_storage[warp_id]).Load(input + warp_id * tile_size,
+ *                                           thread_data);
+ * @endcode
+ * @par
+ * Suppose the input @p d_data is <tt>0, 1, 2, 3, 4, 5, ...</tt>.
+ * The set of @p thread_data across the first logical warp of threads in those
+ * threads will be:
+ * <tt>{ [0,1,2,3], [4,5,6,7], ..., [60,61,62,63] }</tt>.
+ */
 template <typename          InputT,
           int               ITEMS_PER_THREAD,
           WarpLoadAlgorithm ALGORITHM            = WARP_LOAD_DIRECT,
@@ -93,28 +208,22 @@ class WarpLoad
 
 private:
 
-  /******************************************************************************
+  /*****************************************************************************
    * Algorithmic variants
-   ******************************************************************************/
+   ****************************************************************************/
 
   /// Load helper
   template <WarpLoadAlgorithm _POLICY, int DUMMY>
   struct LoadInternal;
 
 
-  /**
-   * BLOCK_LOAD_DIRECT specialization of load helper
-   */
   template <int DUMMY>
   struct LoadInternal<WARP_LOAD_DIRECT, DUMMY>
   {
-    /// Shared memory storage layout type
-    typedef NullType TempStorage;
+    using TempStorage = NullType;
 
-    /// Linear thread-id
     int linear_tid;
 
-    /// Constructor
     __device__ __forceinline__
     LoadInternal(TempStorage & /*temp_storage*/,
                  int linear_tid)
@@ -123,27 +232,27 @@ private:
 
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
-      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
-      InputT          (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load
+      InputIteratorT  block_itr,
+      InputT          (&items)[ITEMS_PER_THREAD])
     {
       LoadDirectBlocked(linear_tid, block_itr, items);
     }
 
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
-      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
-      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
-      int             valid_items)                    ///< [in] Number of valid items to load
+      InputIteratorT  block_itr,
+      InputT          (&items)[ITEMS_PER_THREAD],
+      int             valid_items)
     {
       LoadDirectBlocked(linear_tid, block_itr, items, valid_items);
     }
 
     template <typename InputIteratorT, typename DefaultT>
     __device__ __forceinline__ void Load(
-      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
-      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
-      int             valid_items,                    ///< [in] Number of valid items to load
-      DefaultT        oob_default)                    ///< [in] Default value to assign out-of-bound items
+      InputIteratorT  block_itr,
+      InputT          (&items)[ITEMS_PER_THREAD],
+      int             valid_items,
+      DefaultT        oob_default)
     {
       LoadDirectBlocked(linear_tid, block_itr, items, valid_items, oob_default);
     }
@@ -153,13 +262,10 @@ private:
   template <int DUMMY>
   struct LoadInternal<WARP_LOAD_STRIPED, DUMMY>
   {
-    /// Shared memory storage layout type
-    typedef NullType TempStorage;
+    using TempStorage = NullType;
 
-    /// Linear thread-id
     int linear_tid;
 
-    /// Constructor
     __device__ __forceinline__
     LoadInternal(TempStorage & /*temp_storage*/,
                  int linear_tid)
@@ -168,17 +274,17 @@ private:
 
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
-      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
-      InputT          (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load{
+      InputIteratorT  block_itr,
+      InputT          (&items)[ITEMS_PER_THREAD])
     {
       LoadDirectStriped<LOGICAL_WARP_THREADS>(linear_tid, block_itr, items);
     }
 
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
-      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
-      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
-      int             valid_items)                    ///< [in] Number of valid items to load
+      InputIteratorT  block_itr,
+      InputT          (&items)[ITEMS_PER_THREAD],
+      int             valid_items)
     {
       LoadDirectStriped<LOGICAL_WARP_THREADS>(linear_tid,
                                               block_itr,
@@ -189,10 +295,10 @@ private:
     template <typename InputIteratorT,
               typename DefaultT>
     __device__ __forceinline__ void Load(
-      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
-      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
-      int             valid_items,                    ///< [in] Number of valid items to load
-      DefaultT        oob_default)                    ///< [in] Default value to assign out-of-bound items
+      InputIteratorT  block_itr,
+      InputT          (&items)[ITEMS_PER_THREAD],
+      int             valid_items,
+      DefaultT        oob_default)
     {
       LoadDirectStriped<LOGICAL_WARP_THREADS>(linear_tid,
                                               block_itr,
@@ -206,13 +312,10 @@ private:
   template <int DUMMY>
   struct LoadInternal<WARP_LOAD_VECTORIZE, DUMMY>
   {
-    /// Shared memory storage layout type
-    typedef NullType TempStorage;
+    using TempStorage = NullType;
 
-    /// Linear thread-id
     int linear_tid;
 
-    /// Constructor
     __device__ __forceinline__
     LoadInternal(TempStorage &/*temp_storage*/,
                  int linear_tid)
@@ -221,8 +324,8 @@ private:
 
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
-      InputT               *block_ptr,                     ///< [in] The thread block's base input iterator for loading from
-      InputT               (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load
+      InputT               *block_ptr,
+      InputT               (&items)[ITEMS_PER_THREAD])
     {
       InternalLoadDirectBlockedVectorized<LOAD_DEFAULT>(linear_tid,
                                                         block_ptr,
@@ -231,8 +334,8 @@ private:
 
     template <typename InputIteratorT>
     __device__ __forceinline__ void Load(
-      const InputT         *block_ptr,                     ///< [in] The thread block's base input iterator for loading from
-      InputT               (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load
+      const InputT         *block_ptr,
+      InputT               (&items)[ITEMS_PER_THREAD])
     {
       InternalLoadDirectBlockedVectorized<LOAD_DEFAULT>(linear_tid,
                                                         block_ptr,
@@ -325,19 +428,19 @@ private:
 
     template <typename InputIteratorT, typename DefaultT>
     __device__ __forceinline__ void Load(
-      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
-      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
-      int             valid_items,                    ///< [in] Number of valid items to load
-      DefaultT        oob_default)                    ///< [in] Default value to assign out-of-bound items
+      InputIteratorT  block_itr,
+      InputT          (&items)[ITEMS_PER_THREAD],
+      int             valid_items,
+      DefaultT        oob_default)
     {
       LoadDirectStriped<LOGICAL_WARP_THREADS>(linear_tid, block_itr, items, valid_items, oob_default);
       WarpExchangeT(temp_storage).StripedToBlocked(items, items);
     }
   };
 
-  /******************************************************************************
+  /*****************************************************************************
    * Type definitions
-   ******************************************************************************/
+   ****************************************************************************/
 
   /// Internal load implementation to use
   using InternalLoad = LoadInternal<ALGORITHM, 0>;
@@ -346,9 +449,9 @@ private:
   using _TempStorage = typename InternalLoad::TempStorage;
 
 
-  /******************************************************************************
+  /*****************************************************************************
    * Utility methods
-   ******************************************************************************/
+   ****************************************************************************/
 
   /// Internal storage allocator
   __device__ __forceinline__ _TempStorage& PrivateStorage()
@@ -358,9 +461,9 @@ private:
   }
 
 
-  /******************************************************************************
+  /*****************************************************************************
    * Thread fields
-   ******************************************************************************/
+   ****************************************************************************/
 
   /// Thread reference to shared storage
   _TempStorage &temp_storage;
@@ -370,20 +473,39 @@ private:
 
 public:
 
-  /// \smemstorage{WarpLoad}
+  /// @smemstorage{WarpLoad}
   struct TempStorage : Uninitialized<_TempStorage> {};
 
+  /*************************************************************************//**
+   * @name Collective constructors
+   ****************************************************************************/
+  //@{
+
+  /**
+   * @brief Collective constructor using a private static allocation of
+   *        shared memory as temporary storage.
+   */
   __device__ __forceinline__
   WarpLoad()
       : temp_storage(PrivateStorage())
       , linear_tid(IS_ARCH_WARP ? LaneId() : (LaneId() % LOGICAL_WARP_THREADS))
   {}
 
+  /**
+   * @brief Collective constructor using the specified memory allocation as
+   *        temporary storage.
+   */
   __device__ __forceinline__
   WarpLoad(TempStorage &temp_storage)
       : temp_storage(temp_storage.Alias())
       , linear_tid(IS_ARCH_WARP ? LaneId() : (LaneId() % LOGICAL_WARP_THREADS))
   {}
+
+  //@}  end member group
+  /*************************************************************************//**
+   * @name Data movement
+   ****************************************************************************/
+  //@{
 
   template <typename InputIteratorT>
   __device__ __forceinline__ void Load(
@@ -414,6 +536,8 @@ public:
     InternalLoad(temp_storage, linear_tid)
       .Load(block_itr, items, valid_items, oob_default);
   }
+
+  //@}  end member group
 };
 
 CUB_NAMESPACE_END

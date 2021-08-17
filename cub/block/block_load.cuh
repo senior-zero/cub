@@ -489,11 +489,13 @@ enum BlockLoadAlgorithm
      * - The utilization of memory transactions (coalescing) remains high until the the
      *   access stride between threads (i.e., the number items per thread) exceeds the
      *   maximum vector load width (typically 4 items or 64B, whichever is lower).
-     * - The following conditions will prevent vectorization and loading will fall back to cub::BLOCK_LOAD_DIRECT:
+     * - The following conditions will prevent vectorization and loading will fall
+     *   back to cub::BLOCK_LOAD_DIRECT:
      *   - \p ITEMS_PER_THREAD is odd
-     *   - The \p InputIteratorTis not a simple pointer type
+     *   - The \p InputIteratorT is not a simple pointer type
      *   - The block input offset is not quadword-aligned
-     *   - The data type \p T is not a built-in primitive or CUDA vector type (e.g., \p short, \p int2, \p double, \p float2, etc.)
+     *   - The data type \p T is not a built-in primitive or CUDA vector type
+     *     (e.g., \p short, \p int2, \p double, \p float2, etc.)
      */
     BLOCK_LOAD_VECTORIZE,
 
