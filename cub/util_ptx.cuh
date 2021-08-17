@@ -431,10 +431,16 @@ __device__ __forceinline__ unsigned int WarpId()
 }
 
 /**
+ * @brief Returns the warp mask for a warp of @p LOGICAL_WARP_THREADS threads
  *
- * @tparam LOGICAL_WARP_THREADS
- * @param warp_id
- * @return
+ * @par
+ * If the number of threads assigned to the virtual warp is not a power of two,
+ * it's assumed that only one virtual warp exists.
+ *
+ * @tparam LOGICAL_WARP_THREADS <b>[optional]</b> The number of threads per
+ *                              "logical" warp (may be less than the number of
+ *                              hardware warp threads).
+ * @param warp_id Id of virtual warp within architectural warp
  */
 template <int LOGICAL_WARP_THREADS,
           int PTX_ARCH = CUB_PTX_ARCH>
