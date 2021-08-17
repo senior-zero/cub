@@ -184,7 +184,7 @@ enum WarpLoadAlgorithm
  *
  *     // Load a segment of consecutive items that are blocked across threads
  *     int thread_data[items_per_thread];
- *     WarpLoadT(temp_storage[warp_id]).Load(input + warp_id * tile_size,
+ *     WarpLoadT(temp_storage[warp_id]).Load(d_data + warp_id * tile_size,
  *                                           thread_data);
  * @endcode
  * @par
@@ -510,6 +510,7 @@ public:
   /**
    * @brief Load a linear segment of items from memory.
    *
+   * @par
    * \smemreuse
    *
    * @par Snippet
@@ -537,7 +538,7 @@ public:
    *
    *     // Load a segment of consecutive items that are blocked across threads
    *     int thread_data[items_per_thread];
-   *     WarpLoadT(temp_storage[warp_id]).Load(input + warp_id * tile_size,
+   *     WarpLoadT(temp_storage[warp_id]).Load(d_data + warp_id * tile_size,
    *                                           thread_data);
    * @endcode
    * @par
@@ -559,6 +560,7 @@ public:
   /**
    * @brief Load a linear segment of items from memory, guarded by range.
    *
+   * @par
    * \smemreuse
    *
    * @par Snippet
@@ -586,7 +588,7 @@ public:
    *
    *     // Load a segment of consecutive items that are blocked across threads
    *     int thread_data[items_per_thread];
-   *     WarpLoadT(temp_storage[warp_id]).Load(input + warp_id * tile_size,
+   *     WarpLoadT(temp_storage[warp_id]).Load(d_data + warp_id * tile_size,
    *                                           thread_data,
    *                                           valid_items);
    * @endcod
@@ -615,6 +617,7 @@ public:
   /**
    * @brief Load a linear segment of items from memory, guarded by range.
    *
+   * @par
    * \smemreuse
    *
    * @par Snippet
@@ -642,7 +645,7 @@ public:
    *
    *     // Load a segment of consecutive items that are blocked across threads
    *     int thread_data[items_per_thread];
-   *     WarpLoadT(temp_storage[warp_id]).Load(input + warp_id * tile_size,
+   *     WarpLoadT(temp_storage[warp_id]).Load(d_data + warp_id * tile_size,
    *                                           thread_data,
    *                                           valid_items,
    *                                           -1);
