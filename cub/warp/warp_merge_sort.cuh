@@ -34,17 +34,72 @@
 
 CUB_NAMESPACE_BEGIN
 
-/**
- * \addtogroup WarpModule
- * @{
- */
 
 /**
+ * @brief The WarpMergeSort class provides methods for sorting items partitioned
+ *        across a CUDA warp using a merge sorting method.
+ * @ingroup WarpModule
  *
- * @tparam KeyT
- * @tparam ValueT
- * @tparam LOGICAL_WARP_THREADS must be a power-of-two (less or equal to 32)
- * @tparam PTX_ARCH
+ * @tparam KeyT Key type
+ * @tparam ITEMS_PER_THREAD The number of items per thread
+ * @tparam LOGICAL_WARP_THREADS <b>[optional]</b> The number of threads per
+ *                              "logical" warp (may be less than the number of
+ *                              hardware warp threads). Default is the warp size
+ *                              of the targeted CUDA compute-capability (e.g.,
+ *                              32 threads for SM86).
+ * @tparam ValueT <b>[optional]</b> Value type (default: cub::NullType,
+ *                which indicates a keys-only sort)
+ * @tparam PTX_ARCH <b>[optional]</b> \ptxversion
+ *
+ * @par Overview
+ *   WarpMergeSort arranges items into ascending order using a comparison
+ *   functor with less-than semantics. Merge sort can handle arbitrary types
+ *   and comparison functors.
+ *
+ * @par A Simple Example
+ * @par
+ * The code snippet below illustrates a sort of 64 integer keys that are
+ * partitioned across 16 threads where each thread owns 4 consecutive items.
+ * @par
+ * @code
+ * #include <cub/cub.cuh>  // or equivalently <cub/warp/warp_merge_sort.cuh>
+ *
+ * struct CustomLess
+ * {
+ *   template <typename DataType>
+ *   __device__ bool operator()(const DataType &lhs, const DataType &rhs)
+ *   {
+ *     return lhs < rhs;
+ *   }
+ * };
+ *
+ * __global__ void ExampleKernel(...)
+ * {
+ *     constexpr int warp_threads = 16;
+ *     constexpr int block_threads = 256;
+ *     constexpr int items_per_thread = 4;
+ *     constexpr int warps_per_block = block_threads / warp_threads;
+ *     const int warp_id = static_cast<int>(threadIdx.x) / warp_threads;
+ *
+ *     // Specialize WarpMergeSort for a virtual warp of 16 threads owning 4 integer items each
+ *     using WarpMergeSortT = cub::WarpMergeSort<int, items_per_thread, warp_threads>;
+ *
+ *     // Allocate shared memory for WarpMergeSort
+ *     __shared__ typename WarpMergeSort::TempStorage temp_storage[warps_per_block];
+ *
+ *     // Obtain a segment of consecutive items that are blocked across threads
+ *     int thread_keys[items_per_thread];
+ *     // ...
+ *
+ *     WarpMergeSort(temp_storage[warp_id]).Sort(thread_data, CustomLess());
+ *     // ...
+ * }
+ * @endcode
+ * @par
+ * Suppose the set of input @p thread_keys across the block of threads is
+ * <tt>{ [0,511,1,510], [2,509,3,508], [4,507,5,506], ..., [254,257,255,256] }</tt>.
+ * The corresponding output @p thread_keys in those threads will be
+ * <tt>{ [0,1,2,3], [4,5,6,7], [8,9,10,11], ..., [508,509,510,511] }</tt>.
  */
 template <
   typename    KeyT,
@@ -97,6 +152,5 @@ private:
   friend BlockMergeSortStrategyT;
 };
 
-/** @} */       // end group WarpModule
 
 CUB_NAMESPACE_END
