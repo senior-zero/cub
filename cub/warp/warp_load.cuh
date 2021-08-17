@@ -507,31 +507,166 @@ public:
    ****************************************************************************/
   //@{
 
+  /**
+   * @brief Load a linear segment of items from memory.
+   *
+   * \smemreuse
+   *
+   * @par Snippet
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/warp/warp_load.cuh>
+   *
+   * __global__ void ExampleKernel(int *d_data, ...)
+   * {
+   *     constexpr int warp_threads = 16;
+   *     constexpr int block_threads = 256;
+   *     constexpr int items_per_thread = 4;
+   *
+   *     // Specialize WarpLoad for a warp of 16 threads owning 4 integer items each
+   *     using WarpLoadT = WarpLoad<int,
+   *                                items_per_thread,
+   *                                cub::WARP_LOAD_TRANSPOSE,
+   *                                warp_threads>;
+   *
+   *     constexpr int warps_in_block = block_threads / warp_threads;
+   *     constexpr int tile_size = items_per_thread * warp_threads;
+   *     const int warp_id = static_cast<int>(threadIdx.x) / warp_threads;
+   *
+   *     // Allocate shared memory for WarpLoad
+   *     __shared__ typename WarpLoadT::TempStorage temp_storage[warps_in_block];
+   *
+   *     // Load a segment of consecutive items that are blocked across threads
+   *     int thread_data[items_per_thread];
+   *     WarpLoadT(temp_storage[warp_id]).Load(input + warp_id * tile_size,
+   *                                           thread_data);
+   * @endcode
+   * @par
+   * Suppose the input @p d_data is <tt>0, 1, 2, 3, 4, 5, ...</tt>.
+   * The set of @p thread_data across the first logical warp of threads in those
+   * threads will be:
+   * <tt>{ [0,1,2,3], [4,5,6,7], ..., [60,61,62,63] }</tt>.
+   *
+   * @param[in] block_itr The thread block's base input iterator for loading from
+   * @param[out] items Data to load
+   */
   template <typename InputIteratorT>
-  __device__ __forceinline__ void Load(
-    InputIteratorT  block_itr,                  ///< [in] The thread block's base input iterator for loading from
-    InputT          (&items)[ITEMS_PER_THREAD]) ///< [out] Data to load
+  __device__ __forceinline__ void Load(InputIteratorT block_itr,
+                                       InputT (&items)[ITEMS_PER_THREAD])
   {
     InternalLoad(temp_storage, linear_tid).Load(block_itr, items);
   }
 
+  /**
+   * @brief Load a linear segment of items from memory, guarded by range.
+   *
+   * \smemreuse
+   *
+   * @par Snippet
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/warp/warp_load.cuh>
+   *
+   * __global__ void ExampleKernel(int *d_data, int valid_items, ...)
+   * {
+   *     constexpr int warp_threads = 16;
+   *     constexpr int block_threads = 256;
+   *     constexpr int items_per_thread = 4;
+   *
+   *     // Specialize WarpLoad for a warp of 16 threads owning 4 integer items each
+   *     using WarpLoadT = WarpLoad<int,
+   *                                items_per_thread,
+   *                                cub::WARP_LOAD_TRANSPOSE,
+   *                                warp_threads>;
+   *
+   *     constexpr int warps_in_block = block_threads / warp_threads;
+   *     constexpr int tile_size = items_per_thread * warp_threads;
+   *     const int warp_id = static_cast<int>(threadIdx.x) / warp_threads;
+   *
+   *     // Allocate shared memory for WarpLoad
+   *     __shared__ typename WarpLoadT::TempStorage temp_storage[warps_in_block];
+   *
+   *     // Load a segment of consecutive items that are blocked across threads
+   *     int thread_data[items_per_thread];
+   *     WarpLoadT(temp_storage[warp_id]).Load(input + warp_id * tile_size,
+   *                                           thread_data,
+   *                                           valid_items);
+   * @endcod
+   * @par
+   * Suppose the input @p d_data is <tt>0, 1, 2, 3, 4, 5, ...</tt> and @p valid_items
+   * is @p 5.
+   * The set of @p thread_data across the first logical warp of threads in those
+   * threads will be:
+   * <tt>{ [0,1,2,3], [4,?,?,?], ..., [?,?,?,?] }</tt> with only the first
+   * two threads being unmasked to load portions of valid data (and other items
+   * remaining unassigned).
+   *
+   * @param[in] block_itr The thread block's base input iterator for loading from
+   * @param[out] items Data to load
+   * @param[in] valid_items Number of valid items to load
+   */
   template <typename InputIteratorT>
-  __device__ __forceinline__ void Load(
-    InputIteratorT  block_itr,                  ///< [in] The thread block's base input iterator for loading from
-    InputT          (&items)[ITEMS_PER_THREAD], ///< [out] Data to load
-    int             valid_items)                ///< [in] Number of valid items to load
+  __device__ __forceinline__ void Load(InputIteratorT block_itr,
+                                       InputT (&items)[ITEMS_PER_THREAD],
+                                       int valid_items)
   {
     InternalLoad(temp_storage, linear_tid).Load(block_itr, items, valid_items);
   }
 
 
+  /**
+   * @brief Load a linear segment of items from memory, guarded by range.
+   *
+   * \smemreuse
+   *
+   * @par Snippet
+   * @code
+   * #include <cub/cub.cuh>   // or equivalently <cub/warp/warp_load.cuh>
+   *
+   * __global__ void ExampleKernel(int *d_data, int valid_items, ...)
+   * {
+   *     constexpr int warp_threads = 16;
+   *     constexpr int block_threads = 256;
+   *     constexpr int items_per_thread = 4;
+   *
+   *     // Specialize WarpLoad for a warp of 16 threads owning 4 integer items each
+   *     using WarpLoadT = WarpLoad<int,
+   *                                items_per_thread,
+   *                                cub::WARP_LOAD_TRANSPOSE,
+   *                                warp_threads>;
+   *
+   *     constexpr int warps_in_block = block_threads / warp_threads;
+   *     constexpr int tile_size = items_per_thread * warp_threads;
+   *     const int warp_id = static_cast<int>(threadIdx.x) / warp_threads;
+   *
+   *     // Allocate shared memory for WarpLoad
+   *     __shared__ typename WarpLoadT::TempStorage temp_storage[warps_in_block];
+   *
+   *     // Load a segment of consecutive items that are blocked across threads
+   *     int thread_data[items_per_thread];
+   *     WarpLoadT(temp_storage[warp_id]).Load(input + warp_id * tile_size,
+   *                                           thread_data,
+   *                                           valid_items,
+   *                                           -1);
+   * @endcod
+   * @par
+   * Suppose the input @p d_data is <tt>0, 1, 2, 3, 4, 5, ...</tt>, @p valid_items
+   * is @p 5, and the out-of-bounds default is @p -1.
+   * The set of @p thread_data across the first logical warp of threads in those
+   * threads will be:
+   * <tt>{ [0,1,2,3], [4,-1,-1,-1], ..., [-1,-1,-1,-1] }</tt> with only the first
+   * two threads being unmasked to load portions of valid data (and other items
+   * are assigned @p -1).
+   *
+   * @param[in] block_itr The thread block's base input iterator for loading from
+   * @param[out] items Data to load
+   * @param[in] valid_items Number of valid items to load
+   * @param[in] oob_default Default value to assign out-of-bound items
+   */
   template <typename InputIteratorT,
             typename DefaultT>
-  __device__ __forceinline__ void Load(
-    InputIteratorT  block_itr,                  ///< [in] The thread block's base input iterator for loading from
-    InputT          (&items)[ITEMS_PER_THREAD], ///< [out] Data to load
-    int             valid_items,                ///< [in] Number of valid items to load
-    DefaultT        oob_default)                ///< [in] Default value to assign out-of-bound items
+  __device__ __forceinline__ void Load(InputIteratorT block_itr,
+                                       InputT (&items)[ITEMS_PER_THREAD],
+                                       int valid_items,
+                                       DefaultT oob_default)
   {
     InternalLoad(temp_storage, linear_tid)
       .Load(block_itr, items, valid_items, oob_default);
