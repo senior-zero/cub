@@ -106,6 +106,17 @@ cudaError_t AliasTemporaries(
 namespace TemporaryStorage
 {
 
+/**
+ * @brief Named memory region of a temporary storage slot
+ *
+ * @par Overview
+ * This class provides a typed wrapper of a temporary slot memory region.
+ * It can be considered as a field in the C++ union. It's only possible to
+ * increase the array size.
+ *
+ * @warning Array lifetime is defined by the lifetime of the associated slot
+ *          It's impossible to grow the array if the layout is already mapped.
+ */
 template <typename T>
 class Array
 {
@@ -133,6 +144,15 @@ public:
     UpdateSlot();
   }
 
+  /**
+   * @brief Increases the number of elements
+   *
+   * @warning This method should be called before temporary storage mapping stage.
+   *
+   * @param[in] new_elements Increases the memory region occupied in the
+   *                         temporary slot to fit up to @p new_elements items
+   *                         of type @p T.
+   */
   __host__ __device__
   void Grow(std::size_t new_elements)
   {
@@ -140,6 +160,12 @@ public:
     UpdateSlot();
   }
 
+  /**
+   * @brief Returns pointer to array
+   *
+   * If the @p elements number is equal to zero, or storage layout isn't mapped
+   * @p nullptr is returned.
+   */
   __host__ __device__
   T *Get() const
   {
@@ -159,6 +185,37 @@ private:
   }
 };
 
+/**
+ * @brief Temporary storage slot that can be considered a C++ union with an
+ *        arbitrary fields count.
+ *
+ * @warning Slot lifetime is defined by the lifetime of the associated layout.
+ *          It's impossible to request new array if layout is already mapped.
+ *
+ * @par A Simple Example
+ * @code
+ * auto slot = temporary_storage.GetSlot(0);
+ *
+ * // Add fields into the slot
+ * auto int_array = slot->GetAlias<int>();
+ * auto double_array = slot->GetAlias<double>(2);
+ * auto empty_array = slot->GetAlias<char>();
+ * // Slot size is defined by double_array size (2 * sizeof(double))
+ *
+ * if (condition)
+ * {
+ *   int_array.Grow(42);
+ *   // Now slot size is defined by int_array size (42 * sizeof(int))
+ * }
+ *
+ * // Temporary storage mapping
+ * // ...
+
+ * int *d_int_array = int_array.Get();
+ * double *d_double_array = double_array.Get();
+ * char *d_empty_array = empty_array.Get(); // Guaranteed to return nullptr
+ * @endcode
+ */
 class Slot
 {
   std::size_t size{};
@@ -173,6 +230,9 @@ public:
   __host__ __device__
   void SetStorage(void *ptr) { pointer = ptr; }
 
+  /**
+   * @brief Returns empty array of type @p T
+   */
   template <typename T>
   __host__ __device__
   Array<T> GetAlias()
@@ -180,6 +240,9 @@ public:
     return Array<T>(pointer, size);
   }
 
+  /**
+   * @brief Returns an array of type @p T and length @p elements
+   */
   template <typename T>
   __host__ __device__
   Array<T> GetAlias(std::size_t elements)
@@ -188,6 +251,43 @@ public:
   }
 };
 
+/**
+ * @brief Temporary storage layout represents a structure with
+ *        @p SlotsCount union-like fields
+ *
+ * @par A Simple Example
+ * @code
+ * cub::TemporaryStorage::Layout<3> temporary_storage;
+ *
+ * auto slot_0 = temporary_storage.GetSlot(0);
+ * auto slot_1 = temporary_storage.GetSlot(1);
+ *
+ * // Add fields into the first slot
+ * auto int_array = slot_1->GetAlias<int>(1);
+ * auto double_array = slot_1->GetAlias<double>(2);
+ *
+ * // Add fields into the second slot
+ * auto char_array = slot_2->GetAlias<char>();
+ *
+ * // The third slot is empty
+ *
+ * // Temporary storage mapping
+ * if (d_temp_storage == nullptr)
+ * {
+ *   temp_storage_bytes = temporary_storage.GetSize();
+ *   return;
+ * }
+ * else
+ * {
+ *   temporary_storage.MapToBuffer(d_temp_storage, temp_storage_bytes);
+ * }
+ *
+ * // Use pointers
+ * int *d_int_array = int_array.Get();
+ * double *d_double_array = double_array.Get();
+ * char *d_char_array = char_array.Get();
+ * @endcode
+ */
 template <int SlotsCount>
 class Layout
 {
@@ -210,6 +310,9 @@ public:
     return nullptr;
   }
 
+  /**
+   * @brief Returns required temporary storage size in bytes
+   */
   __host__ __device__
   std::size_t GetSize()
   {
@@ -228,13 +331,15 @@ public:
     return temp_storage_bytes;
   }
 
+  /**
+   * @brief Maps the layout to the temporary storage buffer.
+   */
   __host__ __device__
   cudaError_t MapToBuffer(void *d_temp_storage, std::size_t temp_storage_bytes)
   {
-    cudaError_t error = cudaSuccess;
-
     PrepareInterface();
 
+    cudaError_t error = cudaSuccess;
     if ((error = AliasTemporaries(d_temp_storage,
                                   temp_storage_bytes,
                                   pointers,
