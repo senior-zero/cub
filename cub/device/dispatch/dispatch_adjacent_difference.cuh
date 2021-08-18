@@ -184,8 +184,9 @@ struct DispatchAdjacentDifference : public SelectedPolicy
 
     do
     {
-      OffsetT tile_size = AdjacentDifferencePolicyT::ITEMS_PER_TILE;
-      OffsetT num_tiles = cub::DivideAndRoundUp(num_items, tile_size);
+      const unsigned int tile_size = AdjacentDifferencePolicyT::ITEMS_PER_TILE;
+      const unsigned int num_tiles =
+        static_cast<unsigned int>(cub::DivideAndRoundUp(num_items, tile_size));
 
       int shmem_size = AgentDifferenceT::SHARED_MEMORY_SIZE;
 

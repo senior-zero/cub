@@ -141,12 +141,10 @@ struct AgentDifference
 
     if (ReadLeft)
     {
-      InputT input_prev[ITEMS_PER_THREAD];
-
       if (IS_FIRST_TILE)
       {
         BlockAdjacentDifferenceT(temp_storage.adjacent_difference)
-          .SubtractLeft(output, input, input_prev, flag_op);
+          .SubtractLeft(output, input, flag_op);
       }
       else
       {
@@ -154,7 +152,7 @@ struct AgentDifference
                                          : *(input_it + tile_base - 1);
 
         BlockAdjacentDifferenceT(temp_storage.adjacent_difference)
-          .SubtractLeft(output, input, input_prev, flag_op, tile_prev_input);
+          .SubtractLeft(output, input, flag_op, tile_prev_input);
       }
     }
     else

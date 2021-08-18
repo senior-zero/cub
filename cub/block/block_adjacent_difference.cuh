@@ -41,7 +41,7 @@ CUB_NAMESPACE_BEGIN
 
 /**
  * \brief BlockAdjacentDifference provides [<em>collective</em>](index.html#sec0) methods for computing the differences of adjacent elements partitioned across a CUDA thread block.
- * \ingroup SingleModule
+ * \ingroup BlockModule
  *
  * \par Overview
  * - BlockAdjacentDifference calculates the differences of adjacent elements in
@@ -94,12 +94,10 @@ CUB_NAMESPACE_BEGIN
  *
  *     // Collectively compute adjacent_difference
  *     int result[4];
- *     int thread_preds[4];
  *
  *     BlockAdjacentDifferenceT(temp_storage).SubtractLeft(
  *         result,
  *         thread_data,
- *         thread_preds,
  *         CustomDifference());
  *
  * \endcode
@@ -305,7 +303,6 @@ public:
 
     /**
      * \brief Subtracts the left element of each adjacent pair of elements partitioned across a CUDA thread block.
-     * \ingroup SingleModule
      *
      * \par Snippet
      * The code snippet below illustrates how to use \p BlockAdjacentDifference to
@@ -339,12 +336,10 @@ public:
      *
      *     // Collectively compute adjacent_difference
      *     int result[4];
-     *     int thread_preds[4];
      *
      *     BlockAdjacentDifferenceT(temp_storage).SubtractLeft(
      *         result,
      *         thread_data,
-     *         thread_preds,
      *         CustomDifference());
      *
      * \endcode
@@ -360,13 +355,18 @@ public:
     __device__ __forceinline__ void
     SubtractLeft(OutputType (&output)[ITEMS_PER_THREAD], ///< [out] Calling thread's adjacent difference result
                  T (&input)[ITEMS_PER_THREAD],           ///< [in] Calling thread's input items
-                 T (&preds)[ITEMS_PER_THREAD],           ///< [out] Calling thread's predecessor items
                  DifferenceOpT difference_op)            ///< [in] Binary difference operator
     {
       // Share last item
       temp_storage.last_items[linear_tid] = input[ITEMS_PER_THREAD - 1];
 
       CTA_SYNC();
+
+      #pragma unroll
+      for (int item = ITEMS_PER_THREAD - 1; item > 0; item--)
+      {
+        output[item] = difference_op(input[item], input[item - 1]);
+      }
 
       if (linear_tid == 0)
       {
@@ -375,21 +375,13 @@ public:
       }
       else
       {
-        preds[0]  = temp_storage.last_items[linear_tid - 1];
-        output[0] = difference_op(input[0], preds[0]);
-      }
-
-      #pragma unroll
-      for (int item = 1; item < ITEMS_PER_THREAD; item++)
-      {
-        preds[item] = input[item - 1];
-        output[item] = difference_op(input[item], preds[item]);
+        output[0] = difference_op(input[0],
+                                  temp_storage.last_items[linear_tid - 1]);
       }
     }
 
     /**
      * \brief Subtracts the left element of each adjacent pair of elements partitioned across a CUDA thread block.
-     * \ingroup SingleModule
      *
      * \par Snippet
      * The code snippet below illustrates how to use \p BlockAdjacentDifference to
@@ -423,7 +415,6 @@ public:
      *
      *     // Collectively compute adjacent_difference
      *     int result[4];
-     *     int thread_preds[4];
      *
      *     // The last item in the previous tile:
      *     int tile_predecessor_item = ...;
@@ -431,7 +422,6 @@ public:
      *     BlockAdjacentDifferenceT(temp_storage).SubtractLeft(
      *         result,
      *         thread_data,
-     *         thread_preds,
      *         CustomDifference(),
      *         tile_predecessor_item);
      *
@@ -448,7 +438,6 @@ public:
     __device__ __forceinline__ void
     SubtractLeft(OutputT         (&output)[ITEMS_PER_THREAD],    ///< [out] Calling thread's adjacent difference result
                  T               (&input)[ITEMS_PER_THREAD],     ///< [in] Calling thread's input items
-                 T               (&preds)[ITEMS_PER_THREAD],     ///< [out] Calling thread's predecessor items
                  DifferenceOpT   difference_op,                  ///< [in] Binary difference operator
                  T               tile_predecessor_item)          ///< [in] <b>[<em>thread</em><sub>0</sub> only]</b> item which is going to be subtracted from the first tile item (<tt>input<sub>0</sub></tt> from <em>thread</em><sub>0</sub>).
     {
@@ -457,23 +446,26 @@ public:
 
       CTA_SYNC();
 
-      // Set flag for first thread-item
-      preds[0] = (linear_tid == 0) ? tile_predecessor_item : // First thread
-                   temp_storage.last_items[linear_tid - 1];
-
-      output[0] = difference_op(input[0], preds[0]);
-
       #pragma unroll
-      for (int item = 1; item < ITEMS_PER_THREAD; item++)
+      for (int item = ITEMS_PER_THREAD - 1; item > 0; item--)
       {
-        preds[item] = input[item - 1];
-        output[item] = difference_op(input[item], preds[item]);
+        output[item] = difference_op(input[item], input[item - 1]);
+      }
+
+      // Set flag for first thread-item
+      if (linear_tid == 0)
+      {
+        output[0] = difference_op(input[0], tile_predecessor_item);
+      }
+      else
+      {
+        output[0] = difference_op(input[0],
+                                  temp_storage.last_items[linear_tid - 1]);
       }
     }
 
     /**
      * \brief Subtracts the right element of each adjacent pair of elements partitioned across a CUDA thread block.
-     * \ingroup SingleModule
      *
      * \par Snippet
      * The code snippet below illustrates how to use \p BlockAdjacentDifference to
@@ -555,7 +547,6 @@ public:
 
     /**
      * \brief Subtracts the right element of each adjacent pair in range of elements partitioned across a CUDA thread block.
-     * \ingroup SingleModule
      *
      * \par Snippet
      * The code snippet below illustrates how to use \p BlockAdjacentDifference to

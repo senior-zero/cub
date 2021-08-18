@@ -119,12 +119,9 @@ __global__ void BlockAdjacentDifferenceLastTileTestKernel(DataType *data,
 
   if (ReadLeft)
   {
-    DataType thread_preds[ItemsPerThread];
-
     BlockAdjacentDifferenceT(temp_storage).SubtractLeft(
       thread_result,
       thread_data,
-      thread_preds,
       CustomDifference());
   }
   else
@@ -175,12 +172,9 @@ __global__ void BlockAdjacentDifferenceTestKernel(DataType *data,
 
   if (ReadLeft)
   {
-    DataType thread_preds[ItemsPerThread];
-
     BlockAdjacentDifferenceT(temp_storage)
       .SubtractLeft(thread_result,
                     thread_data,
-                    thread_preds,
                     CustomDifference(),
                     oob_default);
   }

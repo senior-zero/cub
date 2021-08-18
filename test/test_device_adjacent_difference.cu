@@ -264,7 +264,8 @@ void test_inplace(OffsetT elements)
 
     {
       const auto target_value = static_cast<ValueT>(-1);
-      const OffsetT actual_count = thrust::count(input.begin(), input.end() - 1, target_value);
+      const OffsetT actual_count = static_cast<OffsetT>(
+        thrust::count(input.begin(), input.end() - 1, target_value));
       const OffsetT target_count = elements - 1;
 
       AssertEquals(actual_count, target_count);
@@ -288,7 +289,8 @@ void test_inplace(OffsetT elements)
 
     {
       const auto target_value = ValueT(1);
-      const OffsetT actual_count = thrust::count(input.begin(), input.end() - 1, target_value);
+      const OffsetT actual_count = static_cast<OffsetT>(
+        thrust::count(input.begin(), input.end() - 1, target_value));
       const OffsetT target_count = elements - 1;
 
       AssertEquals(actual_count, target_count);
