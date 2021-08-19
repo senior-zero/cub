@@ -32,7 +32,6 @@
 // Ensure printing of CUDA runtime errors to console
 #define CUB_STDERR
 
-#include <stdio.h>
 #include <limits>
 #include <typeinfo>
 #include <memory>
@@ -92,7 +91,7 @@ struct CustomType
   {}
 
   __device__ __host__ CustomType(unsigned int key, unsigned int value)
-    : key(key) // overflow
+    : key(key)
     , value(value)
   {}
 };
@@ -704,9 +703,9 @@ void Test(bool inplace,
 
 template <unsigned int ItemsPerThread,
           unsigned int ThreadsInBlock>
-void TestBaseCase(bool inplace,
-                  unsigned int num_items,
-                  thrust::device_vector<CustomType> &d_data)
+void TestCustomType(bool inplace,
+                    unsigned int num_items,
+                    thrust::device_vector<CustomType> &d_data)
 {
   thrust::tabulate(d_data.begin(), d_data.end(), IntToCustomType{1});
 
@@ -814,7 +813,7 @@ void TestCustomType(bool inplace)
   }
 
   d_values.resize(tile_size);
-  TestBaseCase<ItemsPerThread, ThreadsInBlock>(inplace, tile_size, d_values);
+  TestCustomType<ItemsPerThread, ThreadsInBlock>(inplace, tile_size, d_values);
 }
 
 template <unsigned int ItemsPerThread, unsigned int ThreadsPerBlock>
