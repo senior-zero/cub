@@ -40,9 +40,12 @@
 #include <cub/util_allocator.cuh>
 #include <cub/block/block_adjacent_difference.cuh>
 
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
 #include <thrust/random.h>
+#include <thrust/mismatch.h>
+#include <thrust/tabulate.h>
 #include <thrust/sequence.h>
 #include <thrust/shuffle.h>
 #include <thrust/sort.h>
@@ -50,6 +53,33 @@
 #include "test_util.h"
 
 using namespace cub;
+
+
+/**
+ * \brief Generates integer sequence \f$S_n=i(i-1)/2\f$.
+ *
+ * The adjacent difference of this sequence produce consecutive numbers:
+ * \f[
+ *   p = \frac{i(i - 1)}{2} \\
+ *   n = \frac{(i + 1) i}{2} \\
+ *   n - p = i \\
+ *   \frac{(i + 1) i}{2} - \frac{i (i - 1)}{2} = i \\
+ *   (i + 1) i - i (i - 1) = 2 i \\
+ *   (i + 1) - (i - 1) = 2 \\
+ *   2 = 2
+ * \f]
+ */
+template <typename DestT>
+struct TestSequenceGenerator
+{
+  template <typename SourceT>
+  __device__ __host__ DestT operator()(SourceT index) const
+  {
+    return static_cast<DestT>(index * (index - 1) / SourceT(2));
+  }
+};
+
+
 
 struct CustomType
 {
@@ -389,15 +419,32 @@ void BlockAdjacentDifferenceInplaceTest(DataType *data,
 }
 
 
-template <
-  typename DataType,
-  unsigned int ItemsPerThread,
-  unsigned int ThreadsInBlock>
+template <typename FirstIteratorT,
+          typename SecondOperatorT>
+bool CheckResult(FirstIteratorT first_begin,
+                 FirstIteratorT first_end,
+                 SecondOperatorT second_begin)
+{
+  auto err = thrust::mismatch(first_begin, first_end, second_begin);
+
+  if (err.first != first_end)
+  {
+    return false;
+  }
+
+  return true;
+}
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock>
 void TestLastTile(bool inplace,
                   unsigned int num_items,
                   thrust::device_vector<DataType> &d_data)
 {
-  thrust::sequence(d_data.begin(), d_data.end());
+  thrust::tabulate(d_data.begin(),
+                   d_data.end(),
+                   TestSequenceGenerator<DataType>{});
 
   constexpr bool read_left = true;
   constexpr bool read_right = false;
@@ -414,23 +461,30 @@ void TestLastTile(bool inplace,
   else
   {
     BlockAdjacentDifferenceLastTileTest<DataType,
-      ItemsPerThread,
-      ThreadsInBlock,
-      read_left>(thrust::raw_pointer_cast(
+                                        ItemsPerThread,
+                                        ThreadsInBlock,
+                                        read_left>(thrust::raw_pointer_cast(
                                                      d_data.data()),
                                                    num_items);
   }
 
   {
-    const std::size_t expected_count = num_items - 1;
-    const std::size_t actual_count =
-      thrust::count(d_data.begin(), d_data.end(), static_cast<DataType>(1));
+    using CountingIteratorT =
+      typename thrust::counting_iterator<DataType,
+        thrust::use_default,
+        std::size_t,
+        std::size_t>;
 
-    AssertEquals(expected_count, actual_count);
+    AssertTrue(CheckResult(d_data.begin() + 1,
+                           d_data.begin() + num_items,
+                           CountingIteratorT(DataType{0})));
     AssertEquals(d_data.front(), DataType{0});
   }
 
-  thrust::sequence(d_data.begin(), d_data.end());
+
+  thrust::tabulate(d_data.begin(),
+                   d_data.end(),
+                   TestSequenceGenerator<DataType>{});
 
   if (inplace)
   {
@@ -452,13 +506,15 @@ void TestLastTile(bool inplace,
   }
 
   {
-    AssertEquals(thrust::count(d_data.begin(), d_data.end() - 1,
-                               static_cast<DataType>(-1)), num_items - 1);
+    thrust::device_vector<DataType> reference(num_items);
+    thrust::sequence(reference.begin(),
+                     reference.end(),
+                     static_cast<DataType>(0),
+                     static_cast<DataType>(-1));
 
-    const auto expected_value = static_cast<DataType>(num_items - 1);
-    const DataType actual_value = d_data.back();
-
-    AssertEquals(actual_value, expected_value);
+    AssertTrue(CheckResult(d_data.begin(),
+                           d_data.begin() + num_items - 1,
+                           reference.begin()));
   }
 }
 
