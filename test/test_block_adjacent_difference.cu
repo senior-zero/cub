@@ -515,6 +515,8 @@ void TestLastTile(bool inplace,
     AssertTrue(CheckResult(d_data.begin(),
                            d_data.begin() + num_items - 1,
                            reference.begin()));
+    AssertEquals(d_data[num_items - 1],
+                 TestSequenceGenerator<DataType>{}(num_items - 1));
   }
 }
 
@@ -616,13 +618,15 @@ void TestLastTile(bool inplace,
 }
 
 template <typename DataType,
-  unsigned int ItemsPerThread,
-  unsigned int ThreadsInBlock>
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock>
 void Test(bool inplace,
           unsigned int num_items,
           thrust::device_vector<DataType> &d_data)
 {
-  thrust::sequence(d_data.begin(), d_data.end(), DataType{1});
+  thrust::tabulate(d_data.begin(),
+                   d_data.end(),
+                   TestSequenceGenerator<DataType>{});
 
   constexpr bool read_left  = true;
   constexpr bool read_right = false;
@@ -640,23 +644,29 @@ void Test(bool inplace,
   else
   {
     BlockAdjacentDifferenceTest<DataType,
-      ItemsPerThread,
-      ThreadsInBlock,
-      read_left>(thrust::raw_pointer_cast(
+                                ItemsPerThread,
+                                ThreadsInBlock,
+                                read_left>(thrust::raw_pointer_cast(
                                              d_data.data()),
                                            num_items,
                                            DataType{0});
   }
 
   {
-    const std::size_t expected_count = num_items;
-    const std::size_t actual_count =
-      thrust::count(d_data.begin(), d_data.end(), DataType{1});
+    using CountingIteratorT =
+    typename thrust::counting_iterator<DataType,
+      thrust::use_default,
+      std::size_t,
+      std::size_t>;
 
-    AssertEquals(expected_count, actual_count);
+    AssertTrue(CheckResult(d_data.begin() + 1,
+                           d_data.begin() + num_items,
+                           CountingIteratorT(DataType{0})));
   }
 
-  thrust::sequence(d_data.begin(), d_data.end());
+  thrust::tabulate(d_data.begin(),
+                   d_data.end(),
+                   TestSequenceGenerator<DataType>{});
 
   if (inplace)
   {
@@ -680,11 +690,15 @@ void Test(bool inplace,
   }
 
   {
-    const std::size_t expected_count = num_items;
-    const std::size_t actual_count =
-      thrust::count(d_data.begin(), d_data.end(), static_cast<DataType>(-1));
+    thrust::device_vector<DataType> reference(num_items);
+    thrust::sequence(reference.begin(),
+                     reference.end(),
+                     static_cast<DataType>(0),
+                     static_cast<DataType>(-1));
 
-    AssertEquals(expected_count, actual_count);
+    AssertTrue(CheckResult(d_data.begin(),
+                           d_data.begin() + num_items - 1,
+                           reference.begin()));
   }
 }
 
