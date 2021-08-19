@@ -150,7 +150,7 @@ template <typename DataType,
           bool ReadLeft = false>
 __global__ void BlockAdjacentDifferenceTestKernel(DataType *data,
                                                   unsigned int valid_items,
-                                                  DataType oob_default)
+                                                  DataType neighbour_tile_value)
 {
   using BlockAdjacentDifferenceT =
     cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
@@ -176,7 +176,7 @@ __global__ void BlockAdjacentDifferenceTestKernel(DataType *data,
       .SubtractLeft(thread_result,
                     thread_data,
                     CustomDifference(),
-                    oob_default);
+                    neighbour_tile_value);
   }
   else
   {
@@ -184,7 +184,7 @@ __global__ void BlockAdjacentDifferenceTestKernel(DataType *data,
       .SubtractRight(thread_result,
                      thread_data,
                      CustomDifference(),
-                     oob_default);
+                     neighbour_tile_value);
   }
 
   for (unsigned int item = 0; item < ItemsPerThread; item++)
@@ -220,13 +220,13 @@ template <typename DataType,
           bool ReadLeft = false>
 void BlockAdjacentDifferenceTest(DataType *data,
                                  unsigned int valid_items,
-                                 DataType oob_default)
+                                 DataType neighbour_tile_value)
 {
   BlockAdjacentDifferenceTestKernel<DataType,
                                     ThreadsInBlock,
                                     ItemsPerThread,
                                     ReadLeft>
-    <<<1, ThreadsInBlock>>>(data, valid_items, oob_default);
+    <<<1, ThreadsInBlock>>>(data, valid_items, neighbour_tile_value);
 
   CubDebugExit(cudaPeekAtLastError());
   CubDebugExit(cudaDeviceSynchronize());

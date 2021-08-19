@@ -354,7 +354,7 @@ public:
               typename DifferenceOpT>
     __device__ __forceinline__ void
     SubtractLeft(OutputType (&output)[ITEMS_PER_THREAD], ///< [out] Calling thread's adjacent difference result
-                 T (&input)[ITEMS_PER_THREAD],           ///< [in] Calling thread's input items
+                 T (&input)[ITEMS_PER_THREAD],           ///< [in] Calling thread's input items (may be aliased to \p output)
                  DifferenceOpT difference_op)            ///< [in] Binary difference operator
     {
       // Share last item
@@ -437,7 +437,7 @@ public:
               typename DifferenceOpT>
     __device__ __forceinline__ void
     SubtractLeft(OutputT         (&output)[ITEMS_PER_THREAD],    ///< [out] Calling thread's adjacent difference result
-                 T               (&input)[ITEMS_PER_THREAD],     ///< [in] Calling thread's input items
+                 T               (&input)[ITEMS_PER_THREAD],     ///< [in] Calling thread's input items (may be aliased to \p output)
                  DifferenceOpT   difference_op,                  ///< [in] Binary difference operator
                  T               tile_predecessor_item)          ///< [in] <b>[<em>thread</em><sub>0</sub> only]</b> item which is going to be subtracted from the first tile item (<tt>input<sub>0</sub></tt> from <em>thread</em><sub>0</sub>).
     {
@@ -521,7 +521,7 @@ public:
     typename DifferenceOpT>
     __device__ __forceinline__ void
     SubtractRight(OutputT       (&output)[ITEMS_PER_THREAD],     ///< [out] Calling thread's adjacent difference result
-                  T             (&input)[ITEMS_PER_THREAD],      ///< [in] Calling thread's input items
+                  T             (&input)[ITEMS_PER_THREAD],      ///< [in] Calling thread's input items (may be aliased to \p output)
                   DifferenceOpT difference_op,                   ///< [in] Binary difference operator
                   T             tile_successor_item)             ///< [in] <b>[<em>thread</em><sub><tt>BLOCK_THREADS</tt>-1</sub> only]</b> item which is going to be subtracted from the last tile item (<tt>input</tt><sub><em>ITEMS_PER_THREAD</em>-1</sub> from <em>thread</em><sub><em>BLOCK_THREADS</em>-1</sub>).
     {
@@ -535,14 +535,14 @@ public:
                            ? tile_successor_item // Last thread
                            : temp_storage.first_items[linear_tid + 1];
 
-      output[ITEMS_PER_THREAD - 1] =
-        difference_op(input[ITEMS_PER_THREAD - 1], successor_item);
-
       #pragma unroll
       for (int item = 0; item < ITEMS_PER_THREAD - 1; item++)
       {
         output[item] = difference_op(input[item], input[item + 1]);
       }
+
+      output[ITEMS_PER_THREAD - 1] =
+        difference_op(input[ITEMS_PER_THREAD - 1], successor_item);
     }
 
     /**
@@ -599,7 +599,7 @@ public:
               typename DifferenceOpT>
     __device__ __forceinline__ void
     SubtractRightPartialTile(OutputT       (&output)[ITEMS_PER_THREAD],     ///< [out] Calling thread's adjacent difference result
-                             T             (&input)[ITEMS_PER_THREAD],      ///< [in] Calling thread's input items
+                             T             (&input)[ITEMS_PER_THREAD],      ///< [in] Calling thread's input items (may be aliased to \p output)
                              DifferenceOpT difference_op,                   ///< [in] Binary difference operator
                              int           valid_items)                     ///< [in] Number of valid items in thread block
     {
@@ -610,15 +610,15 @@ public:
 
       if ((linear_tid + 1) * ITEMS_PER_THREAD < valid_items)
       {
-        output[ITEMS_PER_THREAD - 1] =
-          difference_op(input[ITEMS_PER_THREAD - 1],
-                  temp_storage.first_items[linear_tid + 1]);
-
         #pragma unroll
         for (int item = 0; item < ITEMS_PER_THREAD - 1; item++)
         {
            output[item] = difference_op(input[item], input[item + 1]);
         }
+
+        output[ITEMS_PER_THREAD - 1] =
+          difference_op(input[ITEMS_PER_THREAD - 1],
+                        temp_storage.first_items[linear_tid + 1]);
       }
       else
       {
