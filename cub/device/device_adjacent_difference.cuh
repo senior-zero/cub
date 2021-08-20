@@ -31,6 +31,8 @@
 #include "../util_namespace.cuh"
 #include "dispatch/dispatch_adjacent_difference.cuh"
 
+#include <limits>
+
 
 CUB_NAMESPACE_BEGIN
 
@@ -88,6 +90,63 @@ CUB_NAMESPACE_BEGIN
  */
 struct DeviceAdjacentDifference
 {
+private:
+  template <bool in_place,
+            bool read_left,
+            typename InputIteratorT,
+            typename OutputIteratorT,
+            typename DifferenceOpT>
+  static CUB_RUNTIME_FUNCTION cudaError_t
+  AdjacentDifference(void *d_temp_storage,
+                     std::size_t &temp_storage_bytes,
+                     InputIteratorT d_input,
+                     OutputIteratorT d_output,
+                     std::size_t num_items,
+                     DifferenceOpT difference_op,
+                     cudaStream_t stream    = 0,
+                     bool debug_synchronous = false)
+  {
+    if (num_items <= std::numeric_limits<std::uint32_t>::max())
+    {
+      using OffsetT = std::uint32_t;
+      using DispatchT = DispatchAdjacentDifference<InputIteratorT,
+                                                   OutputIteratorT,
+                                                   DifferenceOpT,
+                                                   OffsetT,
+                                                   in_place,
+                                                   read_left>;
+
+      return DispatchT::Dispatch(d_temp_storage,
+                                 temp_storage_bytes,
+                                 d_input,
+                                 d_output,
+                                 static_cast<OffsetT>(num_items),
+                                 difference_op,
+                                 stream,
+                                 debug_synchronous);
+    }
+    else
+    {
+      using OffsetT = std::uint64_t;
+      using DispatchT = DispatchAdjacentDifference<InputIteratorT,
+                                                   OutputIteratorT,
+                                                   DifferenceOpT,
+                                                   OffsetT,
+                                                   in_place,
+                                                   read_left>;
+
+      return DispatchT::Dispatch(d_temp_storage,
+                                 temp_storage_bytes,
+                                 d_input,
+                                 d_output,
+                                 static_cast<OffsetT>(num_items),
+                                 difference_op,
+                                 stream,
+                                 debug_synchronous);
+    }
+  }
+
+public:
   /**
    * \brief Subtracts the left element of each adjacent pair of elements residing within device-accessible memory.
    * \ingroup SingleModule
@@ -138,40 +197,31 @@ struct DeviceAdjacentDifference
    *         and the return type of <tt>x - y</tt> is convertible to a type in \p OutputIteratorT's set of \c value_types.
    * \tparam OutputIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
    * \tparam DifferenceOpT's \c result_type is convertible to a type in \p OutputIteratorT's set of \c value_types.
-   * \tparam OffsetT is an integer type for global offsets.
    */
   template <typename InputIteratorT,
             typename OutputIteratorT,
-            typename DifferenceOpT,
-            typename OffsetT>
+            typename DifferenceOpT>
   static CUB_RUNTIME_FUNCTION cudaError_t
   SubtractLeftCopy(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
                    std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
                    InputIteratorT d_input,          ///< [in] Pointer to the input sequence
                    OutputIteratorT d_output,        ///< [out] Pointer to the output sequence
-                   OffsetT num_items,               ///< [in] Number of items in the input sequence
+                   std::size_t num_items,           ///< [in] Number of items in the input sequence
                    DifferenceOpT difference_op,     ///< [in] The binary function used to compute differences.
                    cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
                    bool debug_synchronous = false)  ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
   {
     constexpr bool in_place = false;
     constexpr bool read_left = true;
-    using DispatchAdjacentDifferenceT =
-      DispatchAdjacentDifference<InputIteratorT,
-                                 OutputIteratorT,
-                                 DifferenceOpT,
-                                 OffsetT,
-                                 in_place,
-                                 read_left>;
 
-    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
-                                                 temp_storage_bytes,
-                                                 d_input,
-                                                 d_output,
-                                                 num_items,
-                                                 difference_op,
-                                                 stream,
-                                                 debug_synchronous);
+    return AdjacentDifference<in_place, read_left>(d_temp_storage,
+                                                   temp_storage_bytes,
+                                                   d_input,
+                                                   d_output,
+                                                   num_items,
+                                                   difference_op,
+                                                   stream,
+                                                   debug_synchronous);
   }
 
   /**
@@ -214,38 +264,28 @@ struct DeviceAdjacentDifference
    *         and \p InputIteratorT's \c value_type is convertible to a type in \p OutputIteratorT's set of \c value_types,
    *         and the return type of <tt>x - y</tt> is convertible to a type in \p OutputIteratorT's set of \c value_types.
    * \tparam OutputIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
-   * \tparam OffsetT is an integer type for global offsets.
    */
   template <typename InputIteratorT,
-            typename OutputIteratorT,
-            typename OffsetT>
+            typename OutputIteratorT>
   static CUB_RUNTIME_FUNCTION cudaError_t
   SubtractLeftCopy(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
                    std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
                    InputIteratorT d_input,          ///< [in] Pointer to the input sequence
                    OutputIteratorT d_output,        ///< [out] Pointer to the output sequence
-                   OffsetT num_items,               ///< [in] Number of items in the input sequence
+                   std::size_t num_items,           ///< [in] Number of items in the input sequence
                    cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
                    bool debug_synchronous = false)  ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
   {
     constexpr bool in_place = false;
     constexpr bool read_left = true;
-    using DispatchAdjacentDifferenceT =
-      DispatchAdjacentDifference<InputIteratorT,
-                                 OutputIteratorT,
-                                 Difference,
-                                 OffsetT,
-                                 in_place,
-                                 read_left>;
-
-    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
-                                                 temp_storage_bytes,
-                                                 d_input,
-                                                 d_output,
-                                                 num_items,
-                                                 Difference(),
-                                                 stream,
-                                                 debug_synchronous);
+    return AdjacentDifference<in_place, read_left>(d_temp_storage,
+                                                   temp_storage_bytes,
+                                                   d_input,
+                                                   d_output,
+                                                   num_items,
+                                                   Difference{},
+                                                   stream,
+                                                   debug_synchronous);
   }
 
   /**
@@ -296,41 +336,33 @@ struct DeviceAdjacentDifference
    * \endcode
    *
    * \tparam RandomAccessIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
-   *         \p RandomAccessIteratorT is mutable. If \c x and \c y are objects of \p RandomAccessIteratorT's \c value_type, and \c x - \c y is defined,
-   *         then the return type of <tt>x - y</tt> should be convertible to a type in \p RandomAccessIteratorT's set of \c value_types.
+   *                               \p RandomAccessIteratorT is mutable. If \c x and \c y are objects of \p RandomAccessIteratorT's \c value_type,
+   *                               and \c x - \c y is defined, then the return type of <tt>x - y</tt> should be convertible to a type in
+   *                               \p RandomAccessIteratorT's set of \c value_types.
    * \tparam DifferenceOpT's \c result_type is convertible to a type in \p RandomAccessIteratorT's set of \c value_types.
-   * \tparam OffsetT is an integer type for global offsets.
    */
   template <typename RandomAccessIteratorT,
-            typename DifferenceOpT,
-            typename OffsetT>
+            typename DifferenceOpT>
   static CUB_RUNTIME_FUNCTION cudaError_t
   SubtractLeft(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
                std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
                RandomAccessIteratorT d_input,   ///< [in,out] Pointer to the input sequence
-               OffsetT num_items,               ///< [in] Number of items in the input sequence
+               std::size_t num_items,           ///< [in] Number of items in the input sequence
                DifferenceOpT difference_op,     ///< [in] The binary function used to compute differences.
                cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
                bool debug_synchronous = false)  ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
   {
     constexpr bool in_place = true;
     constexpr bool read_left = true;
-    using DispatchAdjacentDifferenceT =
-      DispatchAdjacentDifference<RandomAccessIteratorT,
-                                 RandomAccessIteratorT,
-                                 DifferenceOpT,
-                                 OffsetT,
-                                 in_place,
-                                 read_left>;
 
-    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
-                                                 temp_storage_bytes,
-                                                 d_input,
-                                                 d_input,
-                                                 num_items,
-                                                 difference_op,
-                                                 stream,
-                                                 debug_synchronous);
+    return AdjacentDifference<in_place, read_left>(d_temp_storage,
+                                                   temp_storage_bytes,
+                                                   d_input,
+                                                   d_input,
+                                                   num_items,
+                                                   difference_op,
+                                                   stream,
+                                                   debug_synchronous);
   }
 
   /**
@@ -372,38 +404,30 @@ struct DeviceAdjacentDifference
    * \endcode
    *
    * \tparam RandomAccessIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
-   *         \p RandomAccessIteratorT is mutable. If \c x and \c y are objects of \p RandomAccessIteratorT's \c value_type, and \c x - \c y is defined,
-   *         then the return type of <tt>x - y</tt> should be convertible to a type in \p RandomAccessIteratorT's set of \c value_types.
-   * \tparam OffsetT is an integer type for global offsets.
+   *                               \p RandomAccessIteratorT is mutable. If \c x and \c y are objects of \p RandomAccessIteratorT's \c value_type,
+   *                               and \c x - \c y is defined, then the return type of <tt>x - y</tt> should be convertible to a type in
+   *                               \p RandomAccessIteratorT's set of \c value_types.
    */
-  template <typename RandomAccessIteratorT,
-            typename OffsetT>
+  template <typename RandomAccessIteratorT>
   static CUB_RUNTIME_FUNCTION cudaError_t
   SubtractLeft(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
                std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
                RandomAccessIteratorT d_input,   ///< [in,out] Pointer to the input sequence
-               OffsetT num_items,               ///< [in] Number of items in the input sequence
+               std::size_t num_items,           ///< [in] Number of items in the input sequence
                cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
                bool debug_synchronous = false)  ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
   {
     constexpr bool in_place = true;
     constexpr bool read_left = true;
-    using DispatchAdjacentDifferenceT =
-      DispatchAdjacentDifference<RandomAccessIteratorT,
-                                 RandomAccessIteratorT,
-                                 Difference,
-                                 OffsetT,
-                                 in_place,
-                                 read_left>;
 
-    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
-                                                 temp_storage_bytes,
-                                                 d_input,
-                                                 d_input,
-                                                 num_items,
-                                                 Difference(),
-                                                 stream,
-                                                 debug_synchronous);
+    return AdjacentDifference<in_place, read_left>(d_temp_storage,
+                                                   temp_storage_bytes,
+                                                   d_input,
+                                                   d_input,
+                                                   num_items,
+                                                   Difference{},
+                                                   stream,
+                                                   debug_synchronous);
   }
 
   /**
@@ -442,42 +466,33 @@ struct DeviceAdjacentDifference
    * \endcode
    *
    * \tparam InputIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
-   *         and \c x and \c y are objects of \p InputIteratorT's \c value_type, then \c x - \c y is defined,
-   *         and \p InputIteratorT's \c value_type is convertible to a type in \p OutputIteratorT's set of \c value_types,
-   *         and the return type of <tt>x - y</tt> is convertible to a type in \p OutputIteratorT's set of \c value_types.
+   *                        and \c x and \c y are objects of \p InputIteratorT's \c value_type, then \c x - \c y is defined,
+   *                        and \p InputIteratorT's \c value_type is convertible to a type in \p OutputIteratorT's set of \c value_types,
+   *                        and the return type of <tt>x - y</tt> is convertible to a type in \p OutputIteratorT's set of \c value_types.
    * \tparam OutputIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
-   * \tparam OffsetT is an integer type for global offsets.
    */
   template <typename InputIteratorT,
-            typename OutputIteratorT,
-            typename OffsetT>
+            typename OutputIteratorT>
   static CUB_RUNTIME_FUNCTION cudaError_t
   SubtractRightCopy(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
                     std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
                     InputIteratorT d_input,          ///< [in] Pointer to the input sequence
                     OutputIteratorT d_output,        ///< [out] Pointer to the output sequence
-                    OffsetT num_items,               ///< [in] Number of items in the input sequence
+                    std::size_t num_items,           ///< [in] Number of items in the input sequence
                     cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
                     bool debug_synchronous = false)  ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
   {
     constexpr bool in_place  = false;
     constexpr bool read_left = false;
-    using DispatchAdjacentDifferenceT =
-      DispatchAdjacentDifference<InputIteratorT,
-                                 OutputIteratorT,
-                                 Difference,
-                                 OffsetT,
-                                 in_place,
-                                 read_left>;
 
-    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
-                                                 temp_storage_bytes,
-                                                 d_input,
-                                                 d_output,
-                                                 num_items,
-                                                 Difference(),
-                                                 stream,
-                                                 debug_synchronous);
+    return AdjacentDifference<in_place, read_left>(d_temp_storage,
+                                                   temp_storage_bytes,
+                                                   d_input,
+                                                   d_output,
+                                                   num_items,
+                                                   Difference{},
+                                                   stream,
+                                                   debug_synchronous);
   }
 
   /**
@@ -525,45 +540,36 @@ struct DeviceAdjacentDifference
    * \endcode
    *
    * \tparam InputIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input Iterator</a>,
-   *         and \c x and \c y are objects of \p InputIteratorT's \c value_type, then \c x - \c y is defined,
-   *         and \p InputIteratorT's \c value_type is convertible to a type in \p OutputIteratorT's set of \c value_types,
-   *         and the return type of <tt>x - y</tt> is convertible to a type in \p OutputIteratorT's set of \c value_types.
+   *                        and \c x and \c y are objects of \p InputIteratorT's \c value_type, then \c x - \c y is defined,
+   *                        and \p InputIteratorT's \c value_type is convertible to a type in \p OutputIteratorT's set of \c value_types,
+   *                        and the return type of <tt>x - y</tt> is convertible to a type in \p OutputIteratorT's set of \c value_types.
    * \tparam OutputIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/output_iterator">Output Iterator</a>.
    * \tparam DifferenceOpT's \c result_type is convertible to a type in \p RandomAccessIteratorT's set of \c value_types.
-   * \tparam OffsetT is an integer type for global offsets.
    */
   template <typename InputIteratorT,
             typename OutputIteratorT,
-            typename DifferenceOpT,
-            typename OffsetT>
+            typename DifferenceOpT>
   static CUB_RUNTIME_FUNCTION cudaError_t
   SubtractRightCopy(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
                     std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
                     InputIteratorT d_input,          ///< [in] Pointer to the input sequence
                     OutputIteratorT d_output,        ///< [out] Pointer to the output sequence
-                    OffsetT num_items,               ///< [in] Number of items in the input sequence
+                    std::size_t num_items,           ///< [in] Number of items in the input sequence
                     DifferenceOpT difference_op,     ///< [in] The binary function used to compute differences.
                     cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
                     bool debug_synchronous = false)  ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
   {
     constexpr bool in_place  = false;
     constexpr bool read_left = false;
-    using DispatchAdjacentDifferenceT =
-      DispatchAdjacentDifference<InputIteratorT,
-                                 OutputIteratorT,
-                                 DifferenceOpT,
-                                 OffsetT,
-                                 in_place,
-                                 read_left>;
 
-    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
-                                                 temp_storage_bytes,
-                                                 d_input,
-                                                 d_output,
-                                                 num_items,
-                                                 difference_op,
-                                                 stream,
-                                                 debug_synchronous);
+    return AdjacentDifference<in_place, read_left>(d_temp_storage,
+                                                   temp_storage_bytes,
+                                                   d_input,
+                                                   d_output,
+                                                   num_items,
+                                                   difference_op,
+                                                   stream,
+                                                   debug_synchronous);
   }
 
   /**
@@ -605,38 +611,29 @@ struct DeviceAdjacentDifference
    * \endcode
    *
    * \tparam RandomAccessIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
-   *         \p RandomAccessIteratorT is mutable. If \c x and \c y are objects of \p RandomAccessIteratorT's \c value_type, and \c x - \c y is defined,
-   *         then the return type of <tt>x - y</tt> should be convertible to a type in \p RandomAccessIteratorT's set of \c value_types.
-   * \tparam OffsetT is an integer type for global offsets.
+   *                               \p RandomAccessIteratorT is mutable. If \c x and \c y are objects of \p RandomAccessIteratorT's \c value_type, and \c x - \c y is defined,
+   *                               then the return type of <tt>x - y</tt> should be convertible to a type in \p RandomAccessIteratorT's set of \c value_types.
    */
-  template <typename RandomAccessIteratorT,
-            typename OffsetT>
+  template <typename RandomAccessIteratorT>
   static CUB_RUNTIME_FUNCTION cudaError_t
   SubtractRight(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
                 std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
                 RandomAccessIteratorT d_input,   ///< [in,out] Pointer to the input sequence
-                OffsetT num_items,               ///< [in] Number of items in the input sequence
+                std::size_t num_items,           ///< [in] Number of items in the input sequence
                 cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
                 bool debug_synchronous = false)  ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
   {
     constexpr bool in_place = true;
     constexpr bool read_left = false;
-    using DispatchAdjacentDifferenceT =
-      DispatchAdjacentDifference<RandomAccessIteratorT,
-                                 RandomAccessIteratorT,
-                                 Difference,
-                                 OffsetT,
-                                 in_place,
-                                 read_left>;
 
-    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
-                                                 temp_storage_bytes,
-                                                 d_input,
-                                                 d_input,
-                                                 num_items,
-                                                 Difference(),
-                                                 stream,
-                                                 debug_synchronous);
+    return AdjacentDifference<in_place, read_left>(d_temp_storage,
+                                                   temp_storage_bytes,
+                                                   d_input,
+                                                   d_input,
+                                                   num_items,
+                                                   Difference{},
+                                                   stream,
+                                                   debug_synchronous);
   }
 
   /**
@@ -678,41 +675,32 @@ struct DeviceAdjacentDifference
    * \endcode
    *
    * \tparam RandomAccessIteratorT is a model of <a href="https://en.cppreference.com/w/cpp/iterator/random_access_iterator">Random Access Iterator</a>,
-   *         \p RandomAccessIteratorT is mutable. If \c x and \c y are objects of \p RandomAccessIteratorT's \c value_type, and \c x - \c y is defined,
-   *         then the return type of <tt>x - y</tt> should be convertible to a type in \p RandomAccessIteratorT's set of \c value_types.
+   *                               \p RandomAccessIteratorT is mutable. If \c x and \c y are objects of \p RandomAccessIteratorT's \c value_type, and \c x - \c y is defined,
+   *                               then the return type of <tt>x - y</tt> should be convertible to a type in \p RandomAccessIteratorT's set of \c value_types.
    * \tparam DifferenceOpT's \c result_type is convertible to a type in \p RandomAccessIteratorT's set of \c value_types.
-   * \tparam OffsetT is an integer type for global offsets.
    */
   template <typename RandomAccessIteratorT,
-            typename DifferenceOpT,
-            typename OffsetT>
+            typename DifferenceOpT>
   static CUB_RUNTIME_FUNCTION cudaError_t
   SubtractRight(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
                 std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
                 RandomAccessIteratorT d_input,   ///< [in,out] Pointer to the input sequence
-                OffsetT num_items,               ///< [in] Number of items in the input sequence
+                std::size_t num_items,           ///< [in] Number of items in the input sequence
                 DifferenceOpT difference_op,     ///< [in] The binary function used to compute differences.
                 cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
                 bool debug_synchronous = false)  ///< [in] <b>[optional]</b> Whether or not to synchronize the stream after every kernel launch to check for errors.  Also causes launch configurations to be printed to the console.  Default is \p false.
   {
     constexpr bool in_place = true;
     constexpr bool read_left = false;
-    using DispatchAdjacentDifferenceT =
-      DispatchAdjacentDifference<RandomAccessIteratorT,
-                                 RandomAccessIteratorT,
-                                 DifferenceOpT,
-                                 OffsetT,
-                                 in_place,
-                                 read_left>;
 
-    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
-                                                 temp_storage_bytes,
-                                                 d_input,
-                                                 d_input,
-                                                 num_items,
-                                                 difference_op,
-                                                 stream,
-                                                 debug_synchronous);
+    return AdjacentDifference<in_place, read_left>(d_temp_storage,
+                                                   temp_storage_bytes,
+                                                   d_input,
+                                                   d_input,
+                                                   num_items,
+                                                   difference_op,
+                                                   stream,
+                                                   debug_synchronous);
   }
 };
 
