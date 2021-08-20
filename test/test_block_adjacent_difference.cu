@@ -583,6 +583,7 @@ void TestFullTile(bool inplace,
   }
 }
 
+
 template <unsigned int ItemsPerThread,
           unsigned int ThreadsInBlock>
 void TestCustomType(bool inplace,
@@ -647,6 +648,7 @@ void TestCustomType(bool inplace,
   }
 }
 
+
 template <
   typename ValueType,
   unsigned int ItemsPerThread,
@@ -666,6 +668,7 @@ void Test(bool inplace)
   TestFullTile<ValueType, ItemsPerThread, ThreadsInBlock>(inplace, d_values);
 }
 
+
 template <unsigned int ItemsPerThread,
           unsigned int ThreadsInBlock>
 void TestCustomType(bool inplace)
@@ -674,6 +677,7 @@ void TestCustomType(bool inplace)
   thrust::device_vector<CustomType> d_values(tile_size);
   TestCustomType<ItemsPerThread, ThreadsInBlock>(inplace, d_values);
 }
+
 
 template <unsigned int ItemsPerThread, unsigned int ThreadsPerBlock>
 void Test(bool inplace)
@@ -684,12 +688,14 @@ void Test(bool inplace)
   Test<std::uint64_t, ItemsPerThread, ThreadsPerBlock>(inplace);
 }
 
+
 template <unsigned int ItemsPerThread>
 void Test(bool inplace)
 {
   Test<ItemsPerThread, 32>(inplace);
   Test<ItemsPerThread, 256>(inplace);
 }
+
 
 template <unsigned int ItemsPerThread>
 void Test()
@@ -698,7 +704,7 @@ void Test()
   Test<ItemsPerThread>(true);
 }
 
-// TODO Add comment on sync requirement for shared memory usage
+
 int main(int argc, char** argv)
 {
   CommandLineArgs args(argc, argv);
