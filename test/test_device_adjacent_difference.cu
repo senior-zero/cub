@@ -49,6 +49,10 @@
 using namespace cub;
 
 
+constexpr bool READ_LEFT = true;
+constexpr bool READ_RIGHT = false;
+
+
 /**
  * \brief Generates integer sequence \f$S_n=i(i-1)/2\f$.
  *
@@ -305,10 +309,7 @@ void TestCopy(std::size_t elements, DifferenceOpT difference_op)
                                        std::size_t,
                                        std::size_t>;
 
-  constexpr bool read_left = true;
-  constexpr bool read_right = false;
-
-  AdjacentDifferenceCopy<read_left>(d_input,
+  AdjacentDifferenceCopy<READ_LEFT>(d_input,
                                     d_output,
                                     difference_op,
                                     elements);
@@ -319,7 +320,7 @@ void TestCopy(std::size_t elements, DifferenceOpT difference_op)
 
   thrust::fill(output.begin(), output.end(), OutputT{42});
 
-  AdjacentDifferenceCopy<read_right>(d_input,
+  AdjacentDifferenceCopy<READ_RIGHT>(d_input,
                                      d_output,
                                      difference_op,
                                      elements);
@@ -353,10 +354,7 @@ void TestIteratorCopy(std::size_t elements, DifferenceOpT difference_op)
     std::size_t,
     std::size_t>;
 
-  constexpr bool read_left = true;
-  constexpr bool read_right = false;
-
-  AdjacentDifferenceCopy<read_left>(input.cbegin(),
+  AdjacentDifferenceCopy<READ_LEFT>(input.cbegin(),
                                     output.begin(),
                                     difference_op,
                                     elements);
@@ -367,7 +365,7 @@ void TestIteratorCopy(std::size_t elements, DifferenceOpT difference_op)
 
   thrust::fill(output.begin(), output.end(), OutputT{42});
 
-  AdjacentDifferenceCopy<read_right>(input.cbegin(),
+  AdjacentDifferenceCopy<READ_RIGHT>(input.cbegin(),
                                      output.begin(),
                                      difference_op,
                                      elements);
@@ -419,10 +417,7 @@ void Test(std::size_t elements, DifferenceOpT difference_op)
       std::size_t,
       std::size_t>;
 
-  constexpr bool read_left = true;
-  constexpr bool read_right = false;
-
-  AdjacentDifference<read_left>(d_data,
+  AdjacentDifference<READ_LEFT>(d_data,
                                 difference_op,
                                 elements);
 
@@ -435,7 +430,7 @@ void Test(std::size_t elements, DifferenceOpT difference_op)
                    data.end(),
                    TestSequenceGenerator<T>{});
 
-  AdjacentDifference<read_right>(d_data,
+  AdjacentDifference<READ_RIGHT>(d_data,
                                  difference_op,
                                  elements);
 
@@ -465,10 +460,7 @@ void TestIterators(std::size_t elements, DifferenceOpT difference_op)
     std::size_t,
     std::size_t>;
 
-  constexpr bool read_left = true;
-  constexpr bool read_right = false;
-
-  AdjacentDifference<read_left>(data.begin(),
+  AdjacentDifference<READ_LEFT>(data.begin(),
                                 difference_op,
                                 elements);
 
@@ -481,7 +473,7 @@ void TestIterators(std::size_t elements, DifferenceOpT difference_op)
                    data.end(),
                    TestSequenceGenerator<T>{});
 
-  AdjacentDifference<read_right>(data.begin(),
+  AdjacentDifference<READ_RIGHT>(data.begin(),
                                  difference_op,
                                  elements);
 
@@ -520,10 +512,7 @@ void TestFancyIterators(std::size_t elements)
   thrust::counting_iterator<ValueT> count_iter(ValueT{1});
   thrust::device_vector<ValueT> output(elements, ValueT{42});
 
-  constexpr bool read_left  = true;
-  constexpr bool read_right = false;
-
-  AdjacentDifferenceCopy<read_left>(count_iter,
+  AdjacentDifferenceCopy<READ_LEFT>(count_iter,
                                     output.begin(),
                                     cub::Difference{},
                                     elements);
@@ -532,7 +521,7 @@ void TestFancyIterators(std::size_t elements)
                  thrust::count(output.begin(), output.end(), ValueT(1))));
 
   thrust::fill(output.begin(), output.end(), ValueT{});
-  AdjacentDifferenceCopy<read_right>(count_iter,
+  AdjacentDifferenceCopy<READ_RIGHT>(count_iter,
                                      output.begin(),
                                      cub::Difference{},
                                      elements);
@@ -545,7 +534,7 @@ void TestFancyIterators(std::size_t elements)
 
   thrust::constant_iterator<ValueT> const_iter(ValueT{});
 
-  AdjacentDifferenceCopy<read_left>(const_iter,
+  AdjacentDifferenceCopy<READ_LEFT>(const_iter,
                                     output.begin(),
                                     cub::Difference{},
                                     elements);
@@ -554,7 +543,7 @@ void TestFancyIterators(std::size_t elements)
                  thrust::count(output.begin(), output.end(), ValueT{})));
 
   thrust::fill(output.begin(), output.end(), ValueT{});
-  AdjacentDifferenceCopy<read_right>(const_iter,
+  AdjacentDifferenceCopy<READ_RIGHT>(const_iter,
                                      output.begin(),
                                      cub::Difference{},
                                      elements);
@@ -562,12 +551,12 @@ void TestFancyIterators(std::size_t elements)
                static_cast<std::size_t>(
                  thrust::count(output.begin(), output.end(), ValueT{})));
 
-  AdjacentDifferenceCopy<read_left>(const_iter,
+  AdjacentDifferenceCopy<READ_LEFT>(const_iter,
                                     thrust::discard_iterator{},
                                     cub::Difference{},
                                     elements);
 
-  AdjacentDifferenceCopy<read_right>(const_iter,
+  AdjacentDifferenceCopy<READ_RIGHT>(const_iter,
                                      thrust::discard_iterator{},
                                      cub::Difference{},
                                      elements);
@@ -587,6 +576,63 @@ void TestSize(std::size_t elements)
   TestFancyIterators(elements);
 }
 
+struct DetectWrongDifference
+{
+  bool *flag;
+
+  __host__ __device__ DetectWrongDifference operator++() const
+  {
+    return *this;
+  }
+  __host__ __device__ DetectWrongDifference operator*() const
+  {
+    return *this;
+  }
+  template <typename Difference>
+  __host__ __device__ DetectWrongDifference operator+(Difference) const
+  {
+    return *this;
+  }
+  template <typename Index>
+  __host__ __device__ DetectWrongDifference operator[](Index) const
+  {
+    return *this;
+  }
+
+  __device__ void operator=(long long difference) const
+  {
+    if (difference != 1)
+    {
+      *flag = false;
+    }
+  }
+};
+
+void TestAdjacentDifferenceWithBigIndexesHelper(int magnitude)
+{
+  const std::size_t elements = 1ll << magnitude;
+
+  thrust::device_vector<bool> all_differences_correct(1, true);
+
+  thrust::counting_iterator<long long> in(1);
+
+  DetectWrongDifference out = {
+    thrust::raw_pointer_cast(all_differences_correct.data())
+  };
+
+  AdjacentDifferenceCopy<READ_LEFT>(in, out, cub::Difference{}, elements);
+  AssertEquals(all_differences_correct.front(), true);
+}
+
+
+void TestAdjacentDifferenceWithBigIndexes()
+{
+  TestAdjacentDifferenceWithBigIndexesHelper(30);
+  TestAdjacentDifferenceWithBigIndexesHelper(31);
+  TestAdjacentDifferenceWithBigIndexesHelper(32);
+  TestAdjacentDifferenceWithBigIndexesHelper(33);
+}
+
 
 int main(int argc, char** argv)
 {
@@ -600,6 +646,7 @@ int main(int argc, char** argv)
   {
     Test(1ull << power_of_two);
   }
+  TestAdjacentDifferenceWithBigIndexes();
 
   return 0;
 }
