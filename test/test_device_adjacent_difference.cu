@@ -580,6 +580,14 @@ void TestFancyIterators(std::size_t elements)
 }
 
 
+void TestSize(std::size_t elements)
+{
+  Test(elements);
+  TestCopy(elements);
+  TestFancyIterators(elements);
+}
+
+
 int main(int argc, char** argv)
 {
   CommandLineArgs args(argc, argv);
@@ -587,13 +595,10 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  for (int power_of_two = 2; power_of_two < 20; power_of_two += 2)
+  Test(0);
+  for (std::size_t power_of_two = 2; power_of_two < 20; power_of_two += 2)
   {
-    unsigned int elements = 1 << power_of_two;
-
-    Test(elements);
-    TestCopy(elements);
-    TestFancyIterators(elements);
+    Test(1ull << power_of_two);
   }
 
   return 0;

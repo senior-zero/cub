@@ -221,8 +221,18 @@ struct DispatchAdjacentDifference : public SelectedPolicy
           // Return if the caller is simply requesting the size of the storage
           // allocation
 
+          if (temp_storage_bytes == 0)
+          {
+            temp_storage_bytes = 1;
+          }
+
           break;
         }
+      }
+
+      if (num_items == OffsetT{})
+      {
+        break;
       }
 
       auto first_tile_previous = reinterpret_cast<InputT*>(allocations[0]);
@@ -319,11 +329,6 @@ struct DispatchAdjacentDifference : public SelectedPolicy
       // Get PTX version
       int ptx_version = 0;
       if (CubDebug(error = PtxVersion(ptx_version)))
-      {
-        break;
-      }
-
-      if (num_items == OffsetT(0))
       {
         break;
       }
