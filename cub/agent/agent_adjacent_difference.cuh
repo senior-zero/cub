@@ -33,7 +33,6 @@
 #include "../block/block_load.cuh"
 #include "../block/block_store.cuh"
 #include "../block/block_adjacent_difference.cuh"
-#include "../detail/type_traits.cuh"
 
 #include <thrust/system/cuda/detail/core/util.h>
 
@@ -64,12 +63,11 @@ template <typename Policy,
           typename DifferenceOpT,
           typename OffsetT,
           typename InputT,
+          typename OutputT,
           bool InPlace,
           bool ReadLeft>
 struct AgentDifference
 {
-  using OutputT = detail::invoke_result_t<DifferenceOpT, InputT, InputT>;
-
   using LoadIt = typename THRUST_NS_QUALIFIER::cuda_cub::core::LoadIterator<Policy, InputIteratorT>::type;
 
   using BlockLoad = typename cub::BlockLoadType<Policy, LoadIt>::type;
@@ -109,7 +107,9 @@ struct AgentDifference
                                              OffsetT num_items)
       : temp_storage(temp_storage.Alias())
       , input_it(input_it)
-      , load_it(input_it)
+      , load_it(
+          THRUST_NS_QUALIFIER::cuda_cub::core::make_load_iterator(Policy(),
+                                                                  input_it))
       , first_tile_previous(first_tile_previous)
       , result(result)
       , difference_op(difference_op)
@@ -221,7 +221,7 @@ struct AgentDifference
 };
 
 template <typename InputIteratorT,
-          typename OutputIteratorT,
+          typename InputT,
           typename OffsetT,
           bool ReadLeft>
 struct AgentDifferenceInit
@@ -230,7 +230,7 @@ struct AgentDifferenceInit
 
   static __device__ __forceinline__ void Process(int tile_idx,
                                                  InputIteratorT first,
-                                                 OutputIteratorT result,
+                                                 InputT *result,
                                                  OffsetT num_tiles,
                                                  int items_per_tile)
   {

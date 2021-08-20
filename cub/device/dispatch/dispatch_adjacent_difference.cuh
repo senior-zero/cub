@@ -31,6 +31,7 @@
 #include "../../util_math.cuh"
 #include "../../util_device.cuh"
 #include "../../util_namespace.cuh"
+#include "../../detail/type_traits.cuh"
 #include "../../agent/agent_adjacent_difference.cuh"
 
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
@@ -41,10 +42,10 @@ CUB_NAMESPACE_BEGIN
 
 template <typename AgentDifferenceInitT,
           typename InputIteratorT,
-          typename OutputIteratorT,
+          typename InputT,
           typename OffsetT>
 void __global__ DeviceAdjacentDifferenceInitKernel(InputIteratorT first,
-                                                   OutputIteratorT result,
+                                                   InputT *result,
                                                    OffsetT num_tiles,
                                                    int items_per_tile)
 {
@@ -62,6 +63,7 @@ template <typename Policy,
           typename DifferenceOpT,
           typename OffsetT,
           typename InputT,
+          typename OutputT,
           bool InPlace,
           bool ReadLeft>
 void __global__
@@ -77,6 +79,7 @@ DeviceAdjacentDifferenceDifferenceKernel(InputIteratorT input,
                                 DifferenceOpT,
                                 OffsetT,
                                 InputT,
+                                OutputT,
                                 InPlace,
                                 ReadLeft>;
 
@@ -111,9 +114,9 @@ struct DeviceAdjacentDifferencePolicy
     using AdjacentDifferencePolicy =
       AgentAdjacentDifferencePolicy<128,
                                     Nominal8BItemsToItems<ValueT>(7),
-                                    cub::BLOCK_LOAD_WARP_TRANSPOSE,
-                                    cub::LOAD_DEFAULT,
-                                    cub::BLOCK_STORE_WARP_TRANSPOSE>;
+                                    BLOCK_LOAD_WARP_TRANSPOSE,
+                                    LOAD_DEFAULT,
+                                    BLOCK_STORE_WARP_TRANSPOSE>;
   };
 
   struct Policy350 : ChainedPolicy<350, Policy350, Policy300>
@@ -121,9 +124,9 @@ struct DeviceAdjacentDifferencePolicy
     using AdjacentDifferencePolicy =
       AgentAdjacentDifferencePolicy<128,
                                     Nominal8BItemsToItems<ValueT>(7),
-                                    cub::BLOCK_LOAD_WARP_TRANSPOSE,
-                                    cub::LOAD_LDG,
-                                    cub::BLOCK_STORE_WARP_TRANSPOSE>;
+                                    BLOCK_LOAD_WARP_TRANSPOSE,
+                                    LOAD_LDG,
+                                    BLOCK_STORE_WARP_TRANSPOSE>;
   };
 
   using MaxPolicy = Policy350;
@@ -139,7 +142,8 @@ template <typename InputIteratorT,
             DeviceAdjacentDifferencePolicy<InputIteratorT>>
 struct DispatchAdjacentDifference : public SelectedPolicy
 {
-  using ValueT = typename std::iterator_traits<InputIteratorT>::value_type;
+  using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
+  using OutputT = detail::invoke_result_t<DifferenceOpT, InputT, InputT>;
 
   void *d_temp_storage;
   std::size_t &temp_storage_bytes;
@@ -181,7 +185,8 @@ struct DispatchAdjacentDifference : public SelectedPolicy
                                              OutputIteratorT,
                                              DifferenceOpT,
                                              OffsetT,
-                                             ValueT,
+                                             InputT,
+                                             OutputT,
                                              InPlace,
                                              ReadLeft>;
 
@@ -191,11 +196,12 @@ struct DispatchAdjacentDifference : public SelectedPolicy
     {
       const int tile_size = AdjacentDifferencePolicyT::ITEMS_PER_TILE;
       const int num_tiles =
-        static_cast<int>(cub::DivideAndRoundUp(num_items, tile_size));
+        static_cast<int>(DivideAndRoundUp(num_items, tile_size));
 
       int shmem_size = AgentDifferenceT::SHARED_MEMORY_SIZE;
 
-      std::size_t first_tile_previous_size = InPlace * (num_tiles) * sizeof(ValueT);
+      std::size_t first_tile_previous_size = InPlace * num_tiles *
+                                             sizeof(InputT);
 
       void *allocations[1]            = {nullptr};
       std::size_t allocation_sizes[1] = {first_tile_previous_size};
@@ -219,16 +225,15 @@ struct DispatchAdjacentDifference : public SelectedPolicy
         }
       }
 
-      auto first_tile_previous = reinterpret_cast<ValueT *>(allocations[0]);
+      auto first_tile_previous = reinterpret_cast<InputT*>(allocations[0]);
 
       if (InPlace)
       {
         using AgentDifferenceInitT =
-          AgentDifferenceInit<InputIteratorT, OutputIteratorT, OffsetT, ReadLeft>;
+          AgentDifferenceInit<InputIteratorT, InputT, OffsetT, ReadLeft>;
 
         const int init_block_size = AgentDifferenceInitT::BLOCK_THREADS;
-        const int init_grid_size =
-          cub::DivideAndRoundUp(num_tiles, init_block_size);
+        const int init_grid_size = DivideAndRoundUp(num_tiles, init_block_size);
 
         THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(init_grid_size,
                                                                 init_block_size,
@@ -236,7 +241,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
                                                                 stream)
           .doit(DeviceAdjacentDifferenceInitKernel<AgentDifferenceInitT,
                                                    InputIteratorT,
-                                                   OutputIteratorT,
+                                                   InputT,
                                                    OffsetT>,
                 d_input,
                 first_tile_previous,
@@ -268,7 +273,8 @@ struct DispatchAdjacentDifference : public SelectedPolicy
                                                        OutputIteratorT,
                                                        DifferenceOpT,
                                                        OffsetT,
-                                                       ValueT,
+                                                       InputT,
+                                                       OutputT,
                                                        InPlace,
                                                        ReadLeft>,
               d_input,

@@ -145,7 +145,9 @@ struct DeviceAdjacentDifference
             typename DifferenceOpT,
             typename OffsetT>
   static CUB_RUNTIME_FUNCTION cudaError_t
-  SubtractLeftCopy(InputIteratorT d_input,          ///< [in] Pointer to the input sequence
+  SubtractLeftCopy(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
+                   std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
+                   InputIteratorT d_input,          ///< [in] Pointer to the input sequence
                    OutputIteratorT d_output,        ///< [out] Pointer to the output sequence
                    OffsetT num_items,               ///< [in] Number of items in the input sequence
                    DifferenceOpT difference_op,     ///< [in] The binary function used to compute differences.
@@ -162,8 +164,7 @@ struct DeviceAdjacentDifference
                                  in_place,
                                  read_left>;
 
-    std::size_t temp_storage_bytes {};
-    return DispatchAdjacentDifferenceT::Dispatch(nullptr,
+    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
                                                  temp_storage_bytes,
                                                  d_input,
                                                  d_output,
@@ -219,7 +220,9 @@ struct DeviceAdjacentDifference
             typename OutputIteratorT,
             typename OffsetT>
   static CUB_RUNTIME_FUNCTION cudaError_t
-  SubtractLeftCopy(InputIteratorT d_input,          ///< [in] Pointer to the input sequence
+  SubtractLeftCopy(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
+                   std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
+                   InputIteratorT d_input,          ///< [in] Pointer to the input sequence
                    OutputIteratorT d_output,        ///< [out] Pointer to the output sequence
                    OffsetT num_items,               ///< [in] Number of items in the input sequence
                    cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
@@ -230,18 +233,17 @@ struct DeviceAdjacentDifference
     using DispatchAdjacentDifferenceT =
       DispatchAdjacentDifference<InputIteratorT,
                                  OutputIteratorT,
-                                 cub::Difference,
+                                 Difference,
                                  OffsetT,
                                  in_place,
                                  read_left>;
 
-    std::size_t temp_storage_bytes{};
-    return DispatchAdjacentDifferenceT::Dispatch(nullptr,
+    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
                                                  temp_storage_bytes,
                                                  d_input,
                                                  d_output,
                                                  num_items,
-                                                 cub::Difference(),
+                                                 Difference(),
                                                  stream,
                                                  debug_synchronous);
   }
@@ -389,7 +391,7 @@ struct DeviceAdjacentDifference
     using DispatchAdjacentDifferenceT =
       DispatchAdjacentDifference<RandomAccessIteratorT,
                                  RandomAccessIteratorT,
-                                 cub::Difference,
+                                 Difference,
                                  OffsetT,
                                  in_place,
                                  read_left>;
@@ -399,7 +401,7 @@ struct DeviceAdjacentDifference
                                                  d_input,
                                                  d_input,
                                                  num_items,
-                                                 cub::Difference(),
+                                                 Difference(),
                                                  stream,
                                                  debug_synchronous);
   }
@@ -450,7 +452,9 @@ struct DeviceAdjacentDifference
             typename OutputIteratorT,
             typename OffsetT>
   static CUB_RUNTIME_FUNCTION cudaError_t
-  SubtractRightCopy(InputIteratorT d_input,          ///< [in] Pointer to the input sequence
+  SubtractRightCopy(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
+                    std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
+                    InputIteratorT d_input,          ///< [in] Pointer to the input sequence
                     OutputIteratorT d_output,        ///< [out] Pointer to the output sequence
                     OffsetT num_items,               ///< [in] Number of items in the input sequence
                     cudaStream_t stream = 0,         ///< [in] <b>[optional]</b> CUDA stream to launch kernels within. Default is stream<sub>0</sub>.
@@ -461,18 +465,17 @@ struct DeviceAdjacentDifference
     using DispatchAdjacentDifferenceT =
       DispatchAdjacentDifference<InputIteratorT,
                                  OutputIteratorT,
-                                 cub::Difference,
+                                 Difference,
                                  OffsetT,
                                  in_place,
                                  read_left>;
 
-    std::size_t temp_storage_bytes;
-    return DispatchAdjacentDifferenceT::Dispatch(nullptr,
+    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
                                                  temp_storage_bytes,
                                                  d_input,
                                                  d_output,
                                                  num_items,
-                                                 cub::Difference(),
+                                                 Difference(),
                                                  stream,
                                                  debug_synchronous);
   }
@@ -534,7 +537,9 @@ struct DeviceAdjacentDifference
             typename DifferenceOpT,
             typename OffsetT>
   static CUB_RUNTIME_FUNCTION cudaError_t
-  SubtractRightCopy(InputIteratorT d_input,          ///< [in] Pointer to the input sequence
+  SubtractRightCopy(void *d_temp_storage,            ///< [in] Device-accessible allocation of temporary storage. When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
+                    std::size_t &temp_storage_bytes, ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation
+                    InputIteratorT d_input,          ///< [in] Pointer to the input sequence
                     OutputIteratorT d_output,        ///< [out] Pointer to the output sequence
                     OffsetT num_items,               ///< [in] Number of items in the input sequence
                     DifferenceOpT difference_op,     ///< [in] The binary function used to compute differences.
@@ -551,8 +556,7 @@ struct DeviceAdjacentDifference
                                  in_place,
                                  read_left>;
 
-    std::size_t temp_storage_bytes;
-    return DispatchAdjacentDifferenceT::Dispatch(nullptr,
+    return DispatchAdjacentDifferenceT::Dispatch(d_temp_storage,
                                                  temp_storage_bytes,
                                                  d_input,
                                                  d_output,
@@ -620,7 +624,7 @@ struct DeviceAdjacentDifference
     using DispatchAdjacentDifferenceT =
       DispatchAdjacentDifference<RandomAccessIteratorT,
                                  RandomAccessIteratorT,
-                                 cub::Difference,
+                                 Difference,
                                  OffsetT,
                                  in_place,
                                  read_left>;
@@ -630,7 +634,7 @@ struct DeviceAdjacentDifference
                                                  d_input,
                                                  d_input,
                                                  num_items,
-                                                 cub::Difference(),
+                                                 Difference(),
                                                  stream,
                                                  debug_synchronous);
   }

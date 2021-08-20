@@ -546,6 +546,7 @@ void TestFullTile(bool inplace,
       std::size_t,
       std::size_t>;
 
+    AssertEquals(d_data.front(), TestSequenceGenerator<DataType>{}(0));
     AssertTrue(CheckResult(d_data.begin() + 1,
                            d_data.end(),
                            CountingIteratorT(DataType{0})));
@@ -580,6 +581,8 @@ void TestFullTile(bool inplace,
     AssertTrue(CheckResult(d_data.begin(),
                            d_data.end() - 1,
                            reference.begin()));
+    AssertEquals(d_data.back(),
+                 TestSequenceGenerator<DataType>{}(d_data.size() - 1));
   }
 }
 
