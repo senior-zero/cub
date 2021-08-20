@@ -41,7 +41,7 @@ CUB_NAMESPACE_BEGIN
  *
  * \par Overview
  * - DeviceAdjacentDifference calculates the differences of adjacent elements in
- *   the d_input. Because the binary operation could be noncommutative, there
+ *   d_input. Because the binary operation could be noncommutative, there
  *   are two sets of methods. Methods named SubtractLeft subtract left element
  *   <tt>\*(i - 1)</tt> of input sequence from current element <tt>\*i</tt>.
  *   Methods named SubtractRight subtract current element <tt>\*i</tt> from the
@@ -94,10 +94,10 @@ struct DeviceAdjacentDifference
    *
    * \par Overview
    * - Calculates the differences of adjacent elements in
-   *   the d_input. That is, <tt>\*d_input</tt> is assigned to
+   *   d_input. That is, <tt>\*d_input</tt> is assigned to
    *   <tt>\*d_output</tt>, and, for each iterator \p i in the range
-   *   <tt>[d_input + 1, d_input + num_items)</tt>, the difference of
-   *   <tt>\*i</tt> and <tt>*(i - 1)</tt> is assigned to
+   *   <tt>[d_input + 1, d_input + num_items)</tt>, the result of
+   *   <tt>difference_op(*i, *(i - 1))</tt> is assigned to
    *   <tt>\*(d_output + (i - d_input))</tt>.
    * - Note that the behavior is undefined if the input and output ranges
    *   overlap in any way.
@@ -179,10 +179,10 @@ struct DeviceAdjacentDifference
    *
    * \par Overview
    * - Calculates the differences of adjacent elements in
-   *   the d_input. That is, <tt>\*d_input</tt> is assigned to
+   *   d_input. That is, <tt>\*d_input</tt> is assigned to
    *   <tt>\*d_output</tt>, and, for each iterator \p i in the range
-   *   <tt>[d_input + 1, d_input + num_items)</tt>, the difference of
-   *   <tt>\*i</tt> and <tt>*(i - 1)</tt> is assigned to
+   *   <tt>[d_input + 1, d_input + num_items)</tt>, the result of
+   *   <tt>difference_op(*i, *(i - 1))</tt> is assigned to
    *   <tt>\*(d_output + (i - d_input))</tt>.
    * - Note that the behavior is undefined if the input and output ranges
    *   overlap in any way.
@@ -252,9 +252,9 @@ struct DeviceAdjacentDifference
    *
    * \par Overview
    * Calculates the differences of adjacent elements in
-   * the d_input. That is, for each iterator \p i in the range
-   * <tt>[d_input + 1, d_input + num_items)</tt>, the difference of
-   * <tt>\*i</tt> and <tt>*(i - 1)</tt> is assigned to
+   * d_input. That is, for each iterator \p i in the range
+   * <tt>[d_input + 1, d_input + num_items)</tt>, the result of
+   * <tt>difference_op(*i, *(i - 1))</tt> is assigned to
    * <tt>\*(d_input + (i - d_input))</tt>.
    *
    * \par Snippet
@@ -337,9 +337,9 @@ struct DeviceAdjacentDifference
    *
    * \par Overview
    * Calculates the differences of adjacent elements in
-   * the d_input. That is, for each iterator \p i in the range
-   * <tt>[d_input + 1, d_input + num_items)</tt>, the difference of
-   * <tt>\*i</tt> and <tt>*(i - 1)</tt> is assigned to
+   * d_input. That is, for each iterator \p i in the range
+   * <tt>[d_input + 1, d_input + num_items)</tt>, the result of
+   * <tt>difference_op(*i, *(i - 1))</tt> is assigned to
    * <tt>\*(d_input + (i - d_input))</tt>.
    *
    * \par Snippet
@@ -410,10 +410,10 @@ struct DeviceAdjacentDifference
    *
    * \par Overview
    * - Calculates the right differences of adjacent elements in
-   *   the d_input. That is, <tt>\*(d_input + num_items - 1)</tt> is assigned to
+   *   d_input. That is, <tt>\*(d_input + num_items - 1)</tt> is assigned to
    *   <tt>\*(d_output + num_items - 1)</tt>, and, for each iterator \p i in the range
-   *   <tt>[d_input, d_input + num_items - 1)</tt>, the difference of
-   *   <tt>\*i</tt> and <tt>*(i + 1)</tt> is assigned to
+   *   <tt>[d_input, d_input + num_items - 1)</tt>, the result of
+   *   <tt>difference_op(*i, *(i + 1))</tt> is assigned to
    *   <tt>\*(d_output + (i - d_input))</tt>.
    * - Note that the behavior is undefined if the input and output ranges
    *   overlap in any way.
@@ -483,10 +483,10 @@ struct DeviceAdjacentDifference
    *
    * \par Overview
    * - Calculates the right differences of adjacent elements in
-   *   the d_input. That is, <tt>\*(d_input + num_items - 1)</tt> is assigned to
+   *   d_input. That is, <tt>\*(d_input + num_items - 1)</tt> is assigned to
    *   <tt>\*(d_output + num_items - 1)</tt>, and, for each iterator \p i in the range
-   *   <tt>[d_input, d_input + num_items - 1)</tt>, the difference of
-   *   <tt>\*i</tt> and <tt>*(i + 1)</tt> is assigned to
+   *   <tt>[d_input, d_input + num_items - 1)</tt>, the result of
+   *   <tt>difference_op(*i, *(i + 1))</tt> is assigned to
    *   <tt>\*(d_output + (i - d_input))</tt>.
    * - Note that the behavior is undefined if the input and output ranges
    *   overlap in any way.
@@ -568,9 +568,9 @@ struct DeviceAdjacentDifference
    *
    * \par Overview
    * Calculates the right differences of adjacent elements in
-   * the d_input. That is, for each iterator \p i in the range
-   * <tt>[d_input, d_input + num_items - 1)</tt>, the difference of
-   * <tt>\*i</tt> and <tt>*(i + 1)</tt> is assigned to
+   * d_input. That is, for each iterator \p i in the range
+   * <tt>[d_input, d_input + num_items - 1)</tt>, the result of
+   * <tt>difference_op(*i, *(i + 1))</tt> is assigned to
    * <tt>\*(d_input + (i - d_input))</tt>.
    *
    * \par Snippet
@@ -641,9 +641,9 @@ struct DeviceAdjacentDifference
    *
    * \par Overview
    * Calculates the right differences of adjacent elements in
-   * the d_input. That is, for each iterator \p i in the range
-   * <tt>[d_input, d_input + num_items - 1)</tt>, the difference of
-   * <tt>\*i</tt> and <tt>*(i + 1)</tt> is assigned to
+   * d_input. That is, for each iterator \p i in the range
+   * <tt>[d_input, d_input + num_items - 1)</tt>, the result of
+   * <tt>difference_op(*i, *(i + 1))</tt> is assigned to
    * <tt>\*(d_input + (i - d_input))</tt>.
    *
    * \par Snippet
