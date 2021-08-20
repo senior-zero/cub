@@ -525,7 +525,7 @@ void TestFancyIterators(std::size_t elements)
 
   AdjacentDifferenceCopy<read_left>(count_iter,
                                     output.begin(),
-                                    cub::Difference(),
+                                    cub::Difference{},
                                     elements);
   AssertEquals(elements,
                static_cast<std::size_t>(
@@ -534,7 +534,7 @@ void TestFancyIterators(std::size_t elements)
   thrust::fill(output.begin(), output.end(), ValueT{});
   AdjacentDifferenceCopy<read_right>(count_iter,
                                      output.begin(),
-                                     cub::Difference(),
+                                     cub::Difference{},
                                      elements);
   AssertEquals(elements - 1,
                static_cast<std::size_t>(
@@ -547,7 +547,7 @@ void TestFancyIterators(std::size_t elements)
 
   AdjacentDifferenceCopy<read_left>(const_iter,
                                     output.begin(),
-                                    cub::Difference(),
+                                    cub::Difference{},
                                     elements);
   AssertEquals(elements,
                static_cast<std::size_t>(
@@ -556,20 +556,20 @@ void TestFancyIterators(std::size_t elements)
   thrust::fill(output.begin(), output.end(), ValueT{});
   AdjacentDifferenceCopy<read_right>(const_iter,
                                      output.begin(),
-                                     cub::Difference(),
+                                     cub::Difference{},
                                      elements);
   AssertEquals(elements,
                static_cast<std::size_t>(
                  thrust::count(output.begin(), output.end(), ValueT{})));
 
   AdjacentDifferenceCopy<read_left>(const_iter,
-                                    thrust::discard_iterator(),
-                                    cub::Difference(),
+                                    thrust::discard_iterator{},
+                                    cub::Difference{},
                                     elements);
 
   AdjacentDifferenceCopy<read_right>(const_iter,
-                                     thrust::discard_iterator(),
-                                     cub::Difference(),
+                                     thrust::discard_iterator{},
+                                     cub::Difference{},
                                      elements);
 }
 
