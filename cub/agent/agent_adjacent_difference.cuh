@@ -60,7 +60,7 @@ struct AgentAdjacentDifferencePolicy
 template <typename Policy,
           typename InputIteratorT,
           typename OutputIteratorT,
-          typename FlagOpT,
+          typename DifferenceOpT,
           typename OffsetT,
           typename InputT,
           bool InPlace,
@@ -98,21 +98,21 @@ struct AgentDifference
   LoadIt load_it;
   InputT *first_tile_previous;
   OutputIteratorT result;
-  FlagOpT flag_op;
+  DifferenceOpT difference_op;
   OffsetT num_items;
 
   __device__ __forceinline__ AgentDifference(TempStorage &temp_storage,
                                              InputIteratorT input_it,
                                              InputT *first_tile_previous,
                                              OutputIteratorT result,
-                                             FlagOpT flag_op,
+                                             DifferenceOpT difference_op,
                                              OffsetT num_items)
       : temp_storage(temp_storage.Alias())
       , input_it(input_it)
       , load_it(input_it)
       , first_tile_previous(first_tile_previous)
       , result(result)
-      , flag_op(flag_op)
+      , difference_op(difference_op)
       , num_items(num_items)
   {}
 
@@ -144,7 +144,7 @@ struct AgentDifference
       if (IS_FIRST_TILE)
       {
         BlockAdjacentDifferenceT(temp_storage.adjacent_difference)
-          .SubtractLeft(output, input, flag_op);
+          .SubtractLeft(output, input, difference_op);
       }
       else
       {
@@ -152,7 +152,7 @@ struct AgentDifference
                                          : *(input_it + tile_base - 1);
 
         BlockAdjacentDifferenceT(temp_storage.adjacent_difference)
-          .SubtractLeft(output, input, flag_op, tile_prev_input);
+          .SubtractLeft(output, input, difference_op, tile_prev_input);
       }
     }
     else
@@ -160,7 +160,7 @@ struct AgentDifference
       if (IS_LAST_TILE)
       {
         BlockAdjacentDifferenceT(temp_storage.adjacent_difference)
-          .SubtractRightPartialTile(output, input, flag_op, num_remaining);
+          .SubtractRightPartialTile(output, input, difference_op, num_remaining);
       }
       else
       {
@@ -168,7 +168,7 @@ struct AgentDifference
                                          : *(input_it + tile_base + ITEMS_PER_TILE);
 
         BlockAdjacentDifferenceT(temp_storage.adjacent_difference)
-          .SubtractRight(output, input, flag_op, tile_next_input);
+          .SubtractRight(output, input, difference_op, tile_next_input);
       }
     }
 
