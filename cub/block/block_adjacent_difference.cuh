@@ -275,11 +275,9 @@ public:
      * \brief Collective constructor using a private static allocation of shared memory as temporary storage.
      */
     __device__ __forceinline__ BlockAdjacentDifference()
-    :
-        temp_storage(PrivateStorage()),
-        linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+        : temp_storage(PrivateStorage())
+        , linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
     {}
-
 
     /**
      * \brief Collective constructor using the specified memory allocation as temporary storage.
@@ -294,15 +292,16 @@ public:
 
     //@}  end member group
     /******************************************************************//**
-     * \name Head flag operations
+     * \name Read left operations
      *********************************************************************/
     //@{
 
-
-#ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
-
     /**
      * \brief Subtracts the left element of each adjacent pair of elements partitioned across a CUDA thread block.
+     *
+     * \par
+     * - \rowmajor
+     * - \smemreuse
      *
      * \par Snippet
      * The code snippet below illustrates how to use \p BlockAdjacentDifference to
@@ -335,10 +334,8 @@ public:
      *     ...
      *
      *     // Collectively compute adjacent_difference
-     *     int result[4];
-     *
      *     BlockAdjacentDifferenceT(temp_storage).SubtractLeft(
-     *         result,
+     *         thread_data,
      *         thread_data,
      *         CustomDifference());
      *
@@ -383,6 +380,10 @@ public:
     /**
      * \brief Subtracts the left element of each adjacent pair of elements partitioned across a CUDA thread block.
      *
+     * \par
+     * - \rowmajor
+     * - \smemreuse
+     *
      * \par Snippet
      * The code snippet below illustrates how to use \p BlockAdjacentDifference to
      * compute the left difference between adjacent elements.
@@ -413,14 +414,12 @@ public:
      *     int thread_data[4];
      *     ...
      *
-     *     // Collectively compute adjacent_difference
-     *     int result[4];
-     *
      *     // The last item in the previous tile:
      *     int tile_predecessor_item = ...;
      *
+     *     // Collectively compute adjacent_difference
      *     BlockAdjacentDifferenceT(temp_storage).SubtractLeft(
-     *         result,
+     *         thread_data,
      *         thread_data,
      *         CustomDifference(),
      *         tile_predecessor_item);
@@ -464,8 +463,18 @@ public:
       }
     }
 
+    //@}  end member group
+    /******************************************************************//**
+     * \name Read right operations
+     *********************************************************************/
+    //@{
+
     /**
      * \brief Subtracts the right element of each adjacent pair of elements partitioned across a CUDA thread block.
+     *
+     * \par
+     * - \rowmajor
+     * - \smemreuse
      *
      * \par Snippet
      * The code snippet below illustrates how to use \p BlockAdjacentDifference to
@@ -544,6 +553,10 @@ public:
     /**
      * \brief Subtracts the right element of each adjacent pair of elements partitioned across a CUDA thread block.
      *
+     * \par
+     * - \rowmajor
+     * - \smemreuse
+     *
      * \par Snippet
      * The code snippet below illustrates how to use \p BlockAdjacentDifference to
      * compute the right difference between adjacent elements.
@@ -574,14 +587,12 @@ public:
      *     int thread_data[4];
      *     ...
      *
-     *     // Collectively compute adjacent_difference
-     *     int result[4];
-     *
      *     // The first item in the nest tile:
      *     int tile_successor_item = ...;
      *
+     *     // Collectively compute adjacent_difference
      *     BlockAdjacentDifferenceT(temp_storage).SubtractRight(
-     *         result,
+     *         thread_data,
      *         thread_data,
      *         CustomDifference(),
      *         tile_successor_item);
@@ -625,6 +636,10 @@ public:
     /**
      * \brief Subtracts the right element of each adjacent pair in range of elements partitioned across a CUDA thread block.
      *
+     * \par
+     * - \rowmajor
+     * - \smemreuse
+     *
      * \par Snippet
      * The code snippet below illustrates how to use \p BlockAdjacentDifference to
      * compute the right difference between adjacent elements.
@@ -656,10 +671,8 @@ public:
      *     ...
      *
      *     // Collectively compute adjacent_difference
-     *     int result[4];
-     *
      *     BlockAdjacentDifferenceT(temp_storage).SubtractRightPartialTile(
-     *         result,
+     *         thread_data,
      *         thread_data,
      *         CustomDifference(),
      *         valid_items);
@@ -718,6 +731,14 @@ public:
         }
       }
     }
+
+    //@}  end member group
+    /******************************************************************//**
+     * \name Head flag operations (deprecated)
+     *********************************************************************/
+    //@{
+
+    #ifndef DOXYGEN_SHOULD_SKIP_THIS    // Do not document
 
     /**
      * \deprecated [Since 1.14.0] The cub::BlockAdjacentDifference::FlagHeads
