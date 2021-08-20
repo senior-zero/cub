@@ -367,7 +367,6 @@ public:
 
       if (linear_tid == 0)
       {
-        // preds[0] is undefined
         output[0] = input[0];
       }
       else
@@ -455,6 +454,107 @@ public:
       if (linear_tid == 0)
       {
         output[0] = difference_op(input[0], tile_predecessor_item);
+      }
+      else
+      {
+        output[0] = difference_op(input[0],
+                                  temp_storage.last_items[linear_tid - 1]);
+      }
+    }
+
+    /**
+     * \brief Subtracts the left element of each adjacent pair of elements partitioned across a CUDA thread block.
+     *
+     * \par
+     * - \rowmajor
+     * - \smemreuse
+     *
+     * \par Snippet
+     * The code snippet below illustrates how to use \p BlockAdjacentDifference to
+     * compute the left difference between adjacent elements.
+     *
+     * \par
+     * \code
+     * #include <cub/cub.cuh>   // or equivalently <cub/block/block_adjacent_difference.cuh>
+     *
+     * struct CustomDifference
+     * {
+     *   template <typename DataType>
+     *   __device__ DataType operator()(DataType &lhs, DataType &rhs)
+     *   {
+     *     return lhs - rhs;
+     *   }
+     * };
+     *
+     * __global__ void ExampleKernel(...)
+     * {
+     *     // Specialize BlockAdjacentDifference for a 1D block of 128 threads on type int
+     *     using BlockAdjacentDifferenceT =
+     *        cub::BlockAdjacentDifference<int, 128>;
+     *
+     *     // Allocate shared memory for BlockDiscontinuity
+     *     __shared__ typename BlockAdjacentDifferenceT::TempStorage temp_storage;
+     *
+     *     // Obtain a segment of consecutive items that are blocked across threads
+     *     int thread_data[4];
+     *     ...
+     *
+     *     // Collectively compute adjacent_difference
+     *     BlockAdjacentDifferenceT(temp_storage).SubtractLeft(
+     *         thread_data,
+     *         thread_data,
+     *         CustomDifference());
+     *
+     * \endcode
+     * \par
+     * Suppose the set of input \p thread_data across the block of threads is
+     * <tt>{ [4,2,1,1], [1,1,1,1], [2,3,3,3], [3,4,1,4], ... }</tt>.
+     * The corresponding output \p result in those threads will be
+     * <tt>{ [4,-2,-1,0], [0,0,0,0], [1,1,0,0], [0,1,-3,3], ... }</tt>.
+     */
+    template <int ITEMS_PER_THREAD,
+      typename OutputType,
+      typename DifferenceOpT>
+    __device__ __forceinline__ void
+    SubtractLeftPartialTile(OutputType (&output)[ITEMS_PER_THREAD], ///< [out] Calling thread's adjacent difference result
+                            T (&input)[ITEMS_PER_THREAD],           ///< [in] Calling thread's input items (may be aliased to \p output)
+                            DifferenceOpT difference_op,            ///< [in] Binary difference operator
+                            int           valid_items)              ///< [in] Number of valid items in thread block
+    {
+      // Share last item
+      temp_storage.last_items[linear_tid] = input[ITEMS_PER_THREAD - 1];
+
+      CTA_SYNC();
+
+      if ((linear_tid + 1) * ITEMS_PER_THREAD < valid_items)
+      {
+        #pragma unroll
+        for (int item = ITEMS_PER_THREAD - 1; item > 0; item--)
+        {
+          output[item] = difference_op(input[item], input[item - 1]);
+        }
+      }
+      else
+      {
+        #pragma unroll
+        for (int item = ITEMS_PER_THREAD - 1; item > 0; item--)
+        {
+          const int idx = linear_tid * ITEMS_PER_THREAD + item;
+
+          if (idx < valid_items)
+          {
+            output[item] = difference_op(input[item], input[item - 1]);
+          }
+          else
+          {
+            output[item] = input[item];
+          }
+        }
+      }
+
+      if (linear_tid == 0 || valid_items <= linear_tid * ITEMS_PER_THREAD)
+      {
+        output[0] = input[0];
       }
       else
       {

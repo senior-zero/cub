@@ -130,7 +130,8 @@ template <typename DataType,
           unsigned int ItemsPerThread,
           bool ReadLeft = false>
 __global__ void
-BlockAdjacentDifferenceLastTileTestKernel(DataType *data,
+BlockAdjacentDifferenceLastTileTestKernel(const DataType *input,
+                                          DataType *output,
                                           unsigned int valid_items)
 {
   using BlockAdjacentDifferenceT =
@@ -145,17 +146,17 @@ BlockAdjacentDifferenceLastTileTestKernel(DataType *data,
 
   for (unsigned int item = 0; item < ItemsPerThread; item++)
   {
-    const unsigned int idx = thread_offset + item;
-    thread_data[item] = idx < valid_items ? data[idx] : DataType();
+    thread_data[item] = input[thread_offset + item];
   }
   __syncthreads();
 
   if (ReadLeft)
   {
-    BlockAdjacentDifferenceT(temp_storage).SubtractLeft(
+    BlockAdjacentDifferenceT(temp_storage).SubtractLeftPartialTile(
       thread_result,
       thread_data,
-      CustomDifference());
+      CustomDifference(),
+      valid_items);
   }
   else
   {
@@ -168,14 +169,7 @@ BlockAdjacentDifferenceLastTileTestKernel(DataType *data,
 
   for (unsigned int item = 0; item < ItemsPerThread; item++)
   {
-    const unsigned int idx = thread_offset + item;
-
-    if (idx >= valid_items)
-    {
-      break;
-    }
-
-    data[idx] = thread_result[item];
+    output[thread_offset + item] = thread_result[item];
   }
 }
 
@@ -229,7 +223,8 @@ template <typename DataType,
           unsigned int ItemsPerThread,
           bool ReadLeft = false>
 __global__ void
-BlockAdjacentDifferenceLastTileTestInplaceKernel(DataType *data,
+BlockAdjacentDifferenceLastTileTestInplaceKernel(const DataType *input,
+                                                 DataType *output,
                                                  unsigned int valid_items)
 {
   using BlockAdjacentDifferenceT =
@@ -243,15 +238,17 @@ BlockAdjacentDifferenceLastTileTestInplaceKernel(DataType *data,
 
   for (unsigned int item = 0; item < ItemsPerThread; item++)
   {
-    const unsigned int idx = thread_offset + item;
-    thread_data[item]      = idx < valid_items ? data[idx] : DataType();
+    thread_data[item] = input[thread_offset + item];
   }
   __syncthreads();
 
   if (ReadLeft)
   {
     BlockAdjacentDifferenceT(temp_storage)
-      .SubtractLeft(thread_data, thread_data, CustomDifference());
+      .SubtractLeftPartialTile(thread_data,
+                               thread_data,
+                               CustomDifference(),
+                               valid_items);
   }
   else
   {
@@ -264,14 +261,7 @@ BlockAdjacentDifferenceLastTileTestInplaceKernel(DataType *data,
 
   for (unsigned int item = 0; item < ItemsPerThread; item++)
   {
-    const unsigned int idx = thread_offset + item;
-
-    if (idx >= valid_items)
-    {
-      break;
-    }
-
-    data[idx] = thread_data[item];
+    output[thread_offset + item] = thread_data[item];
   }
 }
 
@@ -324,14 +314,15 @@ template <typename DataType,
           unsigned int ItemsPerThread,
           unsigned int ThreadsInBlock,
           bool ReadLeft = false>
-void BlockAdjacentDifferenceLastTileTest(DataType *data,
+void BlockAdjacentDifferenceLastTileTest(const DataType *input,
+                                         DataType *output,
                                          unsigned int valid_items)
 {
   BlockAdjacentDifferenceLastTileTestKernel<DataType,
                                             ThreadsInBlock,
                                             ItemsPerThread,
                                             ReadLeft>
-    <<<1, ThreadsInBlock>>>(data, valid_items);
+    <<<1, ThreadsInBlock>>>(input, output, valid_items);
 
   CubDebugExit(cudaPeekAtLastError());
   CubDebugExit(cudaDeviceSynchronize());
@@ -358,14 +349,15 @@ template <typename DataType,
           unsigned int ItemsPerThread,
           unsigned int ThreadsInBlock,
           bool ReadLeft = false>
-void BlockAdjacentDifferenceLastTileInplaceTest(DataType *data,
+void BlockAdjacentDifferenceLastTileInplaceTest(const DataType *input,
+                                                DataType *output,
                                                 unsigned int valid_items)
 {
   BlockAdjacentDifferenceLastTileTestInplaceKernel<DataType,
                                                    ThreadsInBlock,
                                                    ItemsPerThread,
                                                    ReadLeft>
-    <<<1, ThreadsInBlock>>>(data, valid_items);
+    <<<1, ThreadsInBlock>>>(input, output, valid_items);
 
   CubDebugExit(cudaPeekAtLastError());
   CubDebugExit(cudaDeviceSynchronize());
@@ -410,31 +402,35 @@ template <typename DataType,
           unsigned int ThreadsInBlock>
 void TestLastTile(bool inplace,
                   unsigned int num_items,
-                  thrust::device_vector<DataType> &d_data)
+                  thrust::device_vector<DataType> &d_input)
 {
-  thrust::tabulate(d_data.begin(),
-                   d_data.end(),
+  thrust::tabulate(d_input.begin(),
+                   d_input.end(),
                    TestSequenceGenerator<DataType>{});
+  thrust::device_vector<DataType> d_output(d_input.size());
 
   constexpr bool read_left = true;
   constexpr bool read_right = false;
+
+  DataType *d_input_ptr = thrust::raw_pointer_cast(d_input.data());
+  DataType *d_output_ptr = thrust::raw_pointer_cast(d_output.data());
 
   if (inplace)
   {
     BlockAdjacentDifferenceLastTileInplaceTest<DataType,
                                                ItemsPerThread,
                                                ThreadsInBlock,
-                                               read_left>(
-      thrust::raw_pointer_cast(d_data.data()),
-      num_items);
+                                               read_left>(d_input_ptr,
+                                                          d_output_ptr,
+                                                          num_items);
   }
   else
   {
     BlockAdjacentDifferenceLastTileTest<DataType,
                                         ItemsPerThread,
                                         ThreadsInBlock,
-                                        read_left>(thrust::raw_pointer_cast(
-                                                     d_data.data()),
+                                        read_left>(d_input_ptr,
+                                                   d_output_ptr,
                                                    num_items);
   }
 
@@ -445,15 +441,18 @@ void TestLastTile(bool inplace,
         std::size_t,
         std::size_t>;
 
-    AssertTrue(CheckResult(d_data.begin() + 1,
-                           d_data.begin() + num_items,
+    AssertEquals(d_output.front(), d_input.front());
+    AssertTrue(CheckResult(d_output.begin() + 1,
+                           d_output.begin() + num_items,
                            CountingIteratorT(DataType{0})));
-    AssertEquals(d_data.front(), DataType{0});
+    AssertTrue(CheckResult(d_output.begin() + num_items,
+                           d_output.end(),
+                           d_input.begin() + num_items));
   }
 
 
-  thrust::tabulate(d_data.begin(),
-                   d_data.end(),
+  thrust::tabulate(d_input.begin(),
+                   d_input.end(),
                    TestSequenceGenerator<DataType>{});
 
   if (inplace)
@@ -461,17 +460,17 @@ void TestLastTile(bool inplace,
     BlockAdjacentDifferenceLastTileInplaceTest<DataType,
                                                ItemsPerThread,
                                                ThreadsInBlock,
-                                               read_right>(
-      thrust::raw_pointer_cast(d_data.data()),
-      num_items);
+                                               read_right>(d_input_ptr,
+                                                           d_output_ptr,
+                                                           num_items);
   }
   else
   {
     BlockAdjacentDifferenceLastTileTest<DataType,
                                         ItemsPerThread,
                                         ThreadsInBlock,
-                                        read_right>(thrust::raw_pointer_cast(
-                                                      d_data.data()),
+                                        read_right>(d_input_ptr,
+                                                    d_output_ptr,
                                                     num_items);
   }
 
@@ -482,11 +481,12 @@ void TestLastTile(bool inplace,
                      static_cast<DataType>(0),
                      static_cast<DataType>(-1));
 
-    AssertTrue(CheckResult(d_data.begin(),
-                           d_data.begin() + num_items - 1,
+    AssertTrue(CheckResult(d_output.begin(),
+                           d_output.begin() + num_items - 1,
                            reference.begin()));
-    AssertEquals(d_data[num_items - 1],
-                 TestSequenceGenerator<DataType>{}(num_items - 1));
+    AssertTrue(CheckResult(d_output.begin() + num_items - 1,
+                           d_output.end(),
+                           d_input.begin() + num_items - 1));
   }
 }
 
@@ -508,84 +508,6 @@ struct IntToCustomType
   }
 };
 
-template <unsigned int ItemsPerThread,
-          unsigned int ThreadsInBlock>
-void TestLastTile(bool inplace,
-                  unsigned int num_items,
-                  thrust::device_vector<CustomType> &d_data)
-{
-  thrust::tabulate(d_data.begin(), d_data.end(), IntToCustomType());
-
-  constexpr bool read_left  = true;
-  constexpr bool read_right = false;
-
-  if (inplace)
-  {
-    BlockAdjacentDifferenceLastTileInplaceTest<CustomType,
-                                               ItemsPerThread,
-                                               ThreadsInBlock,
-                                               read_left>(
-      thrust::raw_pointer_cast(d_data.data()),
-      num_items);
-  }
-  else
-  {
-    BlockAdjacentDifferenceLastTileTest<CustomType,
-      ItemsPerThread,
-      ThreadsInBlock,
-      read_left>(thrust::raw_pointer_cast(
-                   d_data.data()),
-                 num_items);
-  }
-
-  {
-    const std::size_t expected_count = num_items - 1;
-    const std::size_t actual_count =
-      thrust::count(d_data.begin(), d_data.end(), CustomType{1, 1});
-
-    AssertEquals(expected_count, actual_count);
-    AssertEquals(d_data.front(), CustomType{});
-  }
-
-  thrust::tabulate(d_data.begin(), d_data.end(), IntToCustomType());
-
-  if (inplace)
-  {
-    BlockAdjacentDifferenceLastTileInplaceTest<CustomType,
-                                               ItemsPerThread,
-                                               ThreadsInBlock,
-                                               read_right>(
-      thrust::raw_pointer_cast(d_data.data()),
-      num_items);
-  }
-  else
-  {
-    BlockAdjacentDifferenceLastTileTest<CustomType,
-                                        ItemsPerThread,
-                                        ThreadsInBlock,
-                                        read_right>(thrust::raw_pointer_cast(
-                                                      d_data.data()),
-                                                    num_items);
-  }
-
-  {
-    const auto unsigned_minus_one = static_cast<unsigned int>(-1);
-    const auto expected_count = static_cast<std::size_t>(num_items - 1);
-    const std::size_t actual_count =
-      thrust::count(d_data.begin(),
-                    d_data.end() - 1,
-                    CustomType{unsigned_minus_one, unsigned_minus_one});
-
-    AssertEquals(actual_count, expected_count);
-  }
-
-  {
-    const CustomType expected_value = CustomType{num_items - 1, num_items - 1};
-    const CustomType actual_value   = d_data.back();
-
-    AssertEquals(actual_value, expected_value);
-  }
-}
 
 template <typename DataType,
           unsigned int ItemsPerThread,
@@ -736,14 +658,11 @@ void Test(bool inplace)
 
   for (unsigned int num_items = tile_size; num_items > 1; num_items /= 2)
   {
-    d_values.resize(num_items);
-
     TestLastTile<ValueType, ItemsPerThread, ThreadsInBlock>(inplace,
                                                             num_items,
                                                             d_values);
   }
 
-  d_values.resize(tile_size);
   TestFullTile<ValueType, ItemsPerThread, ThreadsInBlock>(inplace, d_values);
 }
 
@@ -753,14 +672,6 @@ void TestCustomType(bool inplace)
 {
   constexpr int tile_size = ItemsPerThread * ThreadsInBlock;
   thrust::device_vector<CustomType> d_values(tile_size);
-
-  for (unsigned int num_items = tile_size; num_items > 1; num_items /= 2)
-  {
-    d_values.resize(num_items);
-    TestLastTile<ItemsPerThread, ThreadsInBlock>(inplace, num_items, d_values);
-  }
-
-  d_values.resize(tile_size);
   TestCustomType<ItemsPerThread, ThreadsInBlock>(inplace, d_values);
 }
 
