@@ -222,8 +222,9 @@ struct AgentDifference
 
 template <typename InputIteratorT,
           typename OutputIteratorT,
-          typename OffsetT>
-struct AgentDifferenceInitLeft
+          typename OffsetT,
+          bool ReadLeft>
+struct AgentDifferenceInit
 {
   static constexpr int BLOCK_THREADS = 128;
 
@@ -237,29 +238,14 @@ struct AgentDifferenceInitLeft
 
     if (tile_base > 0 && tile_idx < num_tiles)
     {
-      result[tile_idx] = first[tile_base - 1];
-    }
-  }
-};
-
-template <typename InputIteratorT,
-          typename OutputIteratorT,
-          typename OffsetT>
-struct AgentDifferenceInitRight
-{
-  static constexpr int BLOCK_THREADS = 128;
-
-  static __device__ __forceinline__ void Process(int tile_idx,
-                                                 InputIteratorT first,
-                                                 OutputIteratorT result,
-                                                 OffsetT num_tiles,
-                                                 int items_per_tile)
-  {
-    OffsetT tile_base = static_cast<OffsetT>(tile_idx) * items_per_tile;
-
-    if (tile_base > 0 && tile_idx < num_tiles)
-    {
-      result[tile_idx - 1] = first[tile_base];
+      if (ReadLeft)
+      {
+        result[tile_idx] = first[tile_base - 1];
+      }
+      else
+      {
+        result[tile_idx - 1] = first[tile_base];
+      }
     }
   }
 };

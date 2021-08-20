@@ -189,9 +189,9 @@ struct DispatchAdjacentDifference : public SelectedPolicy
 
     do
     {
-      const unsigned int tile_size = AdjacentDifferencePolicyT::ITEMS_PER_TILE;
-      const unsigned int num_tiles =
-        static_cast<unsigned int>(cub::DivideAndRoundUp(num_items, tile_size));
+      const int tile_size = AdjacentDifferencePolicyT::ITEMS_PER_TILE;
+      const int num_tiles =
+        static_cast<int>(cub::DivideAndRoundUp(num_items, tile_size));
 
       int shmem_size = AgentDifferenceT::SHARED_MEMORY_SIZE;
 
@@ -223,15 +223,11 @@ struct DispatchAdjacentDifference : public SelectedPolicy
 
       if (InPlace)
       {
-        using AgentDifferenceInitT = typename If<
-          ReadLeft,
-          AgentDifferenceInitLeft<InputIteratorT, OutputIteratorT, OffsetT>,
-          AgentDifferenceInitRight<InputIteratorT, OutputIteratorT, OffsetT>>::Type;
+        using AgentDifferenceInitT =
+          AgentDifferenceInit<InputIteratorT, OutputIteratorT, OffsetT, ReadLeft>;
 
-        const unsigned int init_block_size =
-          AgentDifferenceInitT::BLOCK_THREADS;
-
-        const unsigned int init_grid_size =
+        const int init_block_size = AgentDifferenceInitT::BLOCK_THREADS;
+        const int init_grid_size =
           cub::DivideAndRoundUp(num_tiles, init_block_size);
 
         THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(init_grid_size,
