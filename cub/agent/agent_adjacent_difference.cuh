@@ -33,6 +33,7 @@
 #include "../block/block_load.cuh"
 #include "../block/block_store.cuh"
 #include "../block/block_adjacent_difference.cuh"
+#include "../detail/type_traits.cuh"
 
 #include <thrust/system/cuda/detail/core/util.h>
 
@@ -67,13 +68,12 @@ template <typename Policy,
           bool ReadLeft>
 struct AgentDifference
 {
-  // XXX output type must be result of BinaryOp(input_type,input_type);
-  using OutputT = InputT;
+  using OutputT = detail::invoke_result_t<DifferenceOpT, InputT, InputT>;
 
   using LoadIt = typename THRUST_NS_QUALIFIER::cuda_cub::core::LoadIterator<Policy, InputIteratorT>::type;
 
   using BlockLoad = typename cub::BlockLoadType<Policy, LoadIt>::type;
-  using BlockStore = typename cub::BlockStoreType<Policy, OutputIteratorT, InputT>::type;
+  using BlockStore = typename cub::BlockStoreType<Policy, OutputIteratorT, OutputT>::type;
 
   using BlockAdjacentDifferenceT =
     cub::BlockAdjacentDifference<InputT, Policy::BLOCK_THREADS>;

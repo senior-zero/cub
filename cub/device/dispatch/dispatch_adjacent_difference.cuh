@@ -59,7 +59,7 @@ void __global__ DeviceAdjacentDifferenceInitKernel(InputIteratorT first,
 template <typename Policy,
           typename InputIteratorT,
           typename OutputIteratorT,
-          typename FlagOpT,
+          typename DifferenceOpT,
           typename OffsetT,
           typename InputT,
           bool InPlace,
@@ -68,13 +68,13 @@ void __global__
 DeviceAdjacentDifferenceDifferenceKernel(InputIteratorT input,
                                          InputT *first_tile_previous,
                                          OutputIteratorT result,
-                                         FlagOpT flag_op,
+                                         DifferenceOpT difference_op,
                                          OffsetT num_items)
 {
   using Agent = AgentDifference<Policy,
                                 InputIteratorT,
                                 OutputIteratorT,
-                                FlagOpT,
+                                DifferenceOpT,
                                 OffsetT,
                                 InputT,
                                 InPlace,
@@ -84,7 +84,12 @@ DeviceAdjacentDifferenceDifferenceKernel(InputIteratorT input,
   typename Agent::TempStorage &storage =
     *reinterpret_cast<typename Agent::TempStorage *>(shmem);
 
-  Agent agent(storage, input, first_tile_previous, result, flag_op, num_items);
+  Agent agent(storage,
+              input,
+              first_tile_previous,
+              result,
+              difference_op,
+              num_items);
 
   int tile_idx = static_cast<int>(blockIdx.x);
   OffsetT tile_base  = static_cast<OffsetT>(tile_idx) * Policy::ITEMS_PER_TILE;
@@ -126,7 +131,7 @@ struct DeviceAdjacentDifferencePolicy
 
 template <typename InputIteratorT,
           typename OutputIteratorT,
-          typename FlagOpT,
+          typename DifferenceOpT,
           typename OffsetT,
           bool InPlace,
           bool ReadLeft,
@@ -141,7 +146,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
   InputIteratorT d_input;
   OutputIteratorT d_output;
   OffsetT num_items;
-  FlagOpT flag_op;
+  DifferenceOpT difference_op;
   cudaStream_t stream;
   bool debug_synchronous;
 
@@ -151,7 +156,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
                              InputIteratorT d_input,
                              OutputIteratorT d_output,
                              OffsetT num_items,
-                             FlagOpT flag_op,
+                             DifferenceOpT difference_op,
                              cudaStream_t stream,
                              bool debug_synchronous)
       : d_temp_storage(d_temp_storage)
@@ -159,7 +164,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
       , d_input(d_input)
       , d_output(d_output)
       , num_items(num_items)
-      , flag_op(flag_op)
+      , difference_op(difference_op)
       , stream(stream)
       , debug_synchronous(debug_synchronous)
   {}
@@ -174,7 +179,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
     using AgentDifferenceT = AgentDifference<AdjacentDifferencePolicyT,
                                              InputIteratorT,
                                              OutputIteratorT,
-                                             FlagOpT,
+                                             DifferenceOpT,
                                              OffsetT,
                                              ValueT,
                                              InPlace,
@@ -214,7 +219,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
         }
       }
 
-      auto first_tile_previous = (ValueT *)allocations[0];
+      auto first_tile_previous = reinterpret_cast<ValueT *>(allocations[0]);
 
       if (InPlace)
       {
@@ -265,7 +270,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
         .doit(DeviceAdjacentDifferenceDifferenceKernel<AdjacentDifferencePolicyT,
                                                        InputIteratorT,
                                                        OutputIteratorT,
-                                                       FlagOpT,
+                                                       DifferenceOpT,
                                                        OffsetT,
                                                        ValueT,
                                                        InPlace,
@@ -273,7 +278,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
               d_input,
               first_tile_previous,
               d_output,
-              flag_op,
+              difference_op,
               num_items);
 
       if (debug_synchronous)
@@ -300,7 +305,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
                               InputIteratorT d_input,
                               OutputIteratorT d_output,
                               OffsetT num_items,
-                              FlagOpT flag_op,
+                              DifferenceOpT difference_op,
                               cudaStream_t stream,
                               bool debug_synchronous)
   {
@@ -327,7 +332,7 @@ struct DispatchAdjacentDifference : public SelectedPolicy
                                           d_input,
                                           d_output,
                                           num_items,
-                                          flag_op,
+                                          difference_op,
                                           stream,
                                           debug_synchronous);
 
