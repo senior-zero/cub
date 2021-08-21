@@ -198,6 +198,38 @@ using prepend_each = typename detail::prepend_each<T, TypeLists>::type;
 template <typename TypeLists>
 using cartesian_product = typename detail::cartesian_product<TypeLists>::type;
 
+template <typename TypeList, std::size_t>
+struct Fold;
+
+template <typename TypeList>
+struct Fold<TypeList, 0>
+{
+  template <typename ActionType>
+  void operator()(ActionType action)
+  {
+    action(wrapped_type<decltype(detail::get<0>(TypeList{}))>{});
+  }
+};
+
+template <typename TypeList, std::size_t Index>
+struct Fold
+{
+  template <typename ActionType>
+  void operator()(ActionType action)
+  {
+    action(wrapped_type<decltype(detail::get<Index>(TypeList{}))>{});
+    Fold<TypeList, Index - 1>{}(action);
+  }
+};
+
+template <typename TypeList, typename Functor>
+void foreach (Functor &&f)
+{
+  constexpr std::size_t list_size = decltype(detail::size(TypeList{}))::value;
+
+  Fold<TypeList, list_size - 1>{}(f);
+}
+
 } // namespace nvbench
 
 
