@@ -172,9 +172,7 @@ function(cub_add_gtest target_name_var test_name test_src cub_target)
     cub_enable_rdc_for_cuda_target(${test_target})
   endif()
 
-  add_test(NAME ${test_target}
-          COMMAND "$<TARGET_FILE:${test_target}>"
-          )
+  add_test(NAME ${test_target} COMMAND "$<TARGET_FILE:${test_target}>")
 endfunction()
 
 foreach (test_src IN LISTS gtest_srcs)

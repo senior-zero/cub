@@ -25,39 +25,599 @@
  *
  ******************************************************************************/
 
+/******************************************************************************
+ * Test of BlockAdjacentDifference utilities
+ ******************************************************************************/
+
 #include <gtest/gtest.h>
 
 #include <type_traits>
 #include <tuple>
 
 
-// Type parameter
-struct A1 {
-  char ch = 'A';
-};
+// Ensure printing of CUDA runtime errors to console
+#define CUB_STDERR
 
-struct A2 {
-  char ch = 'a';
-};
+#include <limits>
+#include <typeinfo>
+#include <memory>
 
-struct B1 {
-  char ch = 'B';
-};
+#include <cub/util_allocator.cuh>
+#include <cub/block/block_adjacent_difference.cuh>
 
-struct B2 {
-  char ch = 'b';
-};
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/device_vector.h>
+#include <thrust/host_vector.h>
+#include <thrust/random.h>
+#include <thrust/mismatch.h>
+#include <thrust/tabulate.h>
+#include <thrust/sequence.h>
+#include <thrust/shuffle.h>
+#include <thrust/sort.h>
+
+
+using namespace cub;
 
 
 template <typename T>
-class pair_test : public ::testing::Test {};
+class BlockAdjacentDifferenceTest: public ::testing::Test {};
 
-using test_types = ::testing::Types<std::tuple<A1,A2>, std::tuple<B1,B2>>;
-TYPED_TEST_SUITE(pair_test, test_types);
 
-TYPED_TEST(pair_test, compare_no_case)
+template <unsigned int ItemsPerThreadArg>
+struct ThreadConfiguration
 {
-  typename std::tuple_element<0, TypeParam>::type param1;
-  typename std::tuple_element<1, TypeParam>::type param2;
-  ASSERT_TRUE(param1.ch == std::toupper(param2.ch));
+  constexpr static unsigned int ItemsPerThread = ItemsPerThreadArg;
+};
+
+template <unsigned int ThreadsInBlockArg>
+struct ThreadBlockConfiguration
+{
+  constexpr static unsigned int ThreadsInBlock = ThreadsInBlockArg;
+};
+
+
+/**
+ * \brief Generates integer sequence \f$S_n=i(i-1)/2\f$.
+ *
+ * The adjacent difference of this sequence produce consecutive numbers:
+ * \f[
+ *   p = \frac{i(i - 1)}{2} \\
+ *   n = \frac{(i + 1) i}{2} \\
+ *   n - p = i \\
+ *   \frac{(i + 1) i}{2} - \frac{i (i - 1)}{2} = i \\
+ *   (i + 1) i - i (i - 1) = 2 i \\
+ *   (i + 1) - (i - 1) = 2 \\
+ *   2 = 2
+ * \f]
+ */
+template <typename DestT>
+struct TestSequenceGenerator
+{
+  std::size_t offset;
+
+  TestSequenceGenerator(std::size_t offset = 0)
+      : offset(offset)
+  {}
+
+  template <typename SourceT>
+  __device__ __host__ DestT operator()(SourceT index) const
+  {
+    index += static_cast<SourceT>(offset);
+    return static_cast<DestT>(index * (index - 1) / SourceT(2));
+  }
+};
+
+struct CustomType
+{
+  unsigned int key;
+  unsigned int value;
+
+  __device__ __host__ CustomType()
+      : key(0)
+      , value(0)
+  {}
+
+  __device__ __host__ CustomType(unsigned int key, unsigned int value)
+      : key(key)
+      , value(value)
+  {}
+};
+
+__device__ __host__ bool operator==(const CustomType &lhs,
+                                    const CustomType &rhs)
+{
+  return lhs.key == rhs.key && lhs.value == rhs.value;
+}
+
+__device__ __host__ bool operator!=(const CustomType &lhs,
+                                    const CustomType &rhs)
+{
+  return !(lhs == rhs);
+}
+
+__device__ __host__ CustomType operator-(const CustomType &lhs,
+                                         const CustomType &rhs)
+{
+  return CustomType{lhs.key - rhs.key, lhs.value - rhs.value};
+}
+
+struct CustomDifference
+{
+  template <typename DataType>
+  __device__ DataType operator()(DataType &lhs, DataType &rhs)
+  {
+    return lhs - rhs;
+  }
+};
+
+template <typename DataType,
+          unsigned int ThreadsInBlock,
+          unsigned int ItemsPerThread,
+          bool ReadLeft = false>
+__global__ void LastTileTestKernel(const DataType *input,
+                                   DataType *output,
+                                   unsigned int valid_items)
+{
+  using BlockAdjacentDifferenceT =
+    cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
+
+  __shared__ typename BlockAdjacentDifferenceT::TempStorage temp_storage;
+
+  DataType thread_data[ItemsPerThread];
+  DataType thread_result[ItemsPerThread];
+
+  const unsigned int thread_offset = threadIdx.x * ItemsPerThread;
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    thread_data[item] = input[thread_offset + item];
+  }
+  __syncthreads();
+
+  if (ReadLeft)
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractLeftPartialTile(thread_result,
+                               thread_data,
+                               CustomDifference(),
+                               valid_items);
+  }
+  else
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractRightPartialTile(thread_result,
+                                thread_data,
+                                CustomDifference(),
+                                valid_items);
+  }
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    output[thread_offset + item] = thread_result[item];
+  }
+}
+
+template <typename DataType,
+          unsigned int ThreadsInBlock,
+          unsigned int ItemsPerThread,
+          bool ReadLeft = false>
+__global__ void MiddleTileTestKernel(const DataType *input,
+                                     DataType *output,
+                                     DataType neighbour_tile_value)
+{
+  using BlockAdjacentDifferenceT =
+    cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
+
+  __shared__ typename BlockAdjacentDifferenceT::TempStorage temp_storage;
+
+  DataType thread_data[ItemsPerThread];
+  DataType thread_result[ItemsPerThread];
+
+  const unsigned int thread_offset = threadIdx.x * ItemsPerThread;
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    thread_data[item] = input[thread_offset + item];
+  }
+  __syncthreads();
+
+  if (ReadLeft)
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractLeft(thread_result,
+                    thread_data,
+                    CustomDifference(),
+                    neighbour_tile_value);
+  }
+  else
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractRight(thread_result,
+                     thread_data,
+                     CustomDifference(),
+                     neighbour_tile_value);
+  }
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    output[thread_offset + item] = thread_result[item];
+  }
+}
+
+template <typename DataType,
+          unsigned int ThreadsInBlock,
+          unsigned int ItemsPerThread,
+          bool ReadLeft = false>
+__global__ void MiddleTileInplaceTestKernel(const DataType *input,
+                                            DataType *output,
+                                            DataType neighbour_tile_value)
+{
+  using BlockAdjacentDifferenceT =
+    cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
+
+  __shared__ typename BlockAdjacentDifferenceT::TempStorage temp_storage;
+
+  DataType thread_data[ItemsPerThread];
+
+  const unsigned int thread_offset = threadIdx.x * ItemsPerThread;
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    thread_data[item] = input[thread_offset + item];
+  }
+  __syncthreads();
+
+  if (ReadLeft)
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractLeft(thread_data,
+                    thread_data,
+                    CustomDifference(),
+                    neighbour_tile_value);
+  }
+  else
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractRight(thread_data,
+                     thread_data,
+                     CustomDifference(),
+                     neighbour_tile_value);
+  }
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    output[thread_offset + item] = thread_data[item];
+  }
+}
+
+template <typename DataType,
+          unsigned int ThreadsInBlock,
+          unsigned int ItemsPerThread,
+          bool ReadLeft = false>
+__global__ void TestKernel(DataType *data)
+{
+  using BlockAdjacentDifferenceT =
+    cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
+
+  __shared__ typename BlockAdjacentDifferenceT::TempStorage temp_storage;
+
+  DataType thread_data[ItemsPerThread];
+  DataType thread_result[ItemsPerThread];
+
+  const unsigned int thread_offset = threadIdx.x * ItemsPerThread;
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    thread_data[item] = data[thread_offset + item];
+  }
+  __syncthreads();
+
+  if (ReadLeft)
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractLeft(thread_result, thread_data, CustomDifference());
+  }
+  else
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractRight(thread_result, thread_data, CustomDifference());
+  }
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    data[thread_offset + item] = thread_result[item];
+  }
+}
+
+template <typename DataType,
+          unsigned int ThreadsInBlock,
+          unsigned int ItemsPerThread,
+          bool ReadLeft = false>
+__global__ void LastTileTestInplaceKernel(const DataType *input,
+                                          DataType *output,
+                                          unsigned int valid_items)
+{
+  using BlockAdjacentDifferenceT =
+    cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
+
+  __shared__ typename BlockAdjacentDifferenceT::TempStorage temp_storage;
+
+  DataType thread_data[ItemsPerThread];
+
+  const unsigned int thread_offset = threadIdx.x * ItemsPerThread;
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    thread_data[item] = input[thread_offset + item];
+  }
+  __syncthreads();
+
+  if (ReadLeft)
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractLeftPartialTile(thread_data,
+                               thread_data,
+                               CustomDifference(),
+                               valid_items);
+  }
+  else
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractRightPartialTile(thread_data,
+                                thread_data,
+                                CustomDifference(),
+                                valid_items);
+  }
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    output[thread_offset + item] = thread_data[item];
+  }
+}
+
+template <typename DataType,
+          unsigned int ThreadsInBlock,
+          unsigned int ItemsPerThread,
+          bool ReadLeft = false>
+__global__ void TestInplaceKernel(DataType *data)
+{
+  using BlockAdjacentDifferenceT =
+    cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
+
+  __shared__ typename BlockAdjacentDifferenceT::TempStorage temp_storage;
+
+  DataType thread_data[ItemsPerThread];
+
+  const unsigned int thread_offset = threadIdx.x * ItemsPerThread;
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    thread_data[item] = data[thread_offset + item];
+  }
+  __syncthreads();
+
+  if (ReadLeft)
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractLeft(thread_data, thread_data, CustomDifference());
+  }
+  else
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractRight(thread_data, thread_data, CustomDifference());
+  }
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    data[thread_offset + item] = thread_data[item];
+  }
+}
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void LastTileTest(const DataType *input,
+                  DataType *output,
+                  unsigned int valid_items)
+{
+  LastTileTestKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(input, output, valid_items);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void Test(DataType *data)
+{
+  TestKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(data);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void MiddleTileTest(const DataType *input,
+                    DataType *output,
+                    DataType neighbour_tile_value)
+{
+  MiddleTileTestKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(input, output, neighbour_tile_value);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void LastTileInplaceTest(const DataType *input,
+                         DataType *output,
+                         unsigned int valid_items)
+{
+  LastTileTestInplaceKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(input, output, valid_items);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void InplaceTest(DataType *data)
+{
+  TestInplaceKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(data);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void MiddleTileInplaceTest(const DataType *input,
+                           DataType *output,
+                           DataType neighbour_tile_value)
+{
+  MiddleTileInplaceTestKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(input, output, neighbour_tile_value);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+template <typename FirstIteratorT, typename SecondOperatorT>
+bool CheckResult(FirstIteratorT first_begin,
+                 FirstIteratorT first_end,
+                 SecondOperatorT second_begin)
+{
+  auto err = thrust::mismatch(first_begin, first_end, second_begin);
+
+  if (err.first != first_end)
+  {
+    return false;
+  }
+
+  return true;
+}
+
+
+using TestConfigurations = ::testing::Types<
+  std::tuple<std::uint32_t,
+    ThreadConfiguration<1>,
+    ThreadBlockConfiguration<256>>,
+  std::tuple<std::uint64_t,
+    ThreadConfiguration<1>,
+    ThreadBlockConfiguration<256>>>;
+TYPED_TEST_SUITE(BlockAdjacentDifferenceTest, TestConfigurations);
+
+
+TYPED_TEST(BlockAdjacentDifferenceTest, LastTile)
+{
+  using DataType = typename std::tuple_element<0, TypeParam>::type;
+
+  using ThreadConfigurationT = typename std::tuple_element<1, TypeParam>::type;
+  constexpr unsigned int ItemsPerThread = ThreadConfigurationT::ItemsPerThread;
+
+  using ThreadBlockConfigurationT = typename std::tuple_element<2, TypeParam>::type;
+  constexpr unsigned int ThreadsInBlock =
+    ThreadBlockConfigurationT::ThreadsInBlock;
+
+  constexpr unsigned int tile_size = ItemsPerThread * ThreadsInBlock;
+  thrust::device_vector<DataType> d_input(tile_size);
+
+  for (bool inplace: { false, true })
+  {
+    for (unsigned int num_items = tile_size; num_items > 1; num_items /= 2)
+    {
+      thrust::tabulate(d_input.begin(),
+                       d_input.end(),
+                       TestSequenceGenerator<DataType>{});
+      thrust::device_vector<DataType> d_output(d_input.size());
+
+      constexpr bool read_left  = true;
+      constexpr bool read_right = false;
+
+      DataType *d_input_ptr  = thrust::raw_pointer_cast(d_input.data());
+      DataType *d_output_ptr = thrust::raw_pointer_cast(d_output.data());
+
+      if (inplace)
+      {
+        LastTileInplaceTest<DataType, ItemsPerThread, ThreadsInBlock, read_left>(
+          d_input_ptr,
+          d_output_ptr,
+          num_items);
+      }
+      else
+      {
+        LastTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_left>(
+          d_input_ptr,
+          d_output_ptr,
+          num_items);
+      }
+
+      {
+        using CountingIteratorT =
+        typename thrust::counting_iterator<DataType,
+          thrust::use_default,
+          std::size_t,
+          std::size_t>;
+
+        EXPECT_EQ(d_output.front(), d_input.front());
+        EXPECT_TRUE(CheckResult(d_output.begin() + 1,
+                                d_output.begin() + num_items,
+                                CountingIteratorT(DataType{0})));
+        EXPECT_TRUE(CheckResult(d_output.begin() + num_items,
+                    d_output.end(),
+                    d_input.begin() + num_items));
+      }
+
+      thrust::tabulate(d_input.begin(),
+                       d_input.end(),
+                       TestSequenceGenerator<DataType>{});
+
+      if (inplace)
+      {
+        LastTileInplaceTest<DataType, ItemsPerThread, ThreadsInBlock, read_right>(
+          d_input_ptr,
+          d_output_ptr,
+          num_items);
+      }
+      else
+      {
+        LastTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_right>(
+          d_input_ptr,
+          d_output_ptr,
+          num_items);
+      }
+
+      {
+        thrust::device_vector<DataType> reference(num_items);
+        thrust::sequence(reference.begin(),
+                         reference.end(),
+                         static_cast<DataType>(0),
+                         static_cast<DataType>(-1));
+
+        EXPECT_TRUE(CheckResult(d_output.begin(),
+                                d_output.begin() + num_items - 1,
+                                reference.begin()));
+        EXPECT_TRUE(CheckResult(d_output.begin() + num_items - 1,
+                                d_output.end(),
+                                d_input.begin() + num_items - 1));
+      }
+    }
+  }
 }
