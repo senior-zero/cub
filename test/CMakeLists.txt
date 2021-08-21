@@ -18,6 +18,12 @@ file(GLOB gtest_srcs
   gtest_*.cu
 )
 
+file(GLOB ctest_srcs
+  RELATIVE ${CUB_SOURCE_DIR}/test
+  CONFIGURE_DEPENDS
+  ctest_*.cu
+)
+
 ## cub_add_test
 #
 # Add a test executable and register it with ctest.
@@ -183,6 +189,49 @@ foreach (test_src IN LISTS gtest_srcs)
 
   foreach(cub_target IN LISTS CUB_TARGETS)
     cub_add_gtest(test_target ${test_name} "${test_src}" ${cub_target})
+  endforeach()
+endforeach()
+
+function(cub_add_ctest target_name_var test_name test_src cub_target)
+  cub_get_target_property(config_prefix ${cub_target} PREFIX)
+
+  # The actual name of the test's target:
+  set(test_target ${config_prefix}.ctest.${test_name})
+  set(${target_name_var} ${test_target} PARENT_SCOPE)
+
+  # Related target names:
+  set(config_meta_target ${config_prefix}.tests)
+  set(test_meta_target cub.all.test.${test_name})
+
+  add_executable(${test_target} "${test_src}")
+  target_link_libraries(${test_target} PRIVATE ${cub_target} Catch2::Catch2)
+  cub_clone_target_properties(${test_target} ${cub_target})
+  target_include_directories(${test_target} PRIVATE "${CUB_SOURCE_DIR}/test")
+
+  # Add to the active configuration's meta target
+  add_dependencies(${config_meta_target} ${test_target})
+
+  # Meta target that builds tests with this name for all configurations:
+  if (NOT TARGET ${test_meta_target})
+    add_custom_target(${test_meta_target})
+  endif()
+  add_dependencies(${test_meta_target} ${test_target})
+
+  if (CUB_ENABLE_TESTS_WITH_RDC)
+    cub_enable_rdc_for_cuda_target(${test_target})
+  endif()
+
+  add_test(NAME ${test_target} COMMAND "$<TARGET_FILE:${test_target}>")
+endfunction()
+
+foreach (test_src IN LISTS ctest_srcs)
+  # TODO: Per-test flags.
+
+  get_filename_component(test_name "${test_src}" NAME_WE)
+  string(REGEX REPLACE "^ctest_" "" test_name "${test_name}")
+
+  foreach(cub_target IN LISTS CUB_TARGETS)
+    cub_add_ctest(test_target ${test_name} "${test_src}" ${cub_target})
   endforeach()
 endforeach()
 

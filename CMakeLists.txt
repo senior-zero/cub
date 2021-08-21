@@ -127,6 +127,8 @@ if (CUB_ENABLE_TESTING)
           OPTIONS "INSTALL_GTEST OFF" "gtest_force_shared_crt"
   )
 
+  CPMAddPackage("gh:catchorg/Catch2@2.13.7")
+
   add_subdirectory(test)
 endif()
 
