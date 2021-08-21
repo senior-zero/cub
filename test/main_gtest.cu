@@ -26,38 +26,20 @@
  ******************************************************************************/
 
 #include <gtest/gtest.h>
+#include "test_util.h"
 
-#include <type_traits>
-#include <tuple>
-
-
-// Type parameter
-struct A1 {
-  char ch = 'A';
-};
-
-struct A2 {
-  char ch = 'a';
-};
-
-struct B1 {
-  char ch = 'B';
-};
-
-struct B2 {
-  char ch = 'b';
-};
-
-
-template <typename T>
-class pair_test : public ::testing::Test {};
-
-using test_types = ::testing::Types<std::tuple<A1,A2>, std::tuple<B1,B2>>;
-TYPED_TEST_SUITE(pair_test, test_types);
-
-TYPED_TEST(pair_test, compare_no_case)
+int main(int argc, char *argv[])
 {
-  typename std::tuple_element<0, TypeParam>::type param1;
-  typename std::tuple_element<1, TypeParam>::type param2;
-  ASSERT_TRUE(param1.ch == std::toupper(param2.ch));
+  CommandLineArgs args(argc, argv);
+
+  // Initialize device
+  CubDebugExit(args.DeviceInit());
+
+  ::testing::InitGoogleTest(&argc, argv);
+
+  for (int i = 1; i < argc; ++i) {
+    printf("arg %2d = %s\n", i, argv[i]);
+  }
+
+  return RUN_ALL_TESTS();
 }

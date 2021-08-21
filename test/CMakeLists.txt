@@ -154,7 +154,8 @@ function(cub_add_gtest target_name_var test_name test_src cub_target)
   set(test_meta_target cub.all.test.${test_name})
 
   add_executable(${test_target} "${test_src}")
-  target_link_libraries(${test_target} ${cub_target} gtest gtest_main gmock)
+  target_link_libraries(${test_target} ${cub_target} gtest gmock)
+  target_sources(${test_target} PRIVATE main_gtest.cu)
   cub_clone_target_properties(${test_target} ${cub_target})
   target_include_directories(${test_target} PRIVATE "${CUB_SOURCE_DIR}/test")
 
