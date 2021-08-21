@@ -71,9 +71,16 @@ using namespace cub;
 template <typename DestT>
 struct TestSequenceGenerator
 {
+  std::size_t offset;
+
+  TestSequenceGenerator(std::size_t offset = 0)
+      : offset(offset)
+  {}
+
   template <typename SourceT>
   __device__ __host__ DestT operator()(SourceT index) const
   {
+    index += static_cast<SourceT>(offset);
     return static_cast<DestT>(index * (index - 1) / SourceT(2));
   }
 };
@@ -129,10 +136,9 @@ template <typename DataType,
           unsigned int ThreadsInBlock,
           unsigned int ItemsPerThread,
           bool ReadLeft = false>
-__global__ void
-BlockAdjacentDifferenceLastTileTestKernel(const DataType *input,
-                                          DataType *output,
-                                          unsigned int valid_items)
+__global__ void LastTileTestKernel(const DataType *input,
+                                   DataType *output,
+                                   unsigned int valid_items)
 {
   using BlockAdjacentDifferenceT =
     cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
@@ -178,7 +184,102 @@ template <typename DataType,
           unsigned int ThreadsInBlock,
           unsigned int ItemsPerThread,
           bool ReadLeft = false>
-__global__ void BlockAdjacentDifferenceTestKernel(DataType *data)
+__global__ void MiddleTileTestKernel(const DataType *input,
+                                     DataType *output,
+                                     DataType neighbour_tile_value)
+{
+  using BlockAdjacentDifferenceT =
+    cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
+
+  __shared__ typename BlockAdjacentDifferenceT::TempStorage temp_storage;
+
+  DataType thread_data[ItemsPerThread];
+  DataType thread_result[ItemsPerThread];
+
+  const unsigned int thread_offset = threadIdx.x * ItemsPerThread;
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    thread_data[item] = input[thread_offset + item];
+  }
+  __syncthreads();
+
+  if (ReadLeft)
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractLeft(thread_result,
+                    thread_data,
+                    CustomDifference(),
+                    neighbour_tile_value);
+  }
+  else
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractRight(thread_result,
+                     thread_data,
+                     CustomDifference(),
+                     neighbour_tile_value);
+  }
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    output[thread_offset + item] = thread_result[item];
+  }
+}
+
+
+template <typename DataType,
+          unsigned int ThreadsInBlock,
+          unsigned int ItemsPerThread,
+          bool ReadLeft = false>
+__global__ void MiddleTileInplaceTestKernel(const DataType *input,
+                                            DataType *output,
+                                            DataType neighbour_tile_value)
+{
+  using BlockAdjacentDifferenceT =
+    cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
+
+  __shared__ typename BlockAdjacentDifferenceT::TempStorage temp_storage;
+
+  DataType thread_data[ItemsPerThread];
+
+  const unsigned int thread_offset = threadIdx.x * ItemsPerThread;
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    thread_data[item] = input[thread_offset + item];
+  }
+  __syncthreads();
+
+  if (ReadLeft)
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractLeft(thread_data,
+                    thread_data,
+                    CustomDifference(),
+                    neighbour_tile_value);
+  }
+  else
+  {
+    BlockAdjacentDifferenceT(temp_storage)
+      .SubtractRight(thread_data,
+                     thread_data,
+                     CustomDifference(),
+                     neighbour_tile_value);
+  }
+
+  for (unsigned int item = 0; item < ItemsPerThread; item++)
+  {
+    output[thread_offset + item] = thread_data[item];
+  }
+}
+
+
+template <typename DataType,
+          unsigned int ThreadsInBlock,
+          unsigned int ItemsPerThread,
+          bool ReadLeft = false>
+__global__ void TestKernel(DataType *data)
 {
   using BlockAdjacentDifferenceT =
     cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
@@ -222,10 +323,9 @@ template <typename DataType,
           unsigned int ThreadsInBlock,
           unsigned int ItemsPerThread,
           bool ReadLeft = false>
-__global__ void
-BlockAdjacentDifferenceLastTileTestInplaceKernel(const DataType *input,
-                                                 DataType *output,
-                                                 unsigned int valid_items)
+__global__ void LastTileTestInplaceKernel(const DataType *input,
+                                          DataType *output,
+                                          unsigned int valid_items)
 {
   using BlockAdjacentDifferenceT =
     cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
@@ -265,13 +365,11 @@ BlockAdjacentDifferenceLastTileTestInplaceKernel(const DataType *input,
   }
 }
 
-
 template <typename DataType,
           unsigned int ThreadsInBlock,
           unsigned int ItemsPerThread,
           bool ReadLeft = false>
-__global__ void
-BlockAdjacentDifferenceTestInplaceKernel(DataType *data)
+__global__ void TestInplaceKernel(DataType *data)
 {
   using BlockAdjacentDifferenceT =
     cub::BlockAdjacentDifference<DataType, ThreadsInBlock>;
@@ -309,19 +407,15 @@ BlockAdjacentDifferenceTestInplaceKernel(DataType *data)
   }
 }
 
-
 template <typename DataType,
           unsigned int ItemsPerThread,
           unsigned int ThreadsInBlock,
           bool ReadLeft = false>
-void BlockAdjacentDifferenceLastTileTest(const DataType *input,
-                                         DataType *output,
-                                         unsigned int valid_items)
+void LastTileTest(const DataType *input,
+                  DataType *output,
+                  unsigned int valid_items)
 {
-  BlockAdjacentDifferenceLastTileTestKernel<DataType,
-                                            ThreadsInBlock,
-                                            ItemsPerThread,
-                                            ReadLeft>
+  LastTileTestKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
     <<<1, ThreadsInBlock>>>(input, output, valid_items);
 
   CubDebugExit(cudaPeekAtLastError());
@@ -333,48 +427,72 @@ template <typename DataType,
           unsigned int ItemsPerThread,
           unsigned int ThreadsInBlock,
           bool ReadLeft = false>
-void BlockAdjacentDifferenceTest(DataType *data)
+void Test(DataType *data)
 {
-  BlockAdjacentDifferenceTestKernel<DataType,
-                                    ThreadsInBlock,
-                                    ItemsPerThread,
-                                    ReadLeft><<<1, ThreadsInBlock>>>(data);
-
-  CubDebugExit(cudaPeekAtLastError());
-  CubDebugExit(cudaDeviceSynchronize());
-}
-
-
-template <typename DataType,
-          unsigned int ItemsPerThread,
-          unsigned int ThreadsInBlock,
-          bool ReadLeft = false>
-void BlockAdjacentDifferenceLastTileInplaceTest(const DataType *input,
-                                                DataType *output,
-                                                unsigned int valid_items)
-{
-  BlockAdjacentDifferenceLastTileTestInplaceKernel<DataType,
-                                                   ThreadsInBlock,
-                                                   ItemsPerThread,
-                                                   ReadLeft>
-    <<<1, ThreadsInBlock>>>(input, output, valid_items);
-
-  CubDebugExit(cudaPeekAtLastError());
-  CubDebugExit(cudaDeviceSynchronize());
-}
-
-
-template <typename DataType,
-          unsigned int ItemsPerThread,
-          unsigned int ThreadsInBlock,
-          bool ReadLeft = false>
-void BlockAdjacentDifferenceInplaceTest(DataType *data)
-{
-  BlockAdjacentDifferenceTestInplaceKernel<DataType,
-                                           ThreadsInBlock,
-                                           ItemsPerThread,
-                                           ReadLeft>
+  TestKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
     <<<1, ThreadsInBlock>>>(data);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void MiddleTileTest(const DataType *input,
+                    DataType *output,
+                    DataType neighbour_tile_value)
+{
+  MiddleTileTestKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(input, output, neighbour_tile_value);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void LastTileInplaceTest(const DataType *input,
+                         DataType *output,
+                         unsigned int valid_items)
+{
+  LastTileTestInplaceKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(input, output, valid_items);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void InplaceTest(DataType *data)
+{
+  TestInplaceKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(data);
+
+  CubDebugExit(cudaPeekAtLastError());
+  CubDebugExit(cudaDeviceSynchronize());
+}
+
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock,
+          bool ReadLeft = false>
+void MiddleTileInplaceTest(const DataType *input,
+                           DataType *output,
+                           DataType neighbour_tile_value)
+{
+  MiddleTileInplaceTestKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
+    <<<1, ThreadsInBlock>>>(input, output, neighbour_tile_value);
 
   CubDebugExit(cudaPeekAtLastError());
   CubDebugExit(cudaDeviceSynchronize());
@@ -397,6 +515,7 @@ bool CheckResult(FirstIteratorT first_begin,
   return true;
 }
 
+
 template <typename DataType,
           unsigned int ItemsPerThread,
           unsigned int ThreadsInBlock>
@@ -417,21 +536,17 @@ void TestLastTile(bool inplace,
 
   if (inplace)
   {
-    BlockAdjacentDifferenceLastTileInplaceTest<DataType,
-                                               ItemsPerThread,
-                                               ThreadsInBlock,
-                                               read_left>(d_input_ptr,
-                                                          d_output_ptr,
-                                                          num_items);
+    LastTileInplaceTest<DataType, ItemsPerThread, ThreadsInBlock, read_left>(
+      d_input_ptr,
+      d_output_ptr,
+      num_items);
   }
   else
   {
-    BlockAdjacentDifferenceLastTileTest<DataType,
-                                        ItemsPerThread,
-                                        ThreadsInBlock,
-                                        read_left>(d_input_ptr,
-                                                   d_output_ptr,
-                                                   num_items);
+    LastTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_left>(
+      d_input_ptr,
+      d_output_ptr,
+      num_items);
   }
 
   {
@@ -457,21 +572,17 @@ void TestLastTile(bool inplace,
 
   if (inplace)
   {
-    BlockAdjacentDifferenceLastTileInplaceTest<DataType,
-                                               ItemsPerThread,
-                                               ThreadsInBlock,
-                                               read_right>(d_input_ptr,
-                                                           d_output_ptr,
-                                                           num_items);
+    LastTileInplaceTest<DataType, ItemsPerThread, ThreadsInBlock, read_right>(
+      d_input_ptr,
+      d_output_ptr,
+      num_items);
   }
   else
   {
-    BlockAdjacentDifferenceLastTileTest<DataType,
-                                        ItemsPerThread,
-                                        ThreadsInBlock,
-                                        read_right>(d_input_ptr,
-                                                    d_output_ptr,
-                                                    num_items);
+    LastTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_right>(
+      d_input_ptr,
+      d_output_ptr,
+      num_items);
   }
 
   {
@@ -489,6 +600,89 @@ void TestLastTile(bool inplace,
                            d_input.begin() + num_items - 1));
   }
 }
+
+
+template <typename DataType,
+          unsigned int ItemsPerThread,
+          unsigned int ThreadsInBlock>
+void TestMiddleTile(bool inplace,
+                    thrust::device_vector<DataType> &d_input)
+{
+  thrust::tabulate(d_input.begin(),
+                   d_input.end(),
+                   TestSequenceGenerator<DataType>{std::size_t{1}});
+  thrust::device_vector<DataType> d_output(d_input.size());
+
+  constexpr bool read_left  = true;
+  constexpr bool read_right = false;
+
+  DataType *d_input_ptr  = thrust::raw_pointer_cast(d_input.data());
+  DataType *d_output_ptr = thrust::raw_pointer_cast(d_output.data());
+
+  const DataType left_tile_last_value{0};
+  const DataType right_tile_first_value{
+    TestSequenceGenerator<DataType>{}(d_input.size())
+  };
+
+  if (inplace)
+  {
+    MiddleTileInplaceTest<DataType, ItemsPerThread, ThreadsInBlock, read_left>(
+      d_input_ptr,
+      d_output_ptr,
+      left_tile_last_value);
+  }
+  else
+  {
+    MiddleTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_left>(
+      d_input_ptr,
+      d_output_ptr,
+      left_tile_last_value);
+  }
+
+  {
+    using CountingIteratorT =
+      typename thrust::counting_iterator<DataType,
+                                         thrust::use_default,
+                                         std::size_t,
+                                         std::size_t>;
+
+    AssertTrue(CheckResult(d_output.begin(),
+                           d_output.end(),
+                           CountingIteratorT(DataType{0})));
+  }
+
+  thrust::tabulate(d_input.begin(),
+                   d_input.end(),
+                   TestSequenceGenerator<DataType>{});
+
+  if (inplace)
+  {
+    MiddleTileInplaceTest<DataType, ItemsPerThread, ThreadsInBlock, read_right>(
+      d_input_ptr,
+      d_output_ptr,
+      right_tile_first_value);
+  }
+  else
+  {
+    MiddleTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_right>(
+      d_input_ptr,
+      d_output_ptr,
+      right_tile_first_value);
+  }
+
+  {
+    thrust::device_vector<DataType> reference(d_input.size());
+    thrust::sequence(reference.begin(),
+                     reference.end(),
+                     static_cast<DataType>(0),
+                     static_cast<DataType>(-1));
+
+    AssertTrue(CheckResult(d_output.begin(),
+                           d_output.end(),
+                           reference.begin()));
+  }
+}
+
 
 struct IntToCustomType
 {
@@ -526,17 +720,12 @@ void TestFullTile(bool inplace,
 
   if (inplace)
   {
-    BlockAdjacentDifferenceInplaceTest<DataType,
-                                       ItemsPerThread,
-                                       ThreadsInBlock,
-                                       read_left>(d_data_ptr);
+    InplaceTest<DataType, ItemsPerThread, ThreadsInBlock, read_left>(
+      d_data_ptr);
   }
   else
   {
-    BlockAdjacentDifferenceTest<DataType,
-                                ItemsPerThread,
-                                ThreadsInBlock,
-                                read_left>(d_data_ptr);
+    Test<DataType, ItemsPerThread, ThreadsInBlock, read_left>(d_data_ptr);
   }
 
   {
@@ -558,17 +747,12 @@ void TestFullTile(bool inplace,
 
   if (inplace)
   {
-    BlockAdjacentDifferenceInplaceTest<DataType,
-                                       ItemsPerThread,
-                                       ThreadsInBlock,
-                                       read_right>(d_data_ptr);
+    InplaceTest<DataType, ItemsPerThread, ThreadsInBlock, read_right>(
+      d_data_ptr);
   }
   else
   {
-    BlockAdjacentDifferenceTest<DataType,
-                                ItemsPerThread,
-                                ThreadsInBlock,
-                                read_right>(d_data_ptr);
+    Test<DataType, ItemsPerThread, ThreadsInBlock, read_right>(d_data_ptr);
   }
 
   {
@@ -600,17 +784,12 @@ void TestCustomType(bool inplace,
 
   if (inplace)
   {
-    BlockAdjacentDifferenceInplaceTest<CustomType,
-                                       ItemsPerThread,
-                                       ThreadsInBlock,
-                                       read_left>(d_data_ptr);
+    InplaceTest<CustomType, ItemsPerThread, ThreadsInBlock, read_left>(
+      d_data_ptr);
   }
   else
   {
-    BlockAdjacentDifferenceTest<CustomType,
-                                ItemsPerThread,
-                                ThreadsInBlock,
-                                read_left>(d_data_ptr);
+    Test<CustomType, ItemsPerThread, ThreadsInBlock, read_left>(d_data_ptr);
   }
 
   {
@@ -625,17 +804,12 @@ void TestCustomType(bool inplace,
 
   if (inplace)
   {
-    BlockAdjacentDifferenceInplaceTest<CustomType,
-                                       ItemsPerThread,
-                                       ThreadsInBlock,
-                                       read_right>(d_data_ptr);
+    InplaceTest<CustomType, ItemsPerThread, ThreadsInBlock, read_right>(
+      d_data_ptr);
   }
   else
   {
-    BlockAdjacentDifferenceTest<CustomType,
-      ItemsPerThread,
-      ThreadsInBlock,
-      read_right>(d_data_ptr);
+    Test<CustomType, ItemsPerThread, ThreadsInBlock, read_right>(d_data_ptr);
   }
 
   {
@@ -669,6 +843,7 @@ void Test(bool inplace)
   }
 
   TestFullTile<ValueType, ItemsPerThread, ThreadsInBlock>(inplace, d_values);
+  TestMiddleTile<ValueType, ItemsPerThread, ThreadsInBlock>(inplace, d_values);
 }
 
 
