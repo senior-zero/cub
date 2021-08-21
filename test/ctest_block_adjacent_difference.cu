@@ -567,7 +567,7 @@ TEMPLATE_PRODUCT_TEST_CASE("BlockAdjacentDifference in last tile",
                            (std::uint16_t, std::uint32_t, std::uint64_t))
 {
   using DataType = typename TestType::Type;
-  constexpr unsigned int ItemsPerThread = TestType::ItemsPerThread;
+  constexpr unsigned int ItemsPerThread = TestType::ItemsPerThread; // GENERATE doesn't return compile-time result
   constexpr unsigned int ThreadsInBlock = TestType::ThreadsInBlock;
 
   constexpr unsigned int tile_size = ItemsPerThread * ThreadsInBlock;
