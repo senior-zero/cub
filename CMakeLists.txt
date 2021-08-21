@@ -117,6 +117,16 @@ if (CUB_ENABLE_TESTING OR CUB_ENABLE_EXAMPLES)
 endif()
 
 if (CUB_ENABLE_TESTING)
+  include(cmake/CPM.cmake)
+
+  CPMAddPackage(
+          NAME googletest
+          GITHUB_REPOSITORY google/googletest
+          GIT_TAG release-1.10.0
+          VERSION 1.10.0
+          OPTIONS "INSTALL_GTEST OFF" "gtest_force_shared_crt"
+  )
+
   add_subdirectory(test)
 endif()
 
