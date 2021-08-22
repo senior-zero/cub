@@ -35,6 +35,10 @@
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch.hpp>
 
+
+#include "cartesian_product.h"
+
+
 // Ensure printing of CUDA runtime errors to console
 #define CUB_STDERR
 
@@ -417,8 +421,8 @@ void LastTileTest(const DataType *input,
   LastTileTestKernel<DataType, ThreadsInBlock, ItemsPerThread, ReadLeft>
     <<<1, ThreadsInBlock>>>(input, output, valid_items);
 
-  CubDebugExit(cudaPeekAtLastError());
-  CubDebugExit(cudaDeviceSynchronize());
+  REQUIRE( cudaPeekAtLastError() == cudaSuccess );
+  REQUIRE( cudaDeviceSynchronize() == cudaSuccess );
 }
 
 template <typename DataType,
@@ -507,157 +511,119 @@ bool CheckResult(FirstIteratorT first_begin,
   return true;
 }
 
-template <typename T>
-struct Configuration256TB1IPT
-{
-  using Type = T;
-  constexpr static unsigned int ThreadsInBlock = 256;
-  constexpr static unsigned int ItemsPerThread = 1;
-};
 
-template <typename T>
-struct Configuration256TB2IPT
-{
-  using Type = T;
-  constexpr static unsigned int ThreadsInBlock = 256;
-  constexpr static unsigned int ItemsPerThread = 2;
-};
-
-template <typename T>
-struct Configuration256TB4IPT
-{
-  using Type = T;
-  constexpr static unsigned int ThreadsInBlock = 256;
-  constexpr static unsigned int ItemsPerThread = 4;
-};
-
-template <typename T>
-struct Configuration128TB1IPT
-{
-  using Type = T;
-  constexpr static unsigned int ThreadsInBlock = 128;
-  constexpr static unsigned int ItemsPerThread = 1;
-};
-
-template <typename T>
 struct Configuration128TB2IPT
 {
-  using Type = T;
   constexpr static unsigned int ThreadsInBlock = 128;
   constexpr static unsigned int ItemsPerThread = 2;
 };
 
-template <typename T>
 struct Configuration128TB4IPT
 {
-  using Type = T;
   constexpr static unsigned int ThreadsInBlock = 128;
   constexpr static unsigned int ItemsPerThread = 4;
 };
 
+using threads_in_block = nvbench::enum_type_list<32, 512, 1024>;
+using items_per_thread = nvbench::enum_type_list<1, 2, 4>;
+using types = nvbench::cartesian_product<nvbench::type_list<
+  nvbench::type_list<int>,
+  items_per_thread,
+  threads_in_block>>;
 
-TEMPLATE_PRODUCT_TEST_CASE("BlockAdjacentDifference in last tile",
-                           "[left][right]",
-                           (Configuration128TB1IPT,
-                            Configuration128TB2IPT,
-                            Configuration128TB4IPT,
-                            Configuration256TB1IPT,
-                            Configuration256TB2IPT,
-                            Configuration256TB4IPT),
-                           (std::uint16_t, std::uint32_t, std::uint64_t))
+TEMPLATE_LIST_TEST_CASE("BlockAdjacentDifference in last tile",
+                        "[left][right]",
+                        types)
 {
-  using DataType = typename TestType::Type;
-  constexpr unsigned int ItemsPerThread = TestType::ItemsPerThread; // GENERATE doesn't return compile-time result
-  constexpr unsigned int ThreadsInBlock = TestType::ThreadsInBlock;
+  using DataType = nvbench::get<0, TestType>;
+  constexpr unsigned int ItemsPerThread = nvbench::get<1, TestType>::value;
+  constexpr unsigned int ThreadsInBlock = nvbench::get<2, TestType>::value;
 
   constexpr unsigned int tile_size = ItemsPerThread * ThreadsInBlock;
   thrust::device_vector<DataType> d_input(tile_size);
 
-  for (bool inplace : {false, true})
+  const bool inplace = GENERATE(0, 1);
+  const unsigned int num_items = GENERATE_COPY(take(50, random(1u, tile_size)));
+
+  thrust::tabulate(d_input.begin(),
+                   d_input.end(),
+                   TestSequenceGenerator<DataType>{});
+  thrust::device_vector<DataType> d_output(d_input.size());
+
+  constexpr bool read_left  = true;
+  constexpr bool read_right = false;
+
+  DataType *d_input_ptr  = thrust::raw_pointer_cast(d_input.data());
+  DataType *d_output_ptr = thrust::raw_pointer_cast(d_output.data());
+
+  SECTION( "calculating left adjacent difference" )
   {
-    for (unsigned int num_items = tile_size; num_items > 1; num_items /= 2)
+    if (inplace)
     {
-      thrust::tabulate(d_input.begin(),
-                       d_input.end(),
-                       TestSequenceGenerator<DataType>{});
-      thrust::device_vector<DataType> d_output(d_input.size());
+      LastTileInplaceTest<DataType,
+                          ItemsPerThread,
+                          ThreadsInBlock,
+                          read_left>(d_input_ptr, d_output_ptr, num_items);
+    }
+    else
+    {
+      LastTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_left>(
+        d_input_ptr,
+        d_output_ptr,
+        num_items);
+    }
 
-      constexpr bool read_left  = true;
-      constexpr bool read_right = false;
+    {
+      using CountingIteratorT =
+      typename thrust::counting_iterator<DataType,
+        thrust::use_default,
+        std::size_t,
+        std::size_t>;
 
-      DataType *d_input_ptr  = thrust::raw_pointer_cast(d_input.data());
-      DataType *d_output_ptr = thrust::raw_pointer_cast(d_output.data());
+      REQUIRE( d_output.front() == d_input.front() );
+      REQUIRE( CheckResult(d_output.begin() + 1,
+                           d_output.begin() + num_items,
+                           CountingIteratorT(DataType{0})));
+      REQUIRE( CheckResult(d_output.begin() + num_items,
+                           d_output.end(),
+                           d_input.begin() + num_items));
+    }
+  }
 
-      SECTION( "calculating left adjacent difference" )
-      {
-        if (inplace)
-        {
-          LastTileInplaceTest<DataType,
-                              ItemsPerThread,
-                              ThreadsInBlock,
-                              read_left>(d_input_ptr, d_output_ptr, num_items);
-        }
-        else
-        {
-          LastTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_left>(
-            d_input_ptr,
-            d_output_ptr,
-            num_items);
-        }
+  thrust::tabulate(d_input.begin(),
+                   d_input.end(),
+                   TestSequenceGenerator<DataType>{});
 
-        {
-          using CountingIteratorT =
-          typename thrust::counting_iterator<DataType,
-            thrust::use_default,
-            std::size_t,
-            std::size_t>;
+  SECTION( "calculating right adjacent difference" )
+  {
+    if (inplace)
+    {
+      LastTileInplaceTest<DataType,
+                          ItemsPerThread,
+                          ThreadsInBlock,
+                          read_right>(d_input_ptr, d_output_ptr, num_items);
+    }
+    else
+    {
+      LastTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_right>(
+        d_input_ptr,
+        d_output_ptr,
+        num_items);
+    }
 
-          REQUIRE( d_output.front() == d_input.front() );
-          REQUIRE( CheckResult(d_output.begin() + 1,
-                               d_output.begin() + num_items,
-                               CountingIteratorT(DataType{0})));
-          REQUIRE( CheckResult(d_output.begin() + num_items,
-                               d_output.end(),
-                               d_input.begin() + num_items));
-        }
-      }
+    {
+      thrust::device_vector<DataType> reference(num_items);
+      thrust::sequence(reference.begin(),
+                       reference.end(),
+                       static_cast<DataType>(0),
+                       static_cast<DataType>(-1));
 
-      thrust::tabulate(d_input.begin(),
-                       d_input.end(),
-                       TestSequenceGenerator<DataType>{});
-
-      SECTION( "calculating right adjacent difference" )
-      {
-        if (inplace)
-        {
-          LastTileInplaceTest<DataType,
-                              ItemsPerThread,
-                              ThreadsInBlock,
-                              read_right>(d_input_ptr, d_output_ptr, num_items);
-        }
-        else
-        {
-          LastTileTest<DataType, ItemsPerThread, ThreadsInBlock, read_right>(
-            d_input_ptr,
-            d_output_ptr,
-            num_items);
-        }
-
-        {
-          thrust::device_vector<DataType> reference(num_items);
-          thrust::sequence(reference.begin(),
-                           reference.end(),
-                           static_cast<DataType>(0),
-                           static_cast<DataType>(-1));
-
-          REQUIRE(CheckResult(d_output.begin(),
-                              d_output.begin() + num_items - 1,
-                              reference.begin()));
-          REQUIRE(CheckResult(d_output.begin() + num_items - 1,
-                              d_output.end(),
-                              d_input.begin() + num_items - 1));
-        }
-      }
+      REQUIRE(CheckResult(d_output.begin(),
+                          d_output.begin() + num_items - 1,
+                          reference.begin()));
+      REQUIRE(CheckResult(d_output.begin() + num_items - 1,
+                          d_output.end(),
+                          d_input.begin() + num_items - 1));
     }
   }
 }

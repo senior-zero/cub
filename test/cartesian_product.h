@@ -232,5 +232,35 @@ void foreach (Functor &&f)
 
 } // namespace nvbench
 
+namespace nvbench
+{
+
+/*!
+ * Convert an enum to a type, allowing it to be used as a compile-time
+ * parameter.
+ *
+ * See the enums.cu example for usage.
+ *
+ * \relatesalso enum_type_list
+ * \relatesalso NVBENCH_DECLARE_ENUM_TYPE_STRINGS
+ */
+template <auto Value, typename T = decltype(Value)>
+struct enum_type : std::integral_constant<T, Value>
+{};
+
+/*!
+ * \brief Helper utility that generates a `type_list` of
+ * `std::integral_constant`s.
+ *
+ * See the enums.cu example for usage.
+ *
+ * \relatesalso enum_type
+ * \relatesalso NVBENCH_DECLARE_ENUM_TYPE_STRINGS
+ */
+template <auto... Ts>
+using enum_type_list = nvbench::type_list<enum_type<Ts>...>;
+
+} // namespace nvbench
+
 
 #endif // CUB_CARTESIAN_PRODUCT_H
