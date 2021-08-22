@@ -207,6 +207,7 @@ function(cub_add_ctest target_name_var test_name test_src cub_target)
   target_link_libraries(${test_target} PRIVATE ${cub_target} Catch2::Catch2)
   cub_clone_target_properties(${test_target} ${cub_target})
   target_include_directories(${test_target} PRIVATE "${CUB_SOURCE_DIR}/test")
+  target_sources(${test_target} PRIVATE catch_runner.cpp)
 
   # Add to the active configuration's meta target
   add_dependencies(${config_meta_target} ${test_target})

@@ -32,7 +32,6 @@
 #include <tuple>
 #include <type_traits>
 
-#define CATCH_CONFIG_RUNNER
 #include <catch2/catch.hpp>
 
 
@@ -626,15 +625,4 @@ TEMPLATE_LIST_TEST_CASE("BlockAdjacentDifference in last tile",
                           d_input.begin() + num_items - 1));
     }
   }
-}
-
-int main(int argc, char *argv[])
-{
-  // global setup...
-
-  int result = Catch::Session().run(argc, argv);
-
-  // global clean-up...
-
-  return result;
 }
