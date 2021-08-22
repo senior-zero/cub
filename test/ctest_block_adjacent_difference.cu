@@ -530,6 +530,8 @@ using types = nvbench::cartesian_product<nvbench::type_list<
   items_per_thread,
   threads_in_block>>;
 
+#pragma diag_suppress 177
+
 TEMPLATE_LIST_TEST_CASE("BlockAdjacentDifference in last tile",
                         "[left][right]",
                         types)
