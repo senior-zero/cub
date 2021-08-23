@@ -207,6 +207,8 @@ __launch_bounds__(int(ChainedPolicyT::ActivePolicy::AgentLargeBufferPolicyT::BLO
     __syncthreads();
 
     // The relative offset of this tile within the buffer it's assigned to
+
+    // Fail to copy large buffers - use std::size_t?
     uint32_t tile_offset_within_buffer = (tile_id - buffer_tile_offsets[buffer_id]) * ITEMS_PER_BLOCK;
 
     // If the tile has already reached beyond the work of the end of the last buffer
@@ -584,6 +586,9 @@ struct DispatchBatchMemcpy : DeviceBatchMemcpyPolicy<BufferOffsetT, BlockOffsetT
     }
 
     // Invoke init_kernel to initialize buffer prefix sum-tile descriptors
+
+    // TODO Can't use thrust directly, should be THRUST_NS
+
     thrust::cuda_cub::launcher::triple_chevron(init_grid_size, INIT_KERNEL_THREADS, 0, stream)
       .doit(init_buffer_scan_states_kernel, buffer_scan_tile_state, num_tiles);
 
@@ -592,6 +597,9 @@ struct DispatchBatchMemcpy : DeviceBatchMemcpyPolicy<BufferOffsetT, BlockOffsetT
       return error;
 
     // Sync the stream if specified to flush runtime errors
+
+    // Separate && into two if statements
+
     if (debug_synchronous && (CubDebug(error = SyncStream(stream))))
       return error;
 

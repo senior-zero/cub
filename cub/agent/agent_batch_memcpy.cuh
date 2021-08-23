@@ -530,7 +530,7 @@ private:
                                                          BlockBufferOffsetT num_wlev_buffers)
   {
     constexpr size_t out_datatype_size = sizeof(uint4);
-    constexpr size_t in_datatype_size  = sizeof(uint);
+    constexpr size_t in_datatype_size  = sizeof(unsigned int);
 
     int warp_id                        = threadIdx.x / CUB_PTX_WARP_THREADS;
     int warp_lane                      = threadIdx.x % CUB_PTX_WARP_THREADS;
