@@ -142,6 +142,8 @@ int main(int argc, char **argv)
     h_buffer_dst_offsets[i] = num_total_bytes;
     num_total_bytes += h_buffer_sizes[i];
   }
+
+  // Only failures should be reported
   size_t buffers_mem_size = (2 * sizeof(ByteOffsetT) + sizeof(BufferSizeT)) * num_buffers;
   std::cout << "Total of " << num_buffers << " buffers (src_offsets + dst_offsets + sizes -> " << buffers_mem_size
             << " bytes), with a total of " << num_total_bytes
@@ -154,6 +156,7 @@ int main(int argc, char **argv)
   CubDebugExit(cudaMalloc(&d_buffer_dst_offsets, num_buffers * sizeof(d_buffer_dst_offsets[0])));
   CubDebugExit(cudaMalloc(&d_buffer_sizes, num_buffers * sizeof(d_buffer_sizes[0])));
 
+  // Only failures should be reported
   std::cout << "Device-side src data segment @" << static_cast<void *>(d_in) << " of " << data_size << " bytes\n";
 
   // Populate the data source with random data
@@ -178,6 +181,7 @@ int main(int argc, char **argv)
   {
     if (i < 100)
     {
+      // Only failures should be reported
       std::cout
         << "Buffer #" << i                                                                                         //
         << ": [" << h_buffer_dst_offsets[i] << ", " << (h_buffer_dst_offsets[i] + h_buffer_sizes[i]) << ") "       //
@@ -266,8 +270,11 @@ int main(int argc, char **argv)
     }
     if (i < 1000)
     {
+      // Only failures should be reported
       if (i % 10 == 0)
+      {
         std::cout << "\n";
+      }
       std::cout << "[" << i << "]:"
                 << "(" << static_cast<uint16_t>(h_gpu_results[i]) << ")/"
                 << "(" << static_cast<uint16_t>(h_out[i]) << "); ";
