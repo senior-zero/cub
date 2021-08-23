@@ -45,6 +45,8 @@
 
 CUB_NAMESPACE_BEGIN
 
+using uint = unsigned int;
+
 __forceinline__ __device__ uint4 load_uint4(const char *ptr)
 {
   auto const offset       = reinterpret_cast<std::uintptr_t>(ptr) % 4;

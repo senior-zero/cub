@@ -251,12 +251,12 @@ int main(int argc, char **argv)
   CubDebugExit(cudaStreamSynchronize(stream));
 
   // CPU-side result generation for verification
-  for (int i = 0; i < num_buffers; i++)
+  for (unsigned int i = 0; i < num_buffers; i++)
   {
     std::memcpy(&h_out[h_buffer_dst_offsets[i]], &h_in[h_buffer_src_offsets[i]], h_buffer_sizes[i]);
   }
 
-  for (int i = 0; i < num_total_bytes; i++)
+  for (unsigned int i = 0; i < num_total_bytes; i++)
   {
     if (h_gpu_results[i] != h_out[i])
     {

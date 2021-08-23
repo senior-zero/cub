@@ -110,13 +110,12 @@ private:
   // ACCESSORS
   //------------------------------------------------------------------------------
 public:
-  __host__ __device__ __forceinline__ uint32_t Get(uint32_t index) const
+  __device__ __forceinline__ uint32_t Get(uint32_t index) const
   {
     int32_t target_offset = index * BITS_PER_ITEM;
     uint32_t val          = 0;
 
-#pragma unroll
-    for (int32_t i = 0; i < NUM_TOTAL_UNITS; ++i)
+    for (uint32_t i = 0; i < NUM_TOTAL_UNITS; ++i)
     {
       // In case the bit-offset of the counter at <index> is larger than the bit range of the current unit,
       // the bit_shift amount will be larger than the bits provided by this unit.
@@ -129,11 +128,10 @@ public:
     return val;
   }
 
-  __host__ __device__ __forceinline__ void Add(uint32_t index, uint32_t value)
+  __device__ __forceinline__ void Add(uint32_t index, uint32_t value)
   {
     int32_t target_offset = index * BITS_PER_ITEM;
 
-#pragma unroll
     for (int32_t i = 0; i < NUM_TOTAL_UNITS; ++i)
     {
       // In case the bit-offset of the counter at <index> is larger than the bit range of the current unit,
@@ -146,7 +144,7 @@ public:
     }
   }
 
-  __host__ __device__ __forceinline__ BitPackedCounter operator+(const BitPackedCounter &rhs) const
+  __device__ __forceinline__ BitPackedCounter operator+(const BitPackedCounter &rhs) const
   {
     BitPackedCounter result;
     for (int32_t i = 0; i < NUM_TOTAL_UNITS; ++i)
@@ -159,9 +157,8 @@ public:
   //------------------------------------------------------------------------------
   // CONSTRUCTORS
   //------------------------------------------------------------------------------
-  __host__ __device__ __forceinline__ BitPackedCounter()
+  __device__ __forceinline__ BitPackedCounter()
   {
-#pragma unroll
     for (int32_t i = 0; i < NUM_TOTAL_UNITS; ++i)
     {
       data[i] = 0;
@@ -318,33 +315,33 @@ private:
       typename BlockSizeClassScanT::TempStorage size_scan_storage;
 
       // Stage 2: Communicate the number ofer buffers requiring block-level collaboration
-      struct
+      struct Scan
       {
         typename BLevBuffScanPrefixCallbackOpT::TempStorage buffer_scan_callback;
-      };
+      } scan;
 
       // Stage 3; batch memcpy buffers that require only thread-level collaboration
-      struct
+      struct Size
       {
         BufferTuple buffers_by_size_class[BUFFERS_PER_BLOCK];
 
         // Stage 3.1: Write buffers requiring block-level collaboration to queue
         union
         {
-          struct
+          struct Scan
           {
             typename BLevBlockScanPrefixCallbackOpT::TempStorage block_scan_callback;
             typename BlockBLevTileCountScanT::TempStorage block_scan_storage;
-          };
+          } scan;
 
           // Stage 3.3:
-          struct
+          struct RLEDecode
           {
             typename BlockRunLengthDecodeT::TempStorage run_length_decode;
             typename BlockExchangeTLevT::TempStorage block_exchange_storage;
-          };
+          } decode;
         };
-      };
+      } size;
     };
     BufferOffsetT blev_buffer_offset;
   };
@@ -398,7 +395,6 @@ private:
   __device__ __forceinline__ void GetBufferSizeClassHistogram(const BufferSizeT (&buffer_sizes)[BUFFERS_PER_THREAD],
                                                               VectorizedSizeClassCounterT &vectorized_counters)
   {
-#pragma unroll
     for (uint32_t i = 0; i < BUFFERS_PER_THREAD; i++)
     {
       // Whether to increment ANY of the buffer size classes at all
@@ -422,7 +418,6 @@ private:
                                                          BufferTuple (&buffers_by_size_class)[BUFFERS_PER_BLOCK])
   {
     BlockBufferOffsetT buffer_id = threadIdx.x;
-#pragma unroll
     for (uint32_t i = 0; i < BUFFERS_PER_THREAD; i++)
     {
       if (buffer_sizes[i] > 0)
@@ -445,7 +440,7 @@ private:
     auto const shift        = offset * 8;
 
     uint4 regs = {aligned_ptr[0], aligned_ptr[1], aligned_ptr[2], aligned_ptr[3]};
-    uint tail  = 0;
+    unsigned int tail  = 0;
     if (shift)
       tail = aligned_ptr[4];
 
@@ -473,7 +468,6 @@ private:
     BlockOffsetT block_offset[BLEV_BUFFERS_PER_THREAD];
     // Read in the BLEV buffer partition (i.e., the buffers that require block-level collaboration)
     uint32_t blev_buffer_offset = threadIdx.x * BLEV_BUFFERS_PER_THREAD;
-#pragma unroll
     for (uint32_t i = 0; i < BLEV_BUFFERS_PER_THREAD; i++)
     {
       if (blev_buffer_offset < num_blev_buffers)
@@ -492,7 +486,7 @@ private:
     if (tile_id == 0)
     {
       BlockOffsetT block_aggregate;
-      BlockBLevTileCountScanT(temp_storage.block_scan_storage).ExclusiveSum(block_offset, block_offset, block_aggregate);
+      BlockBLevTileCountScanT(temp_storage.size.scan.block_scan_storage).ExclusiveSum(block_offset, block_offset, block_aggregate);
       if (threadIdx.x == 0)
       {
         blev_block_scan_state.SetInclusive(0, block_aggregate);
@@ -501,17 +495,16 @@ private:
     else
     {
       BLevBlockScanPrefixCallbackOpT blev_tile_prefix_op(blev_block_scan_state,
-                                                         temp_storage.block_scan_callback,
+                                                         temp_storage.size.scan.block_scan_callback,
                                                          Sum(),
                                                          tile_id);
-      BlockBLevTileCountScanT(temp_storage.block_scan_storage)
+      BlockBLevTileCountScanT(temp_storage.size.scan.block_scan_storage)
         .ExclusiveSum(block_offset, block_offset, blev_tile_prefix_op);
     }
     CTA_SYNC();
 
     // Read in the BLEV buffer partition (i.e., the buffers that require block-level collaboration)
     blev_buffer_offset = threadIdx.x * BLEV_BUFFERS_PER_THREAD;
-#pragma unroll
     for (uint32_t i = 0; i < BLEV_BUFFERS_PER_THREAD; i++)
     {
       if (blev_buffer_offset < num_blev_buffers)
@@ -619,7 +612,6 @@ private:
 
     // Read in the TLEV buffer partition (i.e., the buffers that require thread-level collaboration)
     uint32_t tlev_buffer_offset = threadIdx.x * TLEV_BUFFERS_PER_THREAD;
-#pragma unroll
     for (uint32_t i = 0; i < TLEV_BUFFERS_PER_THREAD; i++)
     {
       if (tlev_buffer_offset < num_tlev_buffers)
@@ -638,7 +630,7 @@ private:
     // Evenly distribute all the bytes that have to be copied from all the buffers that require thread-level
     // collaboration using BlockRunLengthDecode
     uint32_t num_total_tlev_bytes = 0U;
-    BlockRunLengthDecodeT block_run_length_decode(temp_storage.run_length_decode);
+    BlockRunLengthDecodeT block_run_length_decode(temp_storage.size.decode.run_length_decode);
     block_run_length_decode.Init(tlev_buffer_ids, tlev_buffer_sizes, num_total_tlev_bytes);
 
     // Run-length decode the buffers' sizes into a window buffer of limited size. This is repeated until we were able to
@@ -655,14 +647,13 @@ private:
 
       // Zip from SoA to AoS
       ZippedTLevByteAssignment zipped_byte_assignment[TLEV_BYTES_PER_THREAD];
-#pragma unroll
       for (int32_t i = 0; i < TLEV_BYTES_PER_THREAD; i++)
       {
         zipped_byte_assignment[i] = {buffer_id[i], buffer_byte_offset[i]};
       }
 
       // Exchange from blocked to striped arrangement for coalesced memory reads and writes
-      BlockExchangeTLevT(temp_storage.block_exchange_storage)
+      BlockExchangeTLevT(temp_storage.size.decode.block_exchange_storage)
         .BlockedToStriped(zipped_byte_assignment, zipped_byte_assignment);
 
       // Read in the bytes that this thread is assigned to
@@ -671,7 +662,6 @@ private:
       if (is_full_window)
       {
         uint32_t absolute_tlev_byte_offset = decoded_window_offset + threadIdx.x;
-#pragma unroll
         for (int32_t i = 0; i < TLEV_BYTES_PER_THREAD; i++)
         {
           uint8_t src_byte = reinterpret_cast<const uint8_t *>(
@@ -685,7 +675,6 @@ private:
       else
       {
         uint32_t absolute_tlev_byte_offset = decoded_window_offset + threadIdx.x;
-#pragma unroll
         for (int32_t i = 0; i < TLEV_BYTES_PER_THREAD; i++)
         {
           if (absolute_tlev_byte_offset < num_total_tlev_bytes)
@@ -763,7 +752,7 @@ public:
     else
     {
       BLevBuffScanPrefixCallbackOpT blev_buffer_prefix_op(blev_buffer_scan_state,
-                                                          temp_storage.buffer_scan_callback,
+                                                          temp_storage.scan.buffer_scan_callback,
                                                           Sum(),
                                                           tile_id);
 
@@ -782,7 +771,7 @@ public:
     CTA_SYNC();
 
     // Scatter the buffers into one of the three partitions (TLEV, WLEV, BLEV) depending on their size
-    PartitionBuffersBySize(buffer_sizes, size_class_histogram, temp_storage.buffers_by_size_class);
+    PartitionBuffersBySize(buffer_sizes, size_class_histogram, temp_storage.size.buffers_by_size_class);
 
     // Ensure all buffers have been partitioned by their size class AND
     // ensure that blev_buffer_offset has been written to shared memory
@@ -795,7 +784,7 @@ public:
 
     // Copy block-level buffers
     EnqueueBLEVBuffers(
-      &temp_storage.buffers_by_size_class[size_class_agg.Get(TLEV_SIZE_CLASS) + size_class_agg.Get(WLEV_SIZE_CLASS)],
+      &temp_storage.size.buffers_by_size_class[size_class_agg.Get(TLEV_SIZE_CLASS) + size_class_agg.Get(WLEV_SIZE_CLASS)],
       tile_buffer_srcs,
       tile_buffer_dsts,
       tile_buffer_sizes,
@@ -807,7 +796,7 @@ public:
     CTA_SYNC();
 
     // Copy warp-level buffers
-    BatchMemcpyWLEVBuffers(&temp_storage.buffers_by_size_class[size_class_agg.Get(TLEV_SIZE_CLASS)],
+    BatchMemcpyWLEVBuffers(&temp_storage.size.buffers_by_size_class[size_class_agg.Get(TLEV_SIZE_CLASS)],
                            tile_buffer_srcs,
                            tile_buffer_dsts,
                            tile_buffer_sizes,
@@ -815,7 +804,7 @@ public:
 
     // Perform batch memcpy for all the buffers that require thread-level collaboration
     uint32_t num_tlev_buffers = size_class_agg.Get(TLEV_SIZE_CLASS);
-    BatchMemcpyTLEVBuffers(temp_storage.buffers_by_size_class, tile_buffer_srcs, tile_buffer_dsts, num_tlev_buffers);
+    BatchMemcpyTLEVBuffers(temp_storage.size.buffers_by_size_class, tile_buffer_srcs, tile_buffer_dsts, num_tlev_buffers);
   }
 
   //-----------------------------------------------------------------------------
