@@ -39,8 +39,43 @@
 #include <thrust/random.h>
 #include <thrust/reduce.h>
 
+#define TEST_HALF_T \
+  (__CUDACC_VER_MAJOR__ >= 9 || CUDA_VERSION >= 9000) && !__NVCOMPILER_CUDA__
+
+#define TEST_BF_T \
+  (__CUDACC_VER_MAJOR__ >= 11 || CUDA_VERSION >= 11000) && !__NVCOMPILER_CUDA__
+
+#if TEST_HALF_T
+#include <cuda_fp16.h>
+#endif
+
+#if TEST_BF_T
+#include <cuda_bf16.h>
+#endif
+
 using namespace cub;
 
+template <typename T>
+struct UnwrapHalfAndBfloat16
+{
+  using Type = T;
+};
+
+#if TEST_HALF_T
+template <>
+struct UnwrapHalfAndBfloat16<half_t>
+{
+  using Type = __half;
+};
+#endif
+
+#if TEST_BF_T
+template <>
+struct UnwrapHalfAndBfloat16<bfloat16_t>
+{
+  using Type = __nv_bfloat16;
+};
+#endif
 
 constexpr static int MAX_ITERATIONS = 4;
 
@@ -65,8 +100,8 @@ struct SegmentChecker
   const KeyT *sorted_keys {};
   const OffsetT *offsets {};
 
-  explicit SegmentChecker(const KeyT *sorted_keys,
-                          const OffsetT *offsets)
+  SegmentChecker(const KeyT *sorted_keys,
+                 const OffsetT *offsets)
     : sorted_keys(sorted_keys)
     , offsets(offsets)
   {}
@@ -96,8 +131,8 @@ struct DescendingSegmentChecker
   const KeyT *sorted_keys{};
   const OffsetT *offsets{};
 
-  explicit DescendingSegmentChecker(const KeyT *sorted_keys,
-                                    const OffsetT *offsets)
+  DescendingSegmentChecker(const KeyT *sorted_keys,
+                           const OffsetT *offsets)
       : sorted_keys(sorted_keys)
       , offsets(offsets)
   {}
@@ -122,12 +157,12 @@ struct DescendingSegmentChecker
 
 template <typename KeyT,
           typename OffsetT>
-struct ReversedIOTA
+struct ReversedIota
 {
   KeyT *data {};
   const OffsetT *offsets {};
 
-  ReversedIOTA(KeyT *data,
+  ReversedIota(KeyT *data,
                const OffsetT *offsets)
     : data(data)
     , offsets(offsets)
@@ -150,12 +185,12 @@ struct ReversedIOTA
 
 template <typename KeyT,
           typename OffsetT>
-struct IOTA
+struct Iota
 {
   KeyT *data{};
   const OffsetT *offsets{};
 
-  IOTA(KeyT *data, const OffsetT *offsets)
+  Iota(KeyT *data, const OffsetT *offsets)
       : data(data)
       , offsets(offsets)
   {}
@@ -188,6 +223,8 @@ class Input
     std::is_same<ValueT, cub::NullType>::value,
     KeyT,
     ValueT>::type;
+
+  using UnwrappedKeyT = typename UnwrapHalfAndBfloat16<KeyT>::Type;
 
   bool reverse {};
   OffsetT num_items {};
@@ -282,8 +319,8 @@ public:
                         thrust::counting_iterator<unsigned int>(
                           static_cast<unsigned int>(get_num_segments())),
                         is_segment_sorted.begin(),
-                        DescendingSegmentChecker<T, OffsetT>(keys_output,
-                                                             get_d_offsets()));
+                        DescendingSegmentChecker<T, OffsetT>{keys_output,
+                                                             get_d_offsets()});
     }
     else
     {
@@ -292,8 +329,8 @@ public:
                         thrust::counting_iterator<unsigned int>(
                           static_cast<unsigned int>(get_num_segments())),
                         is_segment_sorted.begin(),
-                        SegmentChecker<T, OffsetT>(keys_output,
-                                                   get_d_offsets()));
+                        SegmentChecker<T, OffsetT>{keys_output,
+                                                   get_d_offsets()});
     }
 
     return thrust::reduce(is_segment_sorted.begin(),
@@ -305,7 +342,9 @@ public:
   bool check_output(const KeyT *keys_output,
                     const MaskedValueT *values_output = nullptr)
   {
-    const bool keys_ok = check_output_implementation(keys_output);
+    const bool keys_ok = check_output_implementation(
+      reinterpret_cast<const UnwrappedKeyT *>(keys_output));
+
     const bool values_ok = (std::is_same<ValueT, cub::NullType>::value ||
                             values_output == nullptr)
                              ? true
@@ -330,22 +369,23 @@ private:
 
   void gen_keys()
   {
-    const unsigned int total_segments =
-      static_cast<unsigned int>(get_num_segments());
+    const auto total_segments = static_cast<unsigned int>(get_num_segments());
 
     if (reverse)
     {
       thrust::for_each(thrust::counting_iterator<unsigned int>(0),
                        thrust::counting_iterator<unsigned int>(total_segments),
-                       IOTA<KeyT, OffsetT>(get_d_keys(),
-                                           get_d_offsets()));
+                       Iota<UnwrappedKeyT, OffsetT>{
+                         reinterpret_cast<UnwrappedKeyT *>(get_d_keys()),
+                         get_d_offsets()});
     }
     else
     {
       thrust::for_each(thrust::counting_iterator<unsigned int>(0),
                        thrust::counting_iterator<unsigned int>(total_segments),
-                       ReversedIOTA<KeyT, OffsetT>(get_d_keys(),
-                                                   get_d_offsets()));
+                       ReversedIota<UnwrappedKeyT, OffsetT>{
+                         reinterpret_cast<UnwrappedKeyT *>(get_d_keys()),
+                         get_d_offsets()});
     }
 
     thrust::copy(d_keys.begin(), d_keys.end(), d_values.begin());
@@ -379,8 +419,31 @@ public:
   }
 };
 
+template <typename OffsetT>
+class InputDescription<float, OffsetT>
+{
+  thrust::host_vector<OffsetT> segment_sizes;
 
-template <typename KeyT,
+public:
+  InputDescription& add(const SizeGroupDescription &group)
+  {
+    for (int i = 0; i < group.segments; i++)
+    {
+      segment_sizes.push_back(group.segment_size);
+    }
+
+    return *this;
+  }
+
+  template <typename ValueT = cub::NullType>
+  Input<float, OffsetT, ValueT> gen(bool reverse)
+  {
+    return Input<float, OffsetT, ValueT>(reverse, segment_sizes);
+  }
+};
+
+
+template <typename WrappedKeyT,
           typename ValueT,
           typename OffsetT>
 void Sort(bool pairs,
@@ -391,8 +454,8 @@ void Sort(bool pairs,
           void *tmp_storage,
           std::size_t &temp_storage_bytes,
 
-          KeyT *input_keys,
-          KeyT *output_keys,
+          WrappedKeyT *wrapped_input_keys,
+          WrappedKeyT *wrapped_output_keys,
 
           ValueT *input_values,
           ValueT *output_values,
@@ -404,6 +467,11 @@ void Sort(bool pairs,
           int *keys_selector = nullptr,
           int *values_selector = nullptr)
 {
+  using KeyT = typename UnwrapHalfAndBfloat16<WrappedKeyT>::Type;
+
+  auto input_keys = reinterpret_cast<KeyT*>(wrapped_input_keys);
+  auto output_keys = reinterpret_cast<KeyT*>(wrapped_output_keys);
+
   if (stable_sort)
   {
     if (pairs)
@@ -824,24 +892,22 @@ void TestZeroSegments()
           cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
           values_buffer.selector = 1;
 
-          const std::size_t temp_storage_bytes =
-            Sort<KeyT, ValueT, OffsetT>(sort_pairs,
-                                        sort_descending,
-                                        sort_buffer,
-                                        stable_sort,
-                                        nullptr,
-                                        nullptr,
-                                        nullptr,
-                                        nullptr,
-                                        OffsetT{},
-                                        OffsetT{},
-                                        nullptr,
-                                        &keys_buffer.selector,
-                                        &values_buffer.selector);
+          Sort<KeyT, ValueT, OffsetT>(sort_pairs,
+                                      sort_descending,
+                                      sort_buffer,
+                                      stable_sort,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      OffsetT{},
+                                      OffsetT{},
+                                      nullptr,
+                                      &keys_buffer.selector,
+                                      &values_buffer.selector);
 
           AssertEquals(keys_buffer.selector, 0);
           AssertEquals(values_buffer.selector, 1);
-          AssertEquals(temp_storage_bytes, 0ul);
         }
       }
     }
@@ -873,24 +939,22 @@ void TestEmptySegments(unsigned int segments)
           cub::DoubleBuffer<ValueT> values_buffer(nullptr, nullptr);
           values_buffer.selector = 1;
 
-          const std::size_t temp_storage_bytes =
-            Sort<KeyT, ValueT, OffsetT>(sort_pairs,
-                                        sort_descending,
-                                        sort_buffer,
-                                        sort_stable,
-                                        nullptr,
-                                        nullptr,
-                                        nullptr,
-                                        nullptr,
-                                        OffsetT{},
-                                        segments,
-                                        d_offsets,
-                                        &keys_buffer.selector,
-                                        &values_buffer.selector);
+          Sort<KeyT, ValueT, OffsetT>(sort_pairs,
+                                      sort_descending,
+                                      sort_buffer,
+                                      sort_stable,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      nullptr,
+                                      OffsetT{},
+                                      segments,
+                                      d_offsets,
+                                      &keys_buffer.selector,
+                                      &values_buffer.selector);
 
           AssertEquals(keys_buffer.selector, 0);
           AssertEquals(values_buffer.selector, 1);
-          AssertEquals(temp_storage_bytes, 0ul);
         }
       }
     }
@@ -906,6 +970,7 @@ void TestSameSizeSegments(OffsetT segment_size,
                           bool skip_values = false)
 {
   const OffsetT num_items = segment_size * segments;
+  using UnwrappedKeyT = typename UnwrapHalfAndBfloat16<KeyT>::Type;
 
   thrust::device_vector<OffsetT> offsets(segments + 1);
   thrust::sequence(offsets.begin(),
@@ -915,8 +980,8 @@ void TestSameSizeSegments(OffsetT segment_size,
 
   const OffsetT *d_offsets = thrust::raw_pointer_cast(offsets.data());
 
-  const KeyT target_key = KeyT{42};
-  const ValueT target_value = ValueT{42};
+  const KeyT target_key {42};
+  const ValueT target_value {42};
 
   thrust::device_vector<KeyT> keys_input(num_items);
   thrust::device_vector<KeyT> keys_output(num_items);
@@ -1012,10 +1077,17 @@ void TestSameSizeSegments(OffsetT segment_size,
           {
             const std::size_t items_selected =
               keys_buffer.selector || !sort_buffers
-              ? thrust::count(keys_output.begin(),
-                              keys_output.end(),
-                              target_key)
-              : thrust::count(keys_input.begin(), keys_input.end(), target_key);
+                ? thrust::count(thrust::device,
+                                reinterpret_cast<UnwrappedKeyT *>(
+                                  d_keys_output),
+                                reinterpret_cast<UnwrappedKeyT *>(
+                                  d_keys_output + num_items),
+                                static_cast<const UnwrappedKeyT &>(target_key))
+                : thrust::count(thrust::device,
+                                reinterpret_cast<UnwrappedKeyT *>(d_keys_input),
+                                reinterpret_cast<UnwrappedKeyT *>(d_keys_input +
+                                                                  num_items),
+                                static_cast<const UnwrappedKeyT &>(target_key));
             AssertEquals(items_selected, num_items);
           }
 
@@ -1120,6 +1192,19 @@ void InputTest(bool sort_descending,
   }
 }
 
+struct ComparisonPredicate
+{
+  template <typename T>
+  __host__ __device__ bool operator()(const T &lhs, const T &rhs) const
+  {
+    return lhs == rhs;
+  }
+
+  __host__ __device__ bool operator()(const half_t &lhs, const half_t &rhs) const
+  {
+    return lhs.raw() == rhs.raw();
+  }
+};
 
 template <typename T,
           typename OffsetT>
@@ -1135,7 +1220,7 @@ bool compare_two_outputs(const thrust::host_vector<OffsetT> &offsets,
     auto lhs_end = lhs.cbegin() + offsets[segment_id + 1];
     auto rhs_begin = rhs.cbegin() + offsets[segment_id];
 
-    auto err = thrust::mismatch(lhs_begin, lhs_end, rhs_begin);
+    auto err = thrust::mismatch(lhs_begin, lhs_end, rhs_begin, ComparisonPredicate{});
 
     if (err.first != lhs_end)
     {
@@ -1168,6 +1253,31 @@ void RandomizeInput(thrust::host_vector<KeyT> &h_keys,
     h_values[i] = RandomValue(std::numeric_limits<ValueT>::max());
   }
 }
+
+#if TEST_HALF_T
+void RandomizeInput(thrust::host_vector<half_t> &h_keys,
+                    thrust::host_vector<std::uint32_t> &h_values)
+{
+  for (std::size_t i = 0; i < h_keys.size(); i++)
+  {
+    h_keys[i] = RandomValue(std::numeric_limits<int>::max());
+    h_values[i] = RandomValue(std::numeric_limits<std::uint32_t>::max());
+  }
+}
+#endif
+
+#if TEST_BF_T
+void RandomizeInput(thrust::host_vector<bfloat16_t> &h_keys,
+                    thrust::host_vector<std::uint32_t> &h_values)
+{
+  for (std::size_t i = 0; i < h_keys.size(); i++)
+  {
+    h_keys[i] = RandomValue(std::numeric_limits<int>::max());
+    h_values[i] = RandomValue(std::numeric_limits<std::uint32_t>::max());
+  }
+}
+#endif
+
 
 
 template <typename KeyT,
@@ -1356,8 +1466,8 @@ void InputTestRandom(Input<KeyT, OffsetT, ValueT> &input)
 
             const bool values_ok =
               sort_pairs
-              ? compare_two_outputs(h_offsets, h_values, h_values_output)
-              : true;
+                ? compare_two_outputs(h_offsets, h_values, h_values_output)
+                : true;
 
 #if STORE_ON_FAILURE
             if (!keys_ok || !values_ok)
@@ -1382,42 +1492,96 @@ AssertTrue(keys_ok);
   }
 }
 
+template <typename KeyT,
+          typename ValueT,
+          typename OffsetT>
+struct EdgeTestDispatch
+{
+  // Edge cases that needs to be tested
+  const int empty_short_circuit_segment_size = 0;
+  const int copy_short_circuit_segment_size = 1;
+  const int swap_short_circuit_segment_size = 2;
+
+  const int a_few = 2;
+  const int a_bunch_of = 42;
+  const int a_lot_of = 420;
+
+  template <typename ActivePolicyT>
+  CUB_RUNTIME_FUNCTION __forceinline__ cudaError_t Invoke()
+  {
+    using SmallAndMediumPolicyT =
+      typename ActivePolicyT::SmallAndMediumSegmentedSortPolicyT;
+    using LargeSegmentPolicyT = typename ActivePolicyT::LargeSegmentPolicy;
+
+    const int small_segment_max_segment_size =
+      SmallAndMediumPolicyT::SmallPolicyT::ITEMS_PER_TILE;
+
+    const int items_per_small_segment =
+      SmallAndMediumPolicyT::SmallPolicyT::ITEMS_PER_THREAD;
+
+    const int medium_segment_max_segment_size =
+      SmallAndMediumPolicyT::MediumPolicyT::ITEMS_PER_TILE;
+
+    const int single_thread_segment_size = items_per_small_segment;
+
+    const int large_cached_segment_max_segment_size =
+      LargeSegmentPolicyT::BLOCK_THREADS *
+      LargeSegmentPolicyT::ITEMS_PER_THREAD;
+
+    for (bool sort_descending : {ascending, descending})
+    {
+      Input<KeyT, OffsetT, ValueT> edge_cases =
+        InputDescription<KeyT, OffsetT>()
+          .add({a_lot_of, empty_short_circuit_segment_size})
+          .add({a_lot_of, copy_short_circuit_segment_size})
+          .add({a_lot_of, swap_short_circuit_segment_size})
+          .add({a_lot_of, swap_short_circuit_segment_size + 1})
+          .add({a_lot_of, swap_short_circuit_segment_size + 1})
+          .add({a_lot_of, single_thread_segment_size - 1})
+          .add({a_lot_of, single_thread_segment_size })
+          .add({a_lot_of, single_thread_segment_size + 1 })
+          .add({a_lot_of, single_thread_segment_size * 2 - 1 })
+          .add({a_lot_of, single_thread_segment_size * 2 })
+          .add({a_lot_of, single_thread_segment_size * 2 + 1 })
+          .add({a_bunch_of, small_segment_max_segment_size - 1})
+          .add({a_bunch_of, small_segment_max_segment_size})
+          .add({a_bunch_of, small_segment_max_segment_size + 1})
+          .add({a_bunch_of, medium_segment_max_segment_size - 1})
+          .add({a_bunch_of, medium_segment_max_segment_size})
+          .add({a_bunch_of, medium_segment_max_segment_size + 1})
+          .add({a_bunch_of, large_cached_segment_max_segment_size - 1})
+          .add({a_bunch_of, large_cached_segment_max_segment_size})
+          .add({a_bunch_of, large_cached_segment_max_segment_size + 1})
+          .add({a_few, large_cached_segment_max_segment_size * 2})
+          .add({a_few, large_cached_segment_max_segment_size * 3})
+          .add({a_few, large_cached_segment_max_segment_size * 5})
+          .template gen<ValueT>(sort_descending);
+
+      InputTest<KeyT, ValueT, OffsetT>(sort_descending, edge_cases);
+    }
+
+    return cudaSuccess;
+  }
+};
 
 template <typename KeyT,
           typename ValueT,
           typename OffsetT>
 void EdgePatternsTest()
 {
-  for (bool sort_descending: { ascending, descending })
+  int ptx_version = 0;
+  if (CubDebug(PtxVersion(ptx_version)))
   {
-    Input<KeyT, OffsetT, ValueT> edge_cases =
-      InputDescription<KeyT, OffsetT>()
-        .add({420, 0})
-        .add({420, 1})
-        .add({420, 2})
-        .add({420, 8})
-        .add({420, 9})
-        .add({420, 10})
-        .add({420, 17})
-        .add({42, 18})
-        .add({42, 19})
-        .add({42, 26})
-        .add({42, 27})
-        .add({42, 28})
-        .add({42, 35})
-        .add({42, 36})
-        .add({42, 37})
-        .add({42, 286})
-        .add({42, 287})
-        .add({42, 288})
-        .add({42, 5887})
-        .add({42, 5888})
-        .add({42, 5889})
-        .add({2, 23552})
-        .template gen<ValueT>(sort_descending);
-
-    InputTest<KeyT, ValueT, OffsetT>(sort_descending, edge_cases);
+    return;
   }
+
+  using MaxPolicyT =
+    typename cub::DeviceSegmentedSortPolicy<KeyT, ValueT>::MaxPolicy;
+  using EdgeTestDispatchT = EdgeTestDispatch<KeyT, ValueT, OffsetT>;
+  EdgeTestDispatchT dispatch;
+
+  MaxPolicyT::Invoke(ptx_version, dispatch);
+
 }
 
 template <typename KeyT,
@@ -1507,6 +1671,7 @@ void TestPairs()
 
   RandomTest<KeyT, ValueT, OffsetT>(1 << 2, 1 << 8);
   RandomTest<KeyT, ValueT, OffsetT>(1 << 9, 1 << 19);
+  EdgePatternsTest<KeyT, ValueT, OffsetT>();
 }
 
 
@@ -1529,6 +1694,16 @@ int main(int argc, char** argv)
   TestZeroSegments();
   TestEmptySegments(1 << 2);
   TestEmptySegments(1 << 22);
+
+  TestPairs<float, std::uint32_t, std::uint32_t>();
+
+#if TEST_HALF_T
+  TestPairs<half_t, std::uint32_t, std::uint32_t>();
+#endif
+
+#if TEST_BF_T
+  TestPairs<bfloat16_t, std::uint32_t, std::uint32_t>();
+#endif
 
   TestKeysAndPairs<std::uint8_t,  std::uint32_t>();
   TestKeysAndPairs<std::uint16_t, std::uint32_t>();

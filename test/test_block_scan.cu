@@ -716,30 +716,30 @@ void Test(
 /**
  * Run test for different policy types
  */
-template <
-    int         BLOCK_THREADS,
-    int         ITEMS_PER_THREAD,
-    ScanMode    SCAN_MODE,
-    TestMode    TEST_MODE,
-    typename    ScanOpT,
-    typename    T>
-void Test(
-    GenMode     gen_mode,
-    ScanOpT     scan_op,
-    T           initial_value)
+template <int BLOCK_THREADS,
+          int ITEMS_PER_THREAD,
+          ScanMode SCAN_MODE,
+          TestMode TEST_MODE,
+          typename ScanOpT,
+          typename T>
+void Test(GenMode gen_mode,
+          ScanOpT scan_op,
+          T initial_value)
 {
-  (void)gen_mode;
-  (void)scan_op;
-  (void)initial_value;
-#ifdef TEST_RAKING
-    Test<BLOCK_THREADS, ITEMS_PER_THREAD, SCAN_MODE, TEST_MODE, BLOCK_SCAN_RAKING>(gen_mode, scan_op, initial_value);
-#endif
-#ifdef TEST_RAKING_MEMOIZE
-    Test<BLOCK_THREADS, ITEMS_PER_THREAD, SCAN_MODE, TEST_MODE, BLOCK_SCAN_RAKING_MEMOIZE>(gen_mode, scan_op, initial_value);
-#endif
-#ifdef TEST_WARP_SCANS
-    Test<BLOCK_THREADS, ITEMS_PER_THREAD, SCAN_MODE, TEST_MODE, BLOCK_SCAN_WARP_SCANS>(gen_mode, scan_op, initial_value);
-#endif
+  Test<BLOCK_THREADS, ITEMS_PER_THREAD, SCAN_MODE, TEST_MODE, BLOCK_SCAN_RAKING>(
+    gen_mode,
+    scan_op,
+    initial_value);
+  Test<BLOCK_THREADS,
+       ITEMS_PER_THREAD,
+       SCAN_MODE,
+       TEST_MODE,
+       BLOCK_SCAN_RAKING_MEMOIZE>(gen_mode, scan_op, initial_value);
+  Test<BLOCK_THREADS,
+       ITEMS_PER_THREAD,
+       SCAN_MODE,
+       TEST_MODE,
+       BLOCK_SCAN_WARP_SCANS>(gen_mode, scan_op, initial_value);
 }
 
 
