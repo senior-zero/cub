@@ -226,12 +226,13 @@ struct DispatchScan:
 
     // The input value type
     using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
+    using OutputValT = typename std::iterator_traits<OutputIteratorT>::value_type;
 
     // The output value type -- used as the intermediate accumulator
     // Per https://wg21.link/P0571, use InitValueT if provided, otherwise the
     // input iterator's value type.
     using OutputT =
-      typename If<Equals<InitValueT, NullType>::VALUE, InputT, InitValueT>::Type;
+      typename If<Equals<InitValueT, NullType>::VALUE, OutputValT, InitValueT>::Type;
 
     void*           d_temp_storage;         ///< [in] %Device-accessible allocation of temporary storage.  When NULL, the required allocation size is written to \p temp_storage_bytes and no work is done.
     size_t&         temp_storage_bytes;     ///< [in,out] Reference to size in bytes of \p d_temp_storage allocation

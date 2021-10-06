@@ -97,12 +97,13 @@ struct AgentScan
 
     // The input value type
     using InputT = typename std::iterator_traits<InputIteratorT>::value_type;
+    using OutputValT = typename std::iterator_traits<OutputIteratorT>::value_type;
 
     // The output value type -- used as the intermediate accumulator
     // Per https://wg21.link/P0571, use InitValueT if provided, otherwise the
     // input iterator's value type.
     using OutputT =
-      typename If<Equals<InitValueT, NullType>::VALUE, InputT, InitValueT>::Type;
+      typename If<Equals<InitValueT, NullType>::VALUE, OutputValT, InitValueT>::Type;
 
     // Tile status descriptor interface type
     typedef ScanTileState<OutputT> ScanTileStateT;
