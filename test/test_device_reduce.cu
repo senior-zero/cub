@@ -1008,8 +1008,17 @@ void TestByBackend(
     InitializeSegments(num_items, 1, h_segment_offsets, g_verbose_input);
 
     // Page-aligned-input tests
-    TestByOp<CUB, OutputT>(h_in, d_in, num_items, 1,
-        h_segment_offsets, h_segment_offsets + 1, (OffsetT*) NULL, (OffsetT*)NULL);                 // Host-dispatch
+    if (max_segments > 0)
+    {
+      TestByOp<CUB, OutputT>(h_in,
+                             d_in,
+                             num_items,
+                             1,
+                             h_segment_offsets,
+                             h_segment_offsets + 1,
+                             (OffsetT *)NULL,
+                             (OffsetT *)NULL); // Host-dispatch
+    }
 #ifdef CUB_CDP
     TestByOp<CUB_CDP, OutputT>(h_in, d_in, num_items, 1,
         h_segment_offsets, h_segment_offsets + 1, (OffsetT*) NULL, (OffsetT*)NULL);             // Device-dispatch
@@ -1138,7 +1147,7 @@ struct TestBySize
         //
 
         // Test 0, 1, many
-        TestByGenMode<InputT, OutputT>(0,           max_segments);
+        TestByGenMode<InputT, OutputT>(0,           0);
         TestByGenMode<InputT, OutputT>(1,           max_segments);
         TestByGenMode<InputT, OutputT>(max_items,   max_segments);
 
