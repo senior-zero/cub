@@ -78,7 +78,7 @@ __global__ void BinCountKernel(const unsigned int num_segments,
     const auto segment_size = segment_handler.get_segment_size(segment_id);
     const int bin_id        = clz(segment_size);
 
-    atomicAdd(bins_cache + bin_id, 1);
+    atomicAdd_block(bins_cache + bin_id, 1);
   }
   __syncthreads();
 
@@ -89,8 +89,7 @@ __global__ void BinCountKernel(const unsigned int num_segments,
 }
 
 // TODO Extract agent
-template <int BinsCount,
-  int BlockSize>
+template <int BinsCount, int BlockSize>
 __global__ void BinsPrefixKernel(const int *bins, int *bins_prefix, int *bins_prefix_copy)
 {
   using BlockScan = cub::BlockScan<int, BlockSize>;
@@ -138,7 +137,7 @@ __global__ void BalanceSegments(
     const auto segment_size = segment_handler.get_segment_size(segment_id);
 
     bin_id = clz(segment_size);
-    my_pos = atomicAdd(local_bins + bin_id, 1);
+    my_pos = atomicAdd_block(local_bins + bin_id, 1);
   }
   __syncthreads();
 
