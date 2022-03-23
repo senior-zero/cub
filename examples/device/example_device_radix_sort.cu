@@ -29,7 +29,7 @@
 /******************************************************************************
  * Simple example of DeviceRadixSort::SortPairs().
  *
- * Sorts an array of float keys paired with a corresponding array of int values.
+ * Sorts an array of unsigned char keys paired with a corresponding array of int values.
  *
  * To compile using the command line:
  *   nvcc -arch=sm_XX example_device_radix_sort.cu -I../.. -lcudart -O3
@@ -49,6 +49,10 @@
 
 using namespace cub;
 
+// radix_sort_pairs doesn't interact with value_t other than to copy
+// the data, so we can save template instantiations by reinterpreting
+// it as an opaque type.
+template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
 //---------------------------------------------------------------------
 // Globals, constants and typedefs
@@ -63,13 +67,13 @@ CachingDeviceAllocator  g_allocator(true);  // Caching allocator for device memo
 //---------------------------------------------------------------------
 
 /**
- * Simple key-value pairing for floating point types.  Distinguishes
+ * Simple key-value pairing for opaque types.  Distinguishes
  * between positive and negative zero.
  */
 struct Pair
 {
-    float   key;
-    int     value;
+    unsigned char   key;
+    OpaqueType<8>     value;
 
     bool operator<(const Pair &b) const
     {
@@ -80,9 +84,9 @@ struct Pair
             return false;
 
         // Return true if key is negative zero and b.key is positive zero
-        unsigned int key_bits   = SafeBitCast<unsigned int>(key);
-        unsigned int b_key_bits = SafeBitCast<unsigned int>(b.key);
-        unsigned int HIGH_BIT   = 1u << 31;
+        unsigned char key_bits   = SafeBitCast<unsigned char>(key);
+        unsigned char b_key_bits = SafeBitCast<unsigned char>(b.key);
+        unsigned char HIGH_BIT   = 1u << 7;
 
         return ((key_bits & HIGH_BIT) != 0) && ((b_key_bits & HIGH_BIT) == 0);
     }
@@ -93,18 +97,19 @@ struct Pair
  * Initialize key-value sorting problem.
  */
 void Initialize(
-    float           *h_keys,
-    int             *h_values,
-    float           *h_reference_keys,
-    int             *h_reference_values,
+    unsigned char           *h_keys,
+    OpaqueType<8>             *h_values,
+    unsigned char           *h_reference_keys,
+    OpaqueType<8>             *h_reference_values,
     int             num_items)
 {
     Pair *h_pairs = new Pair[num_items];
 
     for (int i = 0; i < num_items; ++i)
     {
-        RandomBits(h_keys[i]);
-        RandomBits(h_values[i]);
+        h_keys[i] = i % 2;
+        //RandomBits(h_values[i]);
+        //h_values[i] = i;
         h_pairs[i].key    = h_keys[i];
         h_pairs[i].value  = h_values[i];
     }
@@ -116,7 +121,7 @@ void Initialize(
         printf("\n\n");
 
         printf("Input values:\n");
-        DisplayResults(h_values, num_items);
+        //DisplayResults(h_values, num_items);
         printf("\n\n");
     }
 
@@ -141,7 +146,7 @@ void Initialize(
  */
 int main(int argc, char** argv)
 {
-    int num_items = 150;
+    size_t num_items = 150;
 
     // Initialize command line
     CommandLineArgs args(argc, argv);
@@ -163,47 +168,58 @@ int main(int argc, char** argv)
     CubDebugExit(args.DeviceInit());
 
     printf("cub::DeviceRadixSort::SortPairs() %d items (%d-byte keys %d-byte values)\n",
-        num_items, int(sizeof(float)), int(sizeof(int)));
+        int(num_items), int(sizeof(unsigned char)), int(sizeof(OpaqueType<8>)));
     fflush(stdout);
 
     // Allocate host arrays
-    float   *h_keys             = new float[num_items];
-    float   *h_reference_keys   = new float[num_items];
-    int     *h_values           = new int[num_items];
-    int     *h_reference_values = new int[num_items];
+    unsigned char   *h_keys             = new unsigned char[num_items];
+    unsigned char   *h_reference_keys   = new unsigned char[num_items];
+    OpaqueType<8>     *h_values           = new OpaqueType<8>[num_items];
+    OpaqueType<8>     *h_reference_values = new OpaqueType<8>[num_items];
 
     // Initialize problem and solution on host
     Initialize(h_keys, h_values, h_reference_keys, h_reference_values, num_items);
 
     // Allocate device arrays
-    DoubleBuffer<float> d_keys;
-    DoubleBuffer<int>   d_values;
-    CubDebugExit(g_allocator.DeviceAllocate((void**)&d_keys.d_buffers[0], sizeof(float) * num_items));
-    CubDebugExit(g_allocator.DeviceAllocate((void**)&d_keys.d_buffers[1], sizeof(float) * num_items));
-    CubDebugExit(g_allocator.DeviceAllocate((void**)&d_values.d_buffers[0], sizeof(int) * num_items));
-    CubDebugExit(g_allocator.DeviceAllocate((void**)&d_values.d_buffers[1], sizeof(int) * num_items));
+    unsigned char* d_keys;
+    OpaqueType<8>*   d_values;
+    unsigned char* d_keys_out;
+    OpaqueType<8>*   d_values_out;
+
+    CubDebugExit(g_allocator.DeviceAllocate((void**)&d_keys, sizeof(unsigned char) * num_items));
+    CubDebugExit(g_allocator.DeviceAllocate((void**)&d_keys_out, sizeof(unsigned char) * num_items));
+    CubDebugExit(g_allocator.DeviceAllocate((void**)&d_values, sizeof(OpaqueType<8>) * num_items));
+    CubDebugExit(g_allocator.DeviceAllocate((void**)&d_values_out, sizeof(OpaqueType<8>) * num_items));
+
+
+    //DoubleBuffer<unsigned char> d_keys;
+    //DoubleBuffer<OpaqueType<8>>   d_values;
+    //CubDebugExit(g_allocator.DeviceAllocate((void**)&d_keys.d_buffers[0], sizeof(unsigned char) * num_items));
+    //CubDebugExit(g_allocator.DeviceAllocate((void**)&d_keys.d_buffers[1], sizeof(unsigned char) * num_items));
+    //CubDebugExit(g_allocator.DeviceAllocate((void**)&d_values.d_buffers[0], sizeof(OpaqueType<8>) * num_items));
+    //CubDebugExit(g_allocator.DeviceAllocate((void**)&d_values.d_buffers[1], sizeof(OpaqueType<8>) * num_items));
 
     // Allocate temporary storage
     size_t  temp_storage_bytes  = 0;
     void    *d_temp_storage     = NULL;
 
-    CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
+    CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_keys_out, d_values, d_values_out, num_items, 0, 8));
     CubDebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
     // Initialize device arrays
-    CubDebugExit(cudaMemcpy(d_keys.d_buffers[d_keys.selector], h_keys, sizeof(float) * num_items, cudaMemcpyHostToDevice));
-    CubDebugExit(cudaMemcpy(d_values.d_buffers[d_values.selector], h_values, sizeof(int) * num_items, cudaMemcpyHostToDevice));
+    CubDebugExit(cudaMemcpy(d_keys, h_keys, sizeof(unsigned char) * num_items, cudaMemcpyHostToDevice));
+    CubDebugExit(cudaMemcpy(d_values, h_values, sizeof(OpaqueType<8>) * num_items, cudaMemcpyHostToDevice));
 
     // Run
-    CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_values, num_items));
+    CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_keys_out, d_values, d_values_out, num_items, 0, 8));
 
     // Check for correctness (and display results, if specified)
-    int compare = CompareDeviceResults(h_reference_keys, d_keys.Current(), num_items, true, g_verbose);
-    printf("\t Compare keys (selector %d): %s\n", d_keys.selector, compare ? "FAIL" : "PASS");
-    AssertEquals(0, compare);
-    compare = CompareDeviceResults(h_reference_values, d_values.Current(), num_items, true, g_verbose);
-    printf("\t Compare values (selector %d): %s\n", d_values.selector, compare ? "FAIL" : "PASS");
-    AssertEquals(0, compare);
+    //int compare = CompareDeviceResults(h_reference_keys, d_keys_out, num_items, true, g_verbose);
+    //printf("\t Compare keys (selector %d): %s\n", d_keys.selector, compare ? "FAIL" : "PASS");
+    //AssertEquals(0, compare);
+    //compare = CompareDeviceResults(h_reference_values, d_values_out, num_items, true, g_verbose);
+    //printf("\t Compare values (selector %d): %s\n", d_values.selector, compare ? "FAIL" : "PASS");
+    //AssertEquals(0, compare);
 
     // Cleanup
     if (h_keys) delete[] h_keys;
@@ -211,10 +227,10 @@ int main(int argc, char** argv)
     if (h_values) delete[] h_values;
     if (h_reference_values) delete[] h_reference_values;
 
-    if (d_keys.d_buffers[0]) CubDebugExit(g_allocator.DeviceFree(d_keys.d_buffers[0]));
-    if (d_keys.d_buffers[1]) CubDebugExit(g_allocator.DeviceFree(d_keys.d_buffers[1]));
-    if (d_values.d_buffers[0]) CubDebugExit(g_allocator.DeviceFree(d_values.d_buffers[0]));
-    if (d_values.d_buffers[1]) CubDebugExit(g_allocator.DeviceFree(d_values.d_buffers[1]));
+    if (d_keys) CubDebugExit(g_allocator.DeviceFree(d_keys));
+    if (d_keys_out) CubDebugExit(g_allocator.DeviceFree(d_keys_out));
+    if (d_values) CubDebugExit(g_allocator.DeviceFree(d_values));
+    if (d_values_out) CubDebugExit(g_allocator.DeviceFree(d_values_out));
     if (d_temp_storage) CubDebugExit(g_allocator.DeviceFree(d_temp_storage));
 
     printf("\n\n");
