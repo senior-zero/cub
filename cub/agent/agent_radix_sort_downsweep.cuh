@@ -779,7 +779,7 @@ struct AgentRadixSortDownsweep
             // Clean up last partial tile with guarded-I/O
             if (block_offset < block_end)
             {
-                ProcessTile<false>(block_offset, block_end - block_offset);
+                // ProcessTile<false>(block_offset, block_end - block_offset);
             }
 
         }
