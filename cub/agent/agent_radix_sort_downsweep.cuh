@@ -169,11 +169,11 @@ struct AgentRadixSortDownsweep
 
     // BlockLoad type (keys)
     using BlockLoadKeysT =
-      BlockLoad<UnsignedBits, BLOCK_THREADS, ITEMS_PER_THREAD, LOAD_ALGORITHM>;
+      BlockLoadTest<UnsignedBits, BLOCK_THREADS, ITEMS_PER_THREAD, LOAD_ALGORITHM>;
 
     // BlockLoad type (values)
     using BlockLoadValuesT =
-      BlockLoadTest<ValueT, BLOCK_THREADS, ITEMS_PER_THREAD, LOAD_ALGORITHM>;
+      BlockLoad<ValueT, BLOCK_THREADS, ITEMS_PER_THREAD, LOAD_ALGORITHM>;
 
     // Value exchange array type
     typedef ValueT ValueExchangeT[TILE_ITEMS];
