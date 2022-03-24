@@ -203,7 +203,7 @@ int main(int argc, char** argv)
     size_t  temp_storage_bytes  = 0;
     void    *d_temp_storage     = NULL;
 
-    CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_keys_out, d_values, d_values_out, num_items, 0, 8));
+    CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_keys_out, d_values, d_values_out, num_items, 0, 8, 0, true));
     CubDebugExit(g_allocator.DeviceAllocate(&d_temp_storage, temp_storage_bytes));
 
     // Initialize device arrays
@@ -211,7 +211,7 @@ int main(int argc, char** argv)
     CubDebugExit(cudaMemcpy(d_values, h_values, sizeof(OpaqueType<8>) * num_items, cudaMemcpyHostToDevice));
 
     // Run
-    CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_keys_out, d_values, d_values_out, num_items, 0, 8));
+    CubDebugExit(DeviceRadixSort::SortPairs(d_temp_storage, temp_storage_bytes, d_keys, d_keys_out, d_values, d_values_out, num_items, 0, 8, 0, true));
 
     // Check for correctness (and display results, if specified)
     //int compare = CompareDeviceResults(h_reference_keys, d_keys_out, num_items, true, g_verbose);
