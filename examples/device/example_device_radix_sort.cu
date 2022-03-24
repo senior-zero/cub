@@ -52,7 +52,7 @@ using namespace cub;
 // radix_sort_pairs doesn't interact with value_t other than to copy
 // the data, so we can save template instantiations by reinterpreting
 // it as an opaque type.
-template <int N> struct alignas(N) OpaqueType { char data[N]; };
+template <int N> struct OpaqueType { char data[N]; };
 
 //---------------------------------------------------------------------
 // Globals, constants and typedefs
