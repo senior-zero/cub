@@ -1302,5 +1302,676 @@ struct BlockLoadType
 };
 
 
+template <
+  typename            InputT,
+  int                 BLOCK_DIM_X,
+  int                 ITEMS_PER_THREAD,
+  BlockLoadAlgorithm  ALGORITHM           = BLOCK_LOAD_DIRECT,
+  int                 BLOCK_DIM_Y         = 1,
+  int                 BLOCK_DIM_Z         = 1,
+  int                 PTX_ARCH            = CUB_PTX_ARCH>
+class BlockLoadTest
+{
+private:
+
+  /******************************************************************************
+     * Constants and typed definitions
+     ******************************************************************************/
+
+  /// Constants
+  enum
+  {
+    /// The thread block size in threads
+    BLOCK_THREADS = BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z,
+  };
+
+
+  /******************************************************************************
+     * Algorithmic variants
+     ******************************************************************************/
+
+  /// Load helper
+  template <BlockLoadAlgorithm _POLICY, int DUMMY>
+  struct LoadInternal;
+
+
+  /**
+     * BLOCK_LOAD_DIRECT specialization of load helper
+   */
+  template <int DUMMY>
+  struct LoadInternal<BLOCK_LOAD_DIRECT, DUMMY>
+  {
+    /// Shared memory storage layout type
+    typedef NullType TempStorage;
+
+    /// Linear thread-id
+    int linear_tid;
+
+    /// Constructor
+    __device__ __forceinline__ LoadInternal(
+      TempStorage &/*temp_storage*/,
+      int linear_tid)
+      :
+      linear_tid(linear_tid)
+    {}
+
+    /// Load a linear segment of items from memory
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load
+    {
+      LoadDirectBlocked(linear_tid, block_itr, items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items)                    ///< [in] Number of valid items to load
+    {
+      LoadDirectBlocked(linear_tid, block_itr, items, valid_items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range, with a fall-back assignment of out-of-bound elements
+    template <typename InputIteratorT, typename DefaultT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items,                    ///< [in] Number of valid items to load
+      DefaultT        oob_default)                    ///< [in] Default value to assign out-of-bound items
+    {
+      LoadDirectBlocked(linear_tid, block_itr, items, valid_items, oob_default);
+    }
+
+  };
+
+
+  /**
+    * BLOCK_LOAD_STRIPED specialization of load helper
+   */
+  template <int DUMMY>
+  struct LoadInternal<BLOCK_LOAD_STRIPED, DUMMY>
+  {
+    /// Shared memory storage layout type
+    typedef NullType TempStorage;
+
+    /// Linear thread-id
+    int linear_tid;
+
+    /// Constructor
+    __device__ __forceinline__ LoadInternal(
+      TempStorage &/*temp_storage*/,
+      int linear_tid)
+      :
+      linear_tid(linear_tid)
+    {}
+
+    /// Load a linear segment of items from memory
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load
+    {
+      LoadDirectStriped<BLOCK_THREADS>(linear_tid, block_itr, items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items)                    ///< [in] Number of valid items to load
+    {
+      LoadDirectStriped<BLOCK_THREADS>(linear_tid, block_itr, items, valid_items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range, with a fall-back assignment of out-of-bound elements
+    template <typename InputIteratorT, typename DefaultT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items,                    ///< [in] Number of valid items to load
+      DefaultT        oob_default)                    ///< [in] Default value to assign out-of-bound items
+    {
+      LoadDirectStriped<BLOCK_THREADS>(linear_tid, block_itr, items, valid_items, oob_default);
+    }
+
+  };
+
+
+  /**
+     * BLOCK_LOAD_VECTORIZE specialization of load helper
+   */
+  template <int DUMMY>
+  struct LoadInternal<BLOCK_LOAD_VECTORIZE, DUMMY>
+  {
+    /// Shared memory storage layout type
+    typedef NullType TempStorage;
+
+    /// Linear thread-id
+    int linear_tid;
+
+    /// Constructor
+    __device__ __forceinline__ LoadInternal(
+      TempStorage &/*temp_storage*/,
+      int linear_tid)
+      :
+      linear_tid(linear_tid)
+    {}
+
+    /// Load a linear segment of items from memory, specialized for native pointer types (attempts vectorization)
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputT               *block_ptr,                     ///< [in] The thread block's base input iterator for loading from
+      InputT               (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load
+    {
+      InternalLoadDirectBlockedVectorized<LOAD_DEFAULT>(linear_tid, block_ptr, items);
+    }
+
+    /// Load a linear segment of items from memory, specialized for native pointer types (attempts vectorization)
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      const InputT         *block_ptr,                     ///< [in] The thread block's base input iterator for loading from
+      InputT               (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load
+    {
+      InternalLoadDirectBlockedVectorized<LOAD_DEFAULT>(linear_tid, block_ptr, items);
+    }
+
+    /// Load a linear segment of items from memory, specialized for native pointer types (attempts vectorization)
+    template <
+      CacheLoadModifier   MODIFIER,
+      typename            ValueType,
+      typename            OffsetT>
+    __device__ __forceinline__ void Load(
+      CacheModifiedInputIterator<MODIFIER, ValueType, OffsetT>    block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT                                                     (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load
+    {
+      InternalLoadDirectBlockedVectorized<MODIFIER>(linear_tid, block_itr.ptr, items);
+    }
+
+    /// Load a linear segment of items from memory, specialized for opaque input iterators (skips vectorization)
+    template <typename _InputIteratorT>
+    __device__ __forceinline__ void Load(
+      _InputIteratorT   block_itr,                    ///< [in] The thread block's base input iterator for loading from
+      InputT           (&items)[ITEMS_PER_THREAD])   ///< [out] Data to load
+    {
+      LoadDirectBlocked(linear_tid, block_itr, items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range (skips vectorization)
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items)                    ///< [in] Number of valid items to load
+    {
+      LoadDirectBlocked(linear_tid, block_itr, items, valid_items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range, with a fall-back assignment of out-of-bound elements (skips vectorization)
+    template <typename InputIteratorT, typename DefaultT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items,                    ///< [in] Number of valid items to load
+      DefaultT        oob_default)                    ///< [in] Default value to assign out-of-bound items
+    {
+      LoadDirectBlocked(linear_tid, block_itr, items, valid_items, oob_default);
+    }
+
+  };
+
+
+  /**
+     * BLOCK_LOAD_TRANSPOSE specialization of load helper
+   */
+  template <int DUMMY>
+  struct LoadInternal<BLOCK_LOAD_TRANSPOSE, DUMMY>
+  {
+    // BlockExchange utility type for keys
+    typedef BlockExchange<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, false, BLOCK_DIM_Y, BLOCK_DIM_Z, PTX_ARCH> BlockExchange;
+
+    /// Shared memory storage layout type
+    struct _TempStorage : BlockExchange::TempStorage
+    {};
+
+    /// Alias wrapper allowing storage to be unioned
+    struct TempStorage : Uninitialized<_TempStorage> {};
+
+    /// Thread reference to shared storage
+    _TempStorage &temp_storage;
+
+    /// Linear thread-id
+    int linear_tid;
+
+    /// Constructor
+    __device__ __forceinline__ LoadInternal(
+      TempStorage &temp_storage,
+      int linear_tid)
+      :
+      temp_storage(temp_storage.Alias()),
+      linear_tid(linear_tid)
+    {}
+
+    /// Load a linear segment of items from memory
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load{
+    {
+      LoadDirectStriped<BLOCK_THREADS>(linear_tid, block_itr, items);
+      BlockExchange(temp_storage).StripedToBlocked(items, items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items)                    ///< [in] Number of valid items to load
+    {
+      LoadDirectStriped<BLOCK_THREADS>(linear_tid, block_itr, items, valid_items);
+      BlockExchange(temp_storage).StripedToBlocked(items, items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range, with a fall-back assignment of out-of-bound elements
+    template <typename InputIteratorT, typename DefaultT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items,                    ///< [in] Number of valid items to load
+      DefaultT        oob_default)                    ///< [in] Default value to assign out-of-bound items
+    {
+      LoadDirectStriped<BLOCK_THREADS>(linear_tid, block_itr, items, valid_items, oob_default);
+      BlockExchange(temp_storage).StripedToBlocked(items, items);
+    }
+
+  };
+
+
+  /**
+     * BLOCK_LOAD_WARP_TRANSPOSE specialization of load helper
+   */
+  template <int DUMMY>
+  struct LoadInternal<BLOCK_LOAD_WARP_TRANSPOSE, DUMMY>
+  {
+    enum
+    {
+      WARP_THREADS = CUB_WARP_THREADS(PTX_ARCH)
+    };
+
+    // Assert BLOCK_THREADS must be a multiple of WARP_THREADS
+    CUB_STATIC_ASSERT((int(BLOCK_THREADS) % int(WARP_THREADS) == 0), "BLOCK_THREADS must be a multiple of WARP_THREADS");
+
+    // BlockExchange utility type for keys
+    typedef BlockExchange<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, false, BLOCK_DIM_Y, BLOCK_DIM_Z, PTX_ARCH> BlockExchange;
+
+    /// Shared memory storage layout type
+    struct _TempStorage : BlockExchange::TempStorage
+    {};
+
+    /// Alias wrapper allowing storage to be unioned
+    struct TempStorage : Uninitialized<_TempStorage> {};
+
+    /// Thread reference to shared storage
+    _TempStorage &temp_storage;
+
+    /// Linear thread-id
+    int linear_tid;
+
+    /// Constructor
+    __device__ __forceinline__ LoadInternal(
+      TempStorage &temp_storage,
+      int linear_tid)
+      :
+      temp_storage(temp_storage.Alias()),
+      linear_tid(linear_tid)
+    {}
+
+    /// Load a linear segment of items from memory
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load{
+    {
+      LoadDirectWarpStriped(linear_tid, block_itr, items);
+      BlockExchange(temp_storage).WarpStripedToBlocked(items, items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items)                    ///< [in] Number of valid items to load
+    {
+      LoadDirectWarpStriped(linear_tid, block_itr, items, valid_items);
+      BlockExchange(temp_storage).WarpStripedToBlocked(items, items);
+    }
+
+
+    /// Load a linear segment of items from memory, guarded by range, with a fall-back assignment of out-of-bound elements
+    template <typename InputIteratorT, typename DefaultT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items,                    ///< [in] Number of valid items to load
+      DefaultT        oob_default)                    ///< [in] Default value to assign out-of-bound items
+    {
+      LoadDirectWarpStriped(linear_tid, block_itr, items, valid_items, oob_default);
+      BlockExchange(temp_storage).WarpStripedToBlocked(items, items);
+    }
+  };
+
+
+  /**
+     * BLOCK_LOAD_WARP_TRANSPOSE_TIMESLICED specialization of load helper
+   */
+  template <int DUMMY>
+  struct LoadInternal<BLOCK_LOAD_WARP_TRANSPOSE_TIMESLICED, DUMMY>
+  {
+    enum
+    {
+      WARP_THREADS = CUB_WARP_THREADS(PTX_ARCH)
+    };
+
+    // Assert BLOCK_THREADS must be a multiple of WARP_THREADS
+    CUB_STATIC_ASSERT((int(BLOCK_THREADS) % int(WARP_THREADS) == 0), "BLOCK_THREADS must be a multiple of WARP_THREADS");
+
+    // BlockExchange utility type for keys
+    typedef BlockExchange<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, true, BLOCK_DIM_Y, BLOCK_DIM_Z, PTX_ARCH> BlockExchange;
+
+    /// Shared memory storage layout type
+    struct _TempStorage : BlockExchange::TempStorage
+    {};
+
+    /// Alias wrapper allowing storage to be unioned
+    struct TempStorage : Uninitialized<_TempStorage> {};
+
+    /// Thread reference to shared storage
+    _TempStorage &temp_storage;
+
+    /// Linear thread-id
+    int linear_tid;
+
+    /// Constructor
+    __device__ __forceinline__ LoadInternal(
+      TempStorage &temp_storage,
+      int linear_tid)
+      :
+      temp_storage(temp_storage.Alias()),
+      linear_tid(linear_tid)
+    {}
+
+    /// Load a linear segment of items from memory
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD])     ///< [out] Data to load{
+    {
+      LoadDirectWarpStriped(linear_tid, block_itr, items);
+      BlockExchange(temp_storage).WarpStripedToBlocked(items, items);
+    }
+
+    /// Load a linear segment of items from memory, guarded by range
+    template <typename InputIteratorT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items)                    ///< [in] Number of valid items to load
+    {
+      LoadDirectWarpStriped(linear_tid, block_itr, items, valid_items);
+      BlockExchange(temp_storage).WarpStripedToBlocked(items, items);
+    }
+
+
+    /// Load a linear segment of items from memory, guarded by range, with a fall-back assignment of out-of-bound elements
+    template <typename InputIteratorT, typename DefaultT>
+    __device__ __forceinline__ void Load(
+      InputIteratorT  block_itr,                      ///< [in] The thread block's base input iterator for loading from
+      InputT          (&items)[ITEMS_PER_THREAD],     ///< [out] Data to load
+      int             valid_items,                    ///< [in] Number of valid items to load
+      DefaultT        oob_default)                    ///< [in] Default value to assign out-of-bound items
+    {
+      LoadDirectWarpStriped(linear_tid, block_itr, items, valid_items, oob_default);
+      BlockExchange(temp_storage).WarpStripedToBlocked(items, items);
+    }
+  };
+
+
+  /******************************************************************************
+     * Type definitions
+     ******************************************************************************/
+
+  /// Internal load implementation to use
+  typedef LoadInternal<ALGORITHM, 0> InternalLoad;
+
+
+  /// Shared memory storage layout type
+  typedef typename InternalLoad::TempStorage _TempStorage;
+
+
+  /******************************************************************************
+     * Utility methods
+     ******************************************************************************/
+
+  /// Internal storage allocator
+  __device__ __forceinline__ _TempStorage& PrivateStorage()
+  {
+    __shared__ _TempStorage private_storage;
+    return private_storage;
+  }
+
+
+  /******************************************************************************
+     * Thread fields
+     ******************************************************************************/
+
+  /// Thread reference to shared storage
+  _TempStorage &temp_storage;
+
+  /// Linear thread-id
+  int linear_tid;
+
+public:
+
+  /// \smemstorage{BlockLoad}
+  struct TempStorage : Uninitialized<_TempStorage> {};
+
+
+  /******************************************************************//**
+     * \name Collective constructors
+     *********************************************************************/
+  //@{
+
+  /**
+     * \brief Collective constructor using a private static allocation of shared memory as temporary storage.
+   */
+  __device__ __forceinline__ BlockLoadTest()
+    :
+    temp_storage(PrivateStorage()),
+    linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+  {}
+
+
+  /**
+     * \brief Collective constructor using the specified memory allocation as temporary storage.
+   */
+  __device__ __forceinline__ BlockLoadTest(
+    TempStorage &temp_storage)             ///< [in] Reference to memory allocation having layout type TempStorage
+    :
+    temp_storage(temp_storage.Alias()),
+    linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
+  {}
+
+
+
+
+  //@}  end member group
+  /******************************************************************//**
+     * \name Data movement
+     *********************************************************************/
+  //@{
+
+
+  /**
+     * \brief Load a linear segment of items from memory.
+     *
+     * \par
+     * - \blocked
+     * - \smemreuse
+     *
+     * \par Snippet
+     * The code snippet below illustrates the loading of a linear
+     * segment of 512 integers into a "blocked" arrangement across 128 threads where each
+     * thread owns 4 consecutive items.  The load is specialized for \p BLOCK_LOAD_WARP_TRANSPOSE,
+     * meaning memory references are efficiently coalesced using a warp-striped access
+     * pattern (after which items are locally reordered among threads).
+     * \par
+     * \code
+     * #include <cub/cub.cuh>   // or equivalently <cub/block/block_load.cuh>
+     *
+     * __global__ void ExampleKernel(int *d_data, ...)
+     * {
+     *     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
+     *     typedef cub::BlockLoad<int, 128, 4, BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
+     *
+     *     // Allocate shared memory for BlockLoad
+     *     __shared__ typename BlockLoad::TempStorage temp_storage;
+     *
+     *     // Load a segment of consecutive items that are blocked across threads
+     *     int thread_data[4];
+     *     BlockLoad(temp_storage).Load(d_data, thread_data);
+     *
+     * \endcode
+     * \par
+     * Suppose the input \p d_data is <tt>0, 1, 2, 3, 4, 5, ...</tt>.
+     * The set of \p thread_data across the block of threads in those threads will be
+     * <tt>{ [0,1,2,3], [4,5,6,7], ..., [508,509,510,511] }</tt>.
+     *
+   */
+  template <typename InputIteratorT>
+  __device__ __forceinline__ void Load(
+    InputIteratorT  block_itr,                  ///< [in] The thread block's base input iterator for loading from
+    InputT          (&items)[ITEMS_PER_THREAD]) ///< [out] Data to load
+  {
+    InternalLoad(temp_storage, linear_tid).Load(block_itr, items);
+  }
+
+
+  /**
+     * \brief Load a linear segment of items from memory, guarded by range.
+     *
+     * \par
+     * - \blocked
+     * - \smemreuse
+     *
+     * \par Snippet
+     * The code snippet below illustrates the guarded loading of a linear
+     * segment of 512 integers into a "blocked" arrangement across 128 threads where each
+     * thread owns 4 consecutive items.  The load is specialized for \p BLOCK_LOAD_WARP_TRANSPOSE,
+     * meaning memory references are efficiently coalesced using a warp-striped access
+     * pattern (after which items are locally reordered among threads).
+     * \par
+     * \code
+     * #include <cub/cub.cuh>   // or equivalently <cub/block/block_load.cuh>
+     *
+     * __global__ void ExampleKernel(int *d_data, int valid_items, ...)
+     * {
+     *     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
+     *     typedef cub::BlockLoad<int, 128, 4, BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
+     *
+     *     // Allocate shared memory for BlockLoad
+     *     __shared__ typename BlockLoad::TempStorage temp_storage;
+     *
+     *     // Load a segment of consecutive items that are blocked across threads
+     *     int thread_data[4];
+     *     BlockLoad(temp_storage).Load(d_data, thread_data, valid_items);
+     *
+     * \endcode
+     * \par
+     * Suppose the input \p d_data is <tt>0, 1, 2, 3, 4, 5, 6...</tt> and \p valid_items is \p 5.
+     * The set of \p thread_data across the block of threads in those threads will be
+     * <tt>{ [0,1,2,3], [4,?,?,?], ..., [?,?,?,?] }</tt>, with only the first two threads
+     * being unmasked to load portions of valid data (and other items remaining unassigned).
+     *
+   */
+  template <typename InputIteratorT>
+  __device__ __forceinline__ void Load(
+    InputIteratorT  block_itr,                  ///< [in] The thread block's base input iterator for loading from
+    InputT          (&items)[ITEMS_PER_THREAD], ///< [out] Data to load
+    int             valid_items)                ///< [in] Number of valid items to load
+  {
+    InternalLoad(temp_storage, linear_tid).Load(block_itr, items, valid_items);
+  }
+
+
+  /**
+     * \brief Load a linear segment of items from memory, guarded by range, with a fall-back assignment of out-of-bound elements
+     *
+     * \par
+     * - \blocked
+     * - \smemreuse
+     *
+     * \par Snippet
+     * The code snippet below illustrates the guarded loading of a linear
+     * segment of 512 integers into a "blocked" arrangement across 128 threads where each
+     * thread owns 4 consecutive items.  The load is specialized for \p BLOCK_LOAD_WARP_TRANSPOSE,
+     * meaning memory references are efficiently coalesced using a warp-striped access
+     * pattern (after which items are locally reordered among threads).
+     * \par
+     * \code
+     * #include <cub/cub.cuh>   // or equivalently <cub/block/block_load.cuh>
+     *
+     * __global__ void ExampleKernel(int *d_data, int valid_items, ...)
+     * {
+     *     // Specialize BlockLoad for a 1D block of 128 threads owning 4 integer items each
+     *     typedef cub::BlockLoad<int, 128, 4, BLOCK_LOAD_WARP_TRANSPOSE> BlockLoad;
+     *
+     *     // Allocate shared memory for BlockLoad
+     *     __shared__ typename BlockLoad::TempStorage temp_storage;
+     *
+     *     // Load a segment of consecutive items that are blocked across threads
+     *     int thread_data[4];
+     *     BlockLoad(temp_storage).Load(d_data, thread_data, valid_items, -1);
+     *
+     * \endcode
+     * \par
+     * Suppose the input \p d_data is <tt>0, 1, 2, 3, 4, 5, 6...</tt>,
+     * \p valid_items is \p 5, and the out-of-bounds default is \p -1.
+     * The set of \p thread_data across the block of threads in those threads will be
+     * <tt>{ [0,1,2,3], [4,-1,-1,-1], ..., [-1,-1,-1,-1] }</tt>, with only the first two threads
+     * being unmasked to load portions of valid data (and other items are assigned \p -1)
+     *
+   */
+  template <typename InputIteratorT, typename DefaultT>
+  __device__ __forceinline__ void Load(
+    InputIteratorT  block_itr,                  ///< [in] The thread block's base input iterator for loading from
+    InputT          (&items)[ITEMS_PER_THREAD], ///< [out] Data to load
+    int             valid_items,                ///< [in] Number of valid items to load
+    DefaultT        oob_default)                ///< [in] Default value to assign out-of-bound items
+  {
+    InternalLoad(temp_storage, linear_tid).Load(block_itr, items, valid_items, oob_default);
+  }
+
+
+  //@}  end member group
+
+};
+
+template <class Policy,
+  class It,
+  class T = cub::detail::value_t<It>>
+struct BlockLoadTypeTest
+{
+  using type = cub::BlockLoadTest<T,
+    Policy::BLOCK_THREADS,
+    Policy::ITEMS_PER_THREAD,
+    Policy::LOAD_ALGORITHM>;
+};
+
+
 CUB_NAMESPACE_END
 
