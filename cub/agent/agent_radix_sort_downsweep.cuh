@@ -757,14 +757,10 @@ struct AgentRadixSortDownsweep
         OffsetT   block_end)
     {
         // Process full tiles of tile_items
-        #pragma unroll 1
-        while (block_offset + TILE_ITEMS <= block_end)
-        {
-            ProcessTile<true>(block_offset);
-            block_offset += TILE_ITEMS;
+        ProcessTile<true>(block_offset);
+        block_offset += TILE_ITEMS;
 
-            CTA_SYNC();
-        }
+        CTA_SYNC();
 
         // Clean up last partial tile with guarded-I/O
         if (block_offset < block_end)
