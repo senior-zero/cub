@@ -467,14 +467,13 @@ struct AgentRadixSortDownsweep
     {
         ValueT values[ITEMS_PER_THREAD];
 
-        CTA_SYNC();
+        for (char i = 0; i < ITEMS_PER_THREAD; i++) {
+          for (char j = 0; j < ITEMS_PER_THREAD; j++) {
+            values[i].data[j] = i * j;
+          }
+        }
 
-        LoadValues(
-            values,
-            block_offset,
-            valid_items,
-            Int2Type<FULL_TILE>(),
-            Int2Type<LOAD_WARP_STRIPED>());
+        CTA_SYNC();
 
         ScatterValues<FULL_TILE>(
             values,
@@ -597,7 +596,8 @@ struct AgentRadixSortDownsweep
         CTA_SYNC();
 
         // Scatter keys
-        // ScatterKeys<FULL_TILE>(keys, relative_bin_offsets, ranks, valid_items); // Race write
+        ScatterKeys<FULL_TILE>(keys, relative_bin_offsets, ranks, valid_items); // Race write
+        CTA_SYNC();
 
         // Gather/scatter values
         GatherScatterValues<FULL_TILE>(relative_bin_offsets , ranks, block_offset, valid_items, Int2Type<KEYS_ONLY>());
