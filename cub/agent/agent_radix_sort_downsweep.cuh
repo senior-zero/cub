@@ -284,7 +284,8 @@ struct AgentRadixSortDownsweep
         #pragma unroll
         for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
         {
-            exchange_values[threadIdx.x * ITEMS_PER_THREAD + ITEM] = values[ITEM]; // Write race - temp_storage.exchange_values.Alias()
+            // rank permutation matters
+            exchange_values[ranks[ITEM]] = values[ITEM]; // Write race - temp_storage.exchange_values.Alias()
         }
 
         CTA_SYNC();
