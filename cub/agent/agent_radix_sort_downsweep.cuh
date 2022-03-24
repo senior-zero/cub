@@ -283,7 +283,7 @@ struct AgentRadixSortDownsweep
       }
        */
 
-        CTA_SYNC();
+        __syncthreads();
 
         ValueExchangeT &exchange_values = temp_storage.exchange_values.Alias();
 
@@ -299,7 +299,7 @@ struct AgentRadixSortDownsweep
             exchange_values[ranks[ITEM]] = values[ITEM]; // Write race - temp_storage.exchange_values.Alias()
         }
 
-        CTA_SYNC();
+        __syncthreads();
 
         #pragma unroll
         for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
