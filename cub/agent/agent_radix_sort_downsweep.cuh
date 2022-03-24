@@ -475,6 +475,7 @@ struct AgentRadixSortDownsweep
             valid_items,
             Int2Type<FULL_TILE>(),
             Int2Type<LOAD_WARP_STRIPED>());
+        CTA_SYNC();
 
         ScatterValues<FULL_TILE>(
             values,
