@@ -1531,7 +1531,7 @@ private:
   struct LoadInternal<BLOCK_LOAD_TRANSPOSE, DUMMY>
   {
     // BlockExchange utility type for keys
-    typedef BlockExchange<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, false, BLOCK_DIM_Y, BLOCK_DIM_Z, PTX_ARCH> BlockExchange;
+    typedef BlockExchangeTest<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, false, BLOCK_DIM_Y, BLOCK_DIM_Z, PTX_ARCH> BlockExchange;
 
     /// Shared memory storage layout type
     struct _TempStorage : BlockExchange::TempStorage
@@ -1606,7 +1606,7 @@ private:
     CUB_STATIC_ASSERT((int(BLOCK_THREADS) % int(WARP_THREADS) == 0), "BLOCK_THREADS must be a multiple of WARP_THREADS");
 
     // BlockExchange utility type for keys
-    typedef BlockExchange<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, false, BLOCK_DIM_Y, BLOCK_DIM_Z, PTX_ARCH> BlockExchange;
+    typedef BlockExchangeTest<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, false, BLOCK_DIM_Y, BLOCK_DIM_Z, PTX_ARCH> BlockExchange;
 
     /// Shared memory storage layout type
     struct _TempStorage : BlockExchange::TempStorage
@@ -1681,7 +1681,7 @@ private:
     CUB_STATIC_ASSERT((int(BLOCK_THREADS) % int(WARP_THREADS) == 0), "BLOCK_THREADS must be a multiple of WARP_THREADS");
 
     // BlockExchange utility type for keys
-    typedef BlockExchange<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, true, BLOCK_DIM_Y, BLOCK_DIM_Z, PTX_ARCH> BlockExchange;
+    typedef BlockExchangeTest<InputT, BLOCK_DIM_X, ITEMS_PER_THREAD, true, BLOCK_DIM_Y, BLOCK_DIM_Z, PTX_ARCH> BlockExchange;
 
     /// Shared memory storage layout type
     struct _TempStorage : BlockExchange::TempStorage
