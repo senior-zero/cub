@@ -493,7 +493,7 @@ struct AgentRadixSortDownsweep
 
         CTA_SYNC();
 
-        // Read race
+        // Write race for FULL_TILE
         LoadValues(
             values,
             block_offset,
@@ -503,6 +503,7 @@ struct AgentRadixSortDownsweep
         CTA_SYNC();
 
         if (FULL_TILE) {
+          // Read race
           ScatterValuesFull(
             values,
               relative_bin_offsets,
@@ -792,7 +793,7 @@ struct AgentRadixSortDownsweep
         // Process full tiles of tile_items
         if (block_offset + TILE_ITEMS <= block_end)
         {
-            ProcessTile<true>(block_offset); // Write race
+            ProcessTile<true>(block_offset); // Write race/Read race
             block_offset += TILE_ITEMS;
 
             CTA_SYNC();
