@@ -467,13 +467,14 @@ struct AgentRadixSortDownsweep
     {
         ValueT values[ITEMS_PER_THREAD];
 
-        for (char i = 0; i < ITEMS_PER_THREAD; i++) {
-          for (char j = 0; j < ITEMS_PER_THREAD; j++) {
-            values[i].data[j] = i * j;
-          }
-        }
-
         CTA_SYNC();
+
+        LoadValues(
+            values,
+            block_offset,
+            valid_items,
+            Int2Type<FULL_TILE>(),
+            Int2Type<LOAD_WARP_STRIPED>());
 
         ScatterValues<FULL_TILE>(
             values,
