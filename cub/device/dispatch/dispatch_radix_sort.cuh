@@ -669,7 +669,7 @@ struct DeviceRadixSortPolicy
 
         // Downsweep policies
         typedef AgentRadixSortDownsweepPolicy <512, 23, DominantT,  BLOCK_LOAD_TRANSPOSE, LOAD_DEFAULT, RADIX_RANK_MATCH, BLOCK_SCAN_WARP_SCANS, PRIMARY_RADIX_BITS>   DownsweepPolicy;
-        typedef AgentRadixSortDownsweepPolicy <(sizeof(KeyT) > 1) ? 256 : 128, OFFSET_64BIT ? 46 : 47, DominantT,  BLOCK_LOAD_TRANSPOSE, LOAD_DEFAULT, RADIX_RANK_MEMOIZE, BLOCK_SCAN_WARP_SCANS, PRIMARY_RADIX_BITS - 1>   AltDownsweepPolicy;
+        typedef AgentRadixSortDownsweepPolicy <(sizeof(KeyT) > 1) ? 256 : 32, OFFSET_64BIT ? 46 : 47, DominantT,  BLOCK_LOAD_TRANSPOSE, LOAD_DEFAULT, RADIX_RANK_MEMOIZE, BLOCK_SCAN_WARP_SCANS, PRIMARY_RADIX_BITS - 1>   AltDownsweepPolicy;
 
         // Upsweep policies
         typedef AgentRadixSortUpsweepPolicy <256, 23, DominantT, LOAD_DEFAULT, PRIMARY_RADIX_BITS>     UpsweepPolicy;
