@@ -107,7 +107,7 @@ void Initialize(
 
     for (size_t i = 0; i < num_items; ++i)
     {
-        h_keys[i] = i % 2;
+        h_keys[i] = 0;
         //RandomBits(h_values[i]);
         //h_values[i] = i;
         h_pairs[i].key    = h_keys[i];
