@@ -290,8 +290,10 @@ struct AgentRadixSortDownsweep
         #pragma unroll
         for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
         {
+          /* removes the race for some reason..
           if (ranks[ITEM] >= TILE_ITEMS)
             printf("TID[%d]: ITEM[%d]: RANK = %d / %d\n", threadIdx.x, ITEM, ranks[ITEM], TILE_ITEMS);
+            */
 
             // rank permutation matters
             exchange_values[ranks[ITEM]] = values[ITEM]; // Write race - temp_storage.exchange_values.Alias()
