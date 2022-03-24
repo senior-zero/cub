@@ -101,11 +101,11 @@ void Initialize(
     OpaqueType<8>             *h_values,
     unsigned char           *h_reference_keys,
     OpaqueType<8>             *h_reference_values,
-    int             num_items)
+    size_t num_items)
 {
     Pair *h_pairs = new Pair[num_items];
 
-    for (int i = 0; i < num_items; ++i)
+    for (size_t i = 0; i < num_items; ++i)
     {
         h_keys[i] = i % 2;
         //RandomBits(h_values[i]);
@@ -127,7 +127,7 @@ void Initialize(
 
     std::stable_sort(h_pairs, h_pairs + num_items);
 
-    for (int i = 0; i < num_items; ++i)
+    for (size_t i = 0; i < num_items; ++i)
     {
         h_reference_keys[i]     = h_pairs[i].key;
         h_reference_values[i]   = h_pairs[i].value;
