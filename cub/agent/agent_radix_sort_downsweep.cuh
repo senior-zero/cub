@@ -597,7 +597,7 @@ struct AgentRadixSortDownsweep
         CTA_SYNC();
 
         // Scatter keys
-        ScatterKeys<FULL_TILE>(keys, relative_bin_offsets, ranks, valid_items);
+        // ScatterKeys<FULL_TILE>(keys, relative_bin_offsets, ranks, valid_items);
 
         // Gather/scatter values
         GatherScatterValues<FULL_TILE>(relative_bin_offsets , ranks, block_offset, valid_items, Int2Type<KEYS_ONLY>());
