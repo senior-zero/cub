@@ -756,32 +756,20 @@ struct AgentRadixSortDownsweep
         OffsetT   block_offset,
         OffsetT   block_end)
     {
-        if (short_circuit)
+        // Process full tiles of tile_items
+        #pragma unroll 1
+        while (block_offset + TILE_ITEMS <= block_end)
         {
-            // Copy keys
-            Copy(d_keys_in, d_keys_out, block_offset, block_end);
+            ProcessTile<true>(block_offset);
+            block_offset += TILE_ITEMS;
 
-            // Copy values
-            Copy(d_values_in, d_values_out, block_offset, block_end);
+            CTA_SYNC();
         }
-        else
+
+        // Clean up last partial tile with guarded-I/O
+        if (block_offset < block_end)
         {
-            // Process full tiles of tile_items
-            #pragma unroll 1
-            while (block_offset + TILE_ITEMS <= block_end)
-            {
-                ProcessTile<true>(block_offset);
-                block_offset += TILE_ITEMS;
-
-                CTA_SYNC();
-            }
-
-            // Clean up last partial tile with guarded-I/O
-            if (block_offset < block_end)
-            {
-                ProcessTile<false>(block_offset, block_end - block_offset); // Race should be here
-            }
-
+            ProcessTile<false>(block_offset, block_end - block_offset); // Race should be here
         }
     }
 
