@@ -482,6 +482,7 @@ struct AgentRadixSortDownsweep
             relative_bin_offsets,
             ranks,
             valid_items);
+        CTA_SYNC();
     }
 
 
