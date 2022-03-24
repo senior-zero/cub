@@ -277,6 +277,9 @@ struct AgentRadixSortDownsweep
         int         (&ranks)[ITEMS_PER_THREAD],
         OffsetT     valid_items)
     {
+      if (threadIdx.x == 0) {
+        printf("Block: %d\n", blockIdx.x);
+      }
         CTA_SYNC();
 
         ValueExchangeT &exchange_values = temp_storage.exchange_values.Alias();
@@ -284,6 +287,7 @@ struct AgentRadixSortDownsweep
         #pragma unroll
         for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
         {
+          printf("TID[%d]: ITEM[%d]: RANK = %d / %d\n", threadIdx.x, ITEM, ranks[ITEM], TILE_ITEMS);
             // rank permutation matters
             exchange_values[ranks[ITEM]] = values[ITEM]; // Write race - temp_storage.exchange_values.Alias()
         }
