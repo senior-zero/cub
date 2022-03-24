@@ -273,8 +273,7 @@ struct AgentRadixSortDownsweep
     /**
      * Scatter ranked values through shared memory, then to device-accessible memory
      */
-    template <bool FULL_TILE>
-    __device__ __forceinline__ void ScatterValues(
+    __device__ __forceinline__ void ScatterValuesFull(
         ValueT      (&values)[ITEMS_PER_THREAD],
         OffsetT     (&relative_bin_offsets)[ITEMS_PER_THREAD],
         int         (&ranks)[ITEMS_PER_THREAD],
@@ -309,17 +308,55 @@ struct AgentRadixSortDownsweep
         {
             ValueT value = exchange_values[threadIdx.x + (ITEM * BLOCK_THREADS)];
 
-            if (FULL_TILE ||
-                (static_cast<OffsetT>(threadIdx.x + (ITEM * BLOCK_THREADS)) < valid_items))
-            {
-                d_values_out[relative_bin_offsets[ITEM] + threadIdx.x + (ITEM * BLOCK_THREADS)] = value;
-            }
+              d_values_out[relative_bin_offsets[ITEM] + threadIdx.x + (ITEM * BLOCK_THREADS)] = value;
         }
     }
 
-    /**
-     * Load a tile of keys (specialized for full tile, block load)
+  __device__ __forceinline__ void ScatterValues(
+    ValueT      (&values)[ITEMS_PER_THREAD],
+    OffsetT     (&relative_bin_offsets)[ITEMS_PER_THREAD],
+    int         (&ranks)[ITEMS_PER_THREAD],
+    OffsetT     valid_items)
+  {
+    /* removes the race for some reason..
+    if (threadIdx.x == 0) {
+      printf("Block: %d\n", blockIdx.x);
+    }
      */
+
+    __syncthreads();
+
+    ValueExchangeT &exchange_values = temp_storage.exchange_values.Alias();
+
+#pragma unroll
+    for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
+    {
+      /* removes the race for some reason..
+      if (ranks[ITEM] >= TILE_ITEMS)
+        printf("TID[%d]: ITEM[%d]: RANK = %d / %d\n", threadIdx.x, ITEM, ranks[ITEM], TILE_ITEMS);
+        */
+
+      // rank permutation matters
+      exchange_values[ranks[ITEM]] = values[ITEM]; // Write race - temp_storage.exchange_values.Alias()
+    }
+
+    __syncthreads();
+
+#pragma unroll
+    for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
+    {
+      ValueT value = exchange_values[threadIdx.x + (ITEM * BLOCK_THREADS)];
+
+      if (static_cast<OffsetT>(threadIdx.x + (ITEM * BLOCK_THREADS)) < valid_items)
+      {
+        d_values_out[relative_bin_offsets[ITEM] + threadIdx.x + (ITEM * BLOCK_THREADS)] = value;
+      }
+    }
+  }
+
+  /**
+   * Load a tile of keys (specialized for full tile, block load)
+   */
     __device__ __forceinline__ void LoadKeys(
         UnsignedBits                (&keys)[ITEMS_PER_THREAD],
         OffsetT                     block_offset,
@@ -480,11 +517,19 @@ struct AgentRadixSortDownsweep
             Int2Type<LOAD_WARP_STRIPED>());
         CTA_SYNC();
 
-        ScatterValues<FULL_TILE>(
+        if (FULL_TILE) {
+          ScatterValuesFull(
+            values,
+              relative_bin_offsets,
+              ranks,
+              valid_items);
+        } else {
+          ScatterValuesFull(
             values,
             relative_bin_offsets,
             ranks,
             valid_items);
+        }
         CTA_SYNC();
     }
 
