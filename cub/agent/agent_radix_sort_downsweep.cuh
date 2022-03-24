@@ -279,12 +279,6 @@ struct AgentRadixSortDownsweep
         int         (&ranks)[ITEMS_PER_THREAD],
         OffsetT     valid_items)
     {
-      /* removes the race for some reason..
-      if (threadIdx.x == 0) {
-        printf("Block: %d\n", blockIdx.x);
-      }
-       */
-
         __syncthreads();
 
         ValueExchangeT &exchange_values = temp_storage.exchange_values.Alias();
@@ -292,11 +286,6 @@ struct AgentRadixSortDownsweep
         #pragma unroll
         for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
         {
-          /* removes the race for some reason..
-          if (ranks[ITEM] >= TILE_ITEMS)
-            printf("TID[%d]: ITEM[%d]: RANK = %d / %d\n", threadIdx.x, ITEM, ranks[ITEM], TILE_ITEMS);
-            */
-
             // rank permutation matters
             exchange_values[ranks[ITEM]] = values[ITEM]; // Write race - temp_storage.exchange_values.Alias()
         }
@@ -331,13 +320,8 @@ struct AgentRadixSortDownsweep
 #pragma unroll
     for (int ITEM = 0; ITEM < ITEMS_PER_THREAD; ++ITEM)
     {
-      /* removes the race for some reason..
-      if (ranks[ITEM] >= TILE_ITEMS)
-        printf("TID[%d]: ITEM[%d]: RANK = %d / %d\n", threadIdx.x, ITEM, ranks[ITEM], TILE_ITEMS);
-        */
-
       // rank permutation matters
-      exchange_values[ranks[ITEM]] = values[ITEM]; // Write race - temp_storage.exchange_values.Alias()
+      exchange_values[ranks[ITEM]] = values[ITEM];
     }
 
     __syncthreads();
@@ -509,6 +493,7 @@ struct AgentRadixSortDownsweep
 
         CTA_SYNC();
 
+        // Read race
         LoadValues(
             values,
             block_offset,
@@ -524,7 +509,7 @@ struct AgentRadixSortDownsweep
               ranks,
               valid_items);
         } else {
-          ScatterValuesFull(
+          ScatterValues(
             values,
             relative_bin_offsets,
             ranks,
@@ -647,7 +632,7 @@ struct AgentRadixSortDownsweep
         CTA_SYNC();
 
         // Scatter keys
-        ScatterKeys<FULL_TILE>(keys, relative_bin_offsets, ranks, valid_items); // Race write
+        ScatterKeys<FULL_TILE>(keys, relative_bin_offsets, ranks, valid_items);
         CTA_SYNC();
 
         // Gather/scatter values
@@ -807,7 +792,7 @@ struct AgentRadixSortDownsweep
         // Process full tiles of tile_items
         if (block_offset + TILE_ITEMS <= block_end)
         {
-            ProcessTile<true>(block_offset);
+            ProcessTile<true>(block_offset); // Write race
             block_offset += TILE_ITEMS;
 
             CTA_SYNC();
@@ -816,7 +801,7 @@ struct AgentRadixSortDownsweep
         // Clean up last partial tile with guarded-I/O
         if (block_offset < block_end)
         {
-            ProcessTile<false>(block_offset, block_end - block_offset); // Race should be here
+            ProcessTile<false>(block_offset, block_end - block_offset);
         }
     }
 
