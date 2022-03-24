@@ -642,7 +642,7 @@ struct DeviceRadixSortPolicy
     /// SM70 (GV100)
     struct Policy700 : ChainedPolicy<700, Policy700, Policy700>
     {
-      constexpr static int ipt = 39;
+      constexpr static int ipt = 19;
         enum {
             PRIMARY_RADIX_BITS      = (sizeof(KeyT) > 1) ? 7 : 5,    // 7.62B 32b keys/s (GV100)
             SINGLE_TILE_RADIX_BITS  = (sizeof(KeyT) > 1) ? 6 : 5,
