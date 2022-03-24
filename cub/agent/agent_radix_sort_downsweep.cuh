@@ -277,9 +277,12 @@ struct AgentRadixSortDownsweep
         int         (&ranks)[ITEMS_PER_THREAD],
         OffsetT     valid_items)
     {
+      /* removes the race for some reason..
       if (threadIdx.x == 0) {
         printf("Block: %d\n", blockIdx.x);
       }
+       */
+
         CTA_SYNC();
 
         ValueExchangeT &exchange_values = temp_storage.exchange_values.Alias();
