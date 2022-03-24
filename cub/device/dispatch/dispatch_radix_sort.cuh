@@ -1582,17 +1582,8 @@ struct DispatchRadixSort :
         }
 
         // Force kernel code-generation in all compiler passes
-        if (num_items <= (SingleTilePolicyT::BLOCK_THREADS * SingleTilePolicyT::ITEMS_PER_THREAD))
-        {
-            // Small, single tile size
-            return InvokeSingleTile<ActivePolicyT>(
-                DeviceRadixSortSingleTileKernel<MaxPolicyT, IS_DESCENDING, KeyT, ValueT, OffsetT>);
-        }
-        else
-        {
-            // Regular size
-            return InvokeManyTiles<ActivePolicyT>(Int2Type<ActivePolicyT::ONESWEEP>());
-        }
+        // Regular size
+        return InvokeManyTiles<ActivePolicyT>(Int2Type<ActivePolicyT::ONESWEEP>());
     }
 
 
