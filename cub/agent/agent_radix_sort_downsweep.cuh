@@ -173,6 +173,9 @@ struct AgentRadixSortDownsweep
 
     // BlockLoad type (values)
     using BlockLoadValuesT =
+      BlockLoad<ValueT, BLOCK_THREADS, ITEMS_PER_THREAD, LOAD_ALGORITHM>;
+
+    using BlockLoadValuesTestT =
       BlockLoadTest<ValueT, BLOCK_THREADS, ITEMS_PER_THREAD, LOAD_ALGORITHM>;
 
     // Value exchange array type
@@ -396,7 +399,7 @@ struct AgentRadixSortDownsweep
         Int2Type<true>              is_full_tile,
         Int2Type<false>             warp_striped)
     {
-        BlockLoadValuesT(temp_storage.load_values).Load(
+        BlockLoadValuesTestT(temp_storage.load_values).Load(
             d_values_in + block_offset, values);
 
         CTA_SYNC();

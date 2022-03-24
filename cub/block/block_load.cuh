@@ -1778,8 +1778,13 @@ private:
 public:
 
   /// \smemstorage{BlockLoad}
-  struct TempStorage : Uninitialized<_TempStorage> {};
-
+  using TempStorage = typename BlockLoad<InputT,
+                                BLOCK_DIM_X,
+                                ITEMS_PER_THREAD,
+                                ALGORITHM,
+                                BLOCK_DIM_Y,
+                                BLOCK_DIM_Z,
+                                PTX_ARCH>::TempStorage;
 
   /******************************************************************//**
      * \name Collective constructors
@@ -1802,7 +1807,7 @@ public:
   __device__ __forceinline__ BlockLoadTest(
     TempStorage &temp_storage)             ///< [in] Reference to memory allocation having layout type TempStorage
     :
-    temp_storage(temp_storage.Alias()),
+    temp_storage(reinterpret_cast<_TempStorage&>(temp_storage.Alias())),
     linear_tid(RowMajorTid(BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z))
   {}
 
