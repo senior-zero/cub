@@ -50,7 +50,7 @@ public:
   {}
 
   template <bool IS_FULL_TILE>
-  __device__ __forceinline__ void ConsumeTile(int items_in_tile)
+  __device__ __forceinline__ void ConsumeTile(OffsetT items_in_tile)
   {
     #pragma unroll
     for (OffsetT item = 0; item < ITEMS_PER_THREAD; ++item)
@@ -58,7 +58,9 @@ public:
       OffsetT idx = BLOCK_THREADS * item + threadIdx.x;
 
       if (IS_FULL_TILE || idx < items_in_tile)
+      {
         op(tile_base + idx);
+      }
     }
   }
 };

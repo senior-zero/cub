@@ -30,14 +30,19 @@
 
 #include <cub/device/device_for.cuh>
 
+#include <thrust/device_vector.h>
+#include <thrust/count.h>
+
 #include "test_util.h"
 
 
-struct PrintT
+struct Marker
 {
+  bool *d_marks{};
+
   __device__ void operator()(int i) const
   {
-    printf("%d\n", i);
+    d_marks[i] = true;
   }
 };
 
@@ -50,9 +55,16 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
+  const int n = 1024 * 1024;
+  thrust::device_vector<bool> marks(n);
+  Marker op{thrust::raw_pointer_cast(marks.data())};
+
   auto tuning = cub::TuneForEach<cub::ForEachAlgorithm::STRIPED>(
     cub::ForEachConfigurationSpace{}.Add<1024, 2>()
+                                    .Add<256, 19>()
                                     .Add<256, 1>());
 
-  cub::DeviceFor::Bulk(4, PrintT{}, {}, true, tuning);
+  cub::DeviceFor::Bulk(n, op, {}, true, tuning);
+
+  AssertEquals(n, thrust::count(marks.begin(), marks.end(), 1));
 }
