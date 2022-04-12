@@ -31,6 +31,7 @@
 #include <cub/util_device.cuh>
 #include <cub/util_math.cuh>
 #include <cub/util_namespace.cuh>
+#include <cub/agent/agent_for.cuh>
 
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
 
@@ -44,15 +45,28 @@ namespace detail
 template <typename OffsetT,
           typename OpT,
           OffsetT BLOCK_THREADS,
-          OffsetT /* ITEMS_PER_THREAD */>
+          OffsetT ITEMS_PER_THREAD>
 __global__ __launch_bounds__(BLOCK_THREADS)
 void device_for_each_kernel(OffsetT num_items, OpT op)
 {
-  for (auto i = static_cast<OffsetT>(threadIdx.x + blockIdx.x * BLOCK_THREADS);
-       i < num_items;
-       i += BLOCK_THREADS * gridDim.x)
+  constexpr OffsetT ITEMS_PER_TILE = ITEMS_PER_THREAD * BLOCK_THREADS;
+
+  const auto tile_base     = static_cast<OffsetT>(blockIdx.x) * ITEMS_PER_TILE;
+  const auto num_remaining = num_items - tile_base;
+  const auto items_in_tile = static_cast<OffsetT>(
+    num_remaining < ITEMS_PER_TILE ? num_remaining : ITEMS_PER_TILE);
+
+  using AgentT = AgentFor<OffsetT, OpT, BLOCK_THREADS, ITEMS_PER_TILE>;
+
+  if (items_in_tile == ITEMS_PER_TILE)
   {
-    op(i);
+    // full tile
+    AgentT(tile_base, op).ConsumeTile<true>(ITEMS_PER_TILE);
+  }
+  else
+  {
+    // partial tile
+    AgentT(tile_base, op).ConsumeTile<false>(items_in_tile);
   }
 }
 

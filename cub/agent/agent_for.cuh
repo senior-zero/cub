@@ -25,34 +25,43 @@
 *
 ******************************************************************************/
 
-// Ensure printing of CUDA runtime errors to console
-#define CUB_STDERR
+#pragma once
 
-#include <cub/device/device_for.cuh>
-
-#include "test_util.h"
+#include <cub/config.cuh>
+#include <cub/util_type.cuh>
 
 
-struct PrintT
+CUB_NAMESPACE_BEGIN
+
+template <typename OffsetT,
+          typename OpT,
+          OffsetT BLOCK_THREADS,
+          OffsetT ITEMS_PER_THREAD>
+class AgentFor
 {
-  __device__ void operator()(int i) const
+  OffsetT tile_base;
+  OpT op;
+
+public:
+  __device__ __forceinline__
+  AgentFor(OffsetT tile_base, OpT op)
+    : tile_base(tile_base)
+    , op(op)
+  {}
+
+  template <bool IS_FULL_TILE>
+  __device__ __forceinline__ void ConsumeTile(int items_in_tile)
   {
-    printf("%d\n", i);
+    #pragma unroll
+    for (OffsetT item = 0; item < ITEMS_PER_THREAD; ++item)
+    {
+      OffsetT idx = BLOCK_THREADS * item + threadIdx.x;
+
+      if (IS_FULL_TILE || idx < items_in_tile)
+        op(tile_base + idx);
+    }
   }
 };
 
 
-int main(int argc, char** argv)
-{
-  // Initialize command line
-  CommandLineArgs args(argc, argv);
-
-  // Initialize device
-  CubDebugExit(args.DeviceInit());
-
-  auto tuning = cub::TuneForEach<cub::ForEachAlgorithm::STRIPED>(
-    cub::ForEachConfigurationSpace{}.Add<1024, 2>()
-                                    .Add<256, 1>());
-
-  cub::DeviceFor::Bulk(4, PrintT{}, {}, true, tuning);
-}
+CUB_NAMESPACE_END
