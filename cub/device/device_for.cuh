@@ -62,21 +62,31 @@ struct ForEachWrapperVectorized
 {
   OpT op;
   const T* in;
+  OffsetT partially_filled_vector_id;
+  int partially_filled_vector_size;
+
+  constexpr static int vec_size = 4;
 
   __device__ void operator()(OffsetT i)
   {
-    // TODO Deal with the last item
-
-    constexpr int vec_size = 4;
     using vector_t = typename CubVector<T, vec_size>::Type;
 
-    // TODO thrust::raw_pointer_case
-    vector_t vec = *reinterpret_cast<const vector_t*>(in + vec_size * i);
-
-    #pragma unroll
-    for (int j = 0; j < vec_size; j++)
+    if (i != partially_filled_vector_id)
     {
-      op(*(reinterpret_cast<T*>(&vec) + j));
+      vector_t vec = *reinterpret_cast<const vector_t*>(in + vec_size * i);
+
+      #pragma unroll
+      for (int j = 0; j < vec_size; j++)
+      {
+        op(*(reinterpret_cast<T*>(&vec) + j));
+      }
+    }
+    else
+    {
+      for (int j = 0; j < partially_filled_vector_size; j++)
+      {
+        op(in[i * vec_size + j]);
+      }
     }
   }
 };
@@ -134,11 +144,14 @@ class DeviceFor
     auto unwrapped_begin = THRUST_NS_QUALIFIER::raw_pointer_cast(&*begin);
     using wrapped_op_t = detail::ForEachWrapperVectorized<OffsetT, OpT, detail::value_t<InputIteratorT>>;
 
-    num_items = cub::DivideAndRoundUp(num_items, 4);
+    const OffsetT num_vec_items = cub::DivideAndRoundUp(num_items, wrapped_op_t::vec_size);
 
     return DispatchFor<OffsetT, wrapped_op_t, Tuning>::Dispatch(
-      num_items,
-      wrapped_op_t{op, unwrapped_begin},
+      num_vec_items,
+      wrapped_op_t{op,
+                   unwrapped_begin,
+                   num_vec_items - 1,
+                   static_cast<int>(num_vec_items * 4 - num_items)},
       stream,
       debug_synchronous);
   }
