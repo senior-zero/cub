@@ -66,11 +66,10 @@ struct ForEachWrapperVectorized
   int partially_filled_vector_size;
 
   constexpr static int vec_size = 4;
+  using vector_t = typename CubVector<T, vec_size>::Type;
 
   __device__ void operator()(OffsetT i)
   {
-    using vector_t = typename CubVector<T, vec_size>::Type;
-
     if (i != partially_filled_vector_id)
     {
       vector_t vec = *reinterpret_cast<const vector_t*>(in + vec_size * i);
@@ -127,6 +126,24 @@ class DeviceFor
       debug_synchronous);
   }
 
+  static unsigned int PowerOf2(std::intptr_t n)
+  {
+    unsigned count = 0;
+
+    if (n && !(n & (n - 1)))
+    {
+      return static_cast<unsigned int>(n);
+    }
+
+    while(n != 0)
+    {
+      n >>= 1;
+      count += 1;
+    }
+
+    return 1 << count;
+  }
+
   template <
     typename InputIteratorT,
     typename OffsetT,
@@ -138,22 +155,34 @@ class DeviceFor
                                                    OpT op,
                                                    cudaStream_t stream    = {},
                                                    bool debug_synchronous = {},
-                                                   Tuning                 = {})
+                                                   Tuning tuning          = {})
   {
-    // TODO Check alignment
     auto unwrapped_begin = THRUST_NS_QUALIFIER::raw_pointer_cast(&*begin);
     using wrapped_op_t = detail::ForEachWrapperVectorized<OffsetT, OpT, detail::value_t<InputIteratorT>>;
 
-    const OffsetT num_vec_items = cub::DivideAndRoundUp(num_items, wrapped_op_t::vec_size);
+    if (PowerOf2(reinterpret_cast<std::intptr_t>(unwrapped_begin)) <=
+        std::alignment_of<typename wrapped_op_t::vector_t>::value)
+    {
+      const OffsetT num_vec_items =
+        cub::DivideAndRoundUp(num_items, wrapped_op_t::vec_size);
 
-    return DispatchFor<OffsetT, wrapped_op_t, Tuning>::Dispatch(
-      num_vec_items,
-      wrapped_op_t{op,
-                   unwrapped_begin,
-                   num_vec_items - 1,
-                   static_cast<int>(num_vec_items * 4 - num_items)},
-      stream,
-      debug_synchronous);
+      return DispatchFor<OffsetT, wrapped_op_t, Tuning>::Dispatch(
+        num_vec_items,
+        wrapped_op_t{op,
+                     unwrapped_begin,
+                     num_vec_items - 1,
+                     static_cast<int>(num_vec_items * 4 - num_items)},
+        stream,
+        debug_synchronous);
+    }
+
+    return ForEachN(std::integral_constant<int, 0>{},
+                    begin,
+                    num_items,
+                    op,
+                    stream,
+                    debug_synchronous,
+                    tuning);
   }
 
 public:
