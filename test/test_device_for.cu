@@ -81,10 +81,10 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  const int n = 32 * 1024 * 1024;
-
   // Test
   {
+    const int n = 32 * 1024 * 1024;
+
     thrust::device_vector<int> marks(n);
     int *d_marks = thrust::raw_pointer_cast(marks.data());
     Marker op{d_marks};
@@ -99,50 +99,63 @@ int main(int argc, char** argv)
 
   // Bench
   {
-    thrust::device_vector<int> in_1(n, 33);
-    thrust::device_vector<int> in_2(n, 32);
+    constexpr int max_iterations = 3;
+    float striped_ms = 0;
+    float vectorized_ms = 0;
 
-    thrust::device_vector<int> counter_1(n);
-    thrust::device_vector<int> counter_2(n);
-
-    int *d_in_1 = thrust::raw_pointer_cast(in_1.data());
-    int *d_in_2 = thrust::raw_pointer_cast(in_2.data());
-
-    int *d_counter_1 = thrust::raw_pointer_cast(counter_1.data());
-    int *d_counter_2 = thrust::raw_pointer_cast(counter_2.data());
-
-    Counter op_1{d_counter_1};
-    Counter op_2{d_counter_2};
-
-    auto striped_tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
-      cub::ForEachConfigurationSpace{}.Add<1024, 1>()
-                                      .Add<256, 1>());
-
-    auto vectorized_tuning = cub::TuneForEach<cub::ForEachAlgorithm::VECTORIZED>(
-      cub::ForEachConfigurationSpace{}.Add<1024, 1>()
-                                      .Add<256, 1>());
-
-    float striped_ms, vectorized_ms;
     cudaEvent_t begin, end;
 
     cudaEventCreate(&begin);
     cudaEventCreate(&end);
 
-    cudaEventRecord(begin);
-    cub::DeviceFor::ForEachN(d_in_1, n, op_1, {}, true, striped_tuning);
-    cudaEventRecord(end);
-    cudaEventSynchronize(end);
-    cudaEventElapsedTime(&striped_ms, begin, end);
+    for (int n = 1024; n < 512 * 1024 * 1024; n *= 2)
+    {
+      thrust::device_vector<int> in_1(n, n);
+      thrust::device_vector<int> in_2(n, n);
 
-    cudaEventRecord(begin);
-    cub::DeviceFor::ForEachN(d_in_2, n, op_2, {}, true, vectorized_tuning);
-    cudaEventRecord(end);
-    cudaEventSynchronize(end);
-    cudaEventElapsedTime(&vectorized_ms, begin, end);
+      thrust::device_vector<int> counter_1(n);
+      thrust::device_vector<int> counter_2(n);
+
+      int *d_in_1 = thrust::raw_pointer_cast(in_1.data());
+      int *d_in_2 = thrust::raw_pointer_cast(in_2.data());
+
+      int *d_counter_1 = thrust::raw_pointer_cast(counter_1.data());
+      int *d_counter_2 = thrust::raw_pointer_cast(counter_2.data());
+
+      Counter op_1{d_counter_1};
+      Counter op_2{d_counter_2};
+
+      auto striped_tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
+        cub::ForEachConfigurationSpace{}.Add<256, 4>());
+
+      auto vectorized_tuning = cub::TuneForEach<cub::ForEachAlgorithm::VECTORIZED>(
+        cub::ForEachConfigurationSpace{}.Add<256, 1>());
+
+      cudaEventRecord(begin);
+      for (int iteration = 0; iteration < max_iterations; iteration++)
+      {
+        cub::DeviceFor::ForEachN(d_in_1, n, op_1, {}, {}, striped_tuning);
+      }
+      cudaEventRecord(end);
+      cudaEventSynchronize(end);
+      cudaEventElapsedTime(&striped_ms, begin, end);
+
+      cudaEventRecord(begin);
+      for (int iteration = 0; iteration < max_iterations; iteration++)
+      {
+        cub::DeviceFor::ForEachN(d_in_2, n, op_2, {}, {}, vectorized_tuning);
+      }
+      cudaEventRecord(end);
+      cudaEventSynchronize(end);
+      cudaEventElapsedTime(&vectorized_ms, begin, end);
+
+      vectorized_ms /= max_iterations;
+      striped_ms /= max_iterations;
+
+      std::cout << n << ", " <<  striped_ms << ", " << vectorized_ms << std::endl;
+    }
 
     cudaEventDestroy(begin);
     cudaEventDestroy(end);
-
-    std::cout << striped_ms << " / " << vectorized_ms << " = " << striped_ms / vectorized_ms << std::endl;
   }
 }

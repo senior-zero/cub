@@ -109,7 +109,7 @@ int for_each_configuration_space_search(for_each_configurations<Head, Tail...>)
 
   const int num_warps = num_blocks * (block_threads / 32);
 
-  printf("occupancy[%d] = %d\n", block_threads, num_warps);
+  // printf("occupancy[%d] = %d\n", block_threads, num_warps);
   return std::max(num_warps,
                   for_each_configuration_space_search<OffsetT, OpT>(
                     for_each_configurations<Tail...>{}));
