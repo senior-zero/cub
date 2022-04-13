@@ -42,6 +42,53 @@ namespace detail
 
 // TODO Different settings for different PTX versions?
 
+template <typename V, typename T, typename = T>
+struct has_unique_value_overload_func_impl : std::false_type
+{};
+
+template <typename V, typename T>
+struct has_unique_value_overload_func_impl<
+  V,
+  T,
+  std::enable_if_t<std::is_same<T, void(V)>::value, T>> : std::true_type
+{};
+
+template <typename V, typename T, typename = T>
+struct has_unique_value_overload_class_impl : std::false_type
+{};
+
+template <typename V, typename T>
+struct has_unique_value_overload_class_impl<
+  V,
+  T,
+  std::enable_if_t<std::is_same<decltype(&T::operator()), void (T::*)(V)>::value,
+                   T>> : std::true_type
+{};
+
+template <typename V, typename T>
+struct has_unique_value_overload_class_impl<
+  V,
+  T,
+  std::enable_if_t<
+    std::is_same<decltype(&T::operator()), void (T::*)(V) const>::value,
+    T>> : std::true_type
+{};
+
+template <typename V, typename T>
+struct has_unique_value_overload_class_impl<
+  V,
+  T,
+  std::enable_if_t<
+    std::is_same<decltype(&T::operator()), void (T::*)(V) volatile>::value,
+    T>> : std::true_type
+{};
+
+template <typename V, typename T>
+using has_unique_value_overload =
+  std::conditional_t<std::is_class<T>::value,
+                     has_unique_value_overload_class_impl<V, T>,
+                     has_unique_value_overload_func_impl<V, T>>;
+
 template <typename OffsetT,
           typename OpT,
           OffsetT BLOCK_THREADS,
@@ -208,12 +255,9 @@ ForEachTuning<Algorithm, Configurations...>
   return {};
 }
 
-using ForEachDefaultTuning = decltype(TuneForEach<ForEachAlgorithm::BLOCK_STRIPED>(
-  ForEachConfigurationSpace{}.Add<256, 2>()));
-
 template <typename OffsetT,
           typename OpT,
-          typename Tuning = ForEachDefaultTuning>
+          typename Tuning>
 struct DispatchFor
 {
   CUB_RUNTIME_FUNCTION __forceinline__ static cudaError_t

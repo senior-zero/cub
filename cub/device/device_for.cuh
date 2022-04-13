@@ -33,7 +33,10 @@
 
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/iterator/iterator_traits.h>
+#include <thrust/type_traits/is_contiguous_iterator.h>
 #include <thrust/distance.h>
+
+#include <type_traits>
 
 CUB_NAMESPACE_BEGIN
 
@@ -58,7 +61,7 @@ template <typename OffsetT, typename OpT, typename T>
 struct ForEachWrapperVectorized
 {
   OpT op;
-  const T* __restrict in;
+  const T* in;
 
   __device__ void operator()(OffsetT i)
   {
@@ -78,13 +81,72 @@ struct ForEachWrapperVectorized
   }
 };
 
+using ForEachDefaultTuning = decltype(TuneForEach<ForEachAlgorithm::BLOCK_STRIPED>(
+  ForEachConfigurationSpace{}.Add<256, 2>()));
+
+template <typename V, typename OpT>
+using ForEachDefaultTuningSelection =
+  decltype(TuneForEach < detail::has_unique_value_overload<V, OpT>::value
+             ? ForEachAlgorithm::VECTORIZED
+             : ForEachAlgorithm::BLOCK_STRIPED >
+                 (ForEachConfigurationSpace{}.Add<256, 2>()));
+
 }
 
-struct DeviceFor
+class DeviceFor
 {
+  template <
+    typename InputIteratorT,
+    typename OffsetT,
+    typename OpT,
+    typename Tuning>
+  CUB_RUNTIME_FUNCTION static cudaError_t ForEachN(std::integral_constant<int, 0> /* do_not_vectorize */,
+                                                   InputIteratorT begin,
+                                                   OffsetT num_items,
+                                                   OpT op,
+                                                   cudaStream_t stream    = {},
+                                                   bool debug_synchronous = {},
+                                                   Tuning                 = {})
+  {
+    using wrapped_op_t = detail::ForEachWrapper<OffsetT, OpT, InputIteratorT>;
+
+    return DispatchFor<OffsetT, wrapped_op_t, Tuning>::Dispatch(
+      num_items,
+      wrapped_op_t{op, begin},
+      stream,
+      debug_synchronous);
+  }
+
+  template <
+    typename InputIteratorT,
+    typename OffsetT,
+    typename OpT,
+    typename Tuning>
+  CUB_RUNTIME_FUNCTION static cudaError_t ForEachN(std::integral_constant<int, 1> /* vectorize */,
+                                                   InputIteratorT begin,
+                                                   OffsetT num_items,
+                                                   OpT op,
+                                                   cudaStream_t stream    = {},
+                                                   bool debug_synchronous = {},
+                                                   Tuning                 = {})
+  {
+    // TODO Check alignment
+    auto unwrapped_begin = thrust::raw_pointer_cast(&*begin);
+    using wrapped_op_t = detail::ForEachWrapperVectorized<OffsetT, OpT, detail::value_t<InputIteratorT>>;
+
+    num_items = cub::DivideAndRoundUp(num_items, 4);
+
+    return DispatchFor<OffsetT, wrapped_op_t, Tuning>::Dispatch(
+      num_items,
+      wrapped_op_t{op, unwrapped_begin},
+      stream,
+      debug_synchronous);
+  }
+
+public:
   template <typename OffsetT,
             typename OpT,
-            typename Tuning = ForEachDefaultTuning>
+            typename Tuning = detail::ForEachDefaultTuning>
   CUB_RUNTIME_FUNCTION static cudaError_t Bulk(OffsetT num_items,
                                                OpT op,
                                                cudaStream_t stream    = {},
@@ -97,39 +159,38 @@ struct DeviceFor
                                                        debug_synchronous);
   }
 
-  template <typename InputIteratorT,
-            typename OffsetT,
-            typename OpT,
-            typename Tuning = ForEachDefaultTuning>
+  template <
+    typename InputIteratorT,
+    typename OffsetT,
+    typename OpT,
+    typename Tuning =
+      detail::ForEachDefaultTuningSelection<detail::value_t<InputIteratorT>, OpT>>
   CUB_RUNTIME_FUNCTION static cudaError_t ForEachN(InputIteratorT begin,
                                                    OffsetT num_items,
                                                    OpT op,
                                                    cudaStream_t stream    = {},
                                                    bool debug_synchronous = {},
-                                                   Tuning                 = {})
+                                                   Tuning tuning          = {})
   {
     // TODO Check alignment
-    constexpr bool use_vectorization = Tuning::algorithm == ForEachAlgorithm::VECTORIZED;
-    using wrapped_op_t = std::conditional_t<
-      use_vectorization,
-      detail::ForEachWrapperVectorized<OffsetT, OpT, detail::value_t<InputIteratorT>>,
-      detail::ForEachWrapper<OffsetT, OpT, InputIteratorT>>;
+    constexpr int use_vectorization = (Tuning::algorithm == ForEachAlgorithm::VECTORIZED)
+                                   && (thrust::is_contiguous_iterator_v<InputIteratorT>);
 
-    if (use_vectorization)
-    {
-      num_items = cub::DivideAndRoundUp(num_items, 4);
-    }
-
-    return DispatchFor<OffsetT, wrapped_op_t, Tuning>::Dispatch(
+    return ForEachN<InputIteratorT, OffsetT, OpT, Tuning>(
+      std::integral_constant<int, use_vectorization>{},
+      begin,
       num_items,
-      wrapped_op_t{op, begin},
+      op,
       stream,
-      debug_synchronous);
+      debug_synchronous,
+      tuning);
   }
 
-  template <typename InputIteratorT,
-            typename OpT,
-            typename Tuning = ForEachDefaultTuning>
+  template <
+    typename InputIteratorT,
+    typename OpT,
+    typename Tuning =
+      detail::ForEachDefaultTuningSelection<detail::value_t<InputIteratorT>, OpT>>
   CUB_RUNTIME_FUNCTION static cudaError_t ForEach(InputIteratorT begin,
                                                   InputIteratorT end,
                                                   OpT op,

@@ -115,6 +115,18 @@ int main(int argc, char** argv)
     AssertEquals(n, thrust::count(marks.begin(), marks.end(), 1));
   }
 
+  // Test
+  {
+    const int n = 32 * 1024 * 1024;
+
+    thrust::device_vector<int> marks(n);
+    thrust::device_vector<int> counter(n);
+
+    Counter op{thrust::raw_pointer_cast(counter.data())};
+
+    cub::DeviceFor::ForEach(marks.begin(), marks.end(), op);
+  }
+
   // Bench
   {
     constexpr int max_iterations = 1;
