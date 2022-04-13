@@ -38,21 +38,21 @@
 
 struct Marker
 {
-  bool *d_marks{};
+  int *d_marks{};
 
   __device__ void operator()(int i) const
   {
-    d_marks[i] = true;
+    d_marks[i] = 1;
   }
 };
 
 struct Checker
 {
-  bool *d_marks{};
+  int *d_marks{};
 
-  __device__ void operator()(bool val) const
+  __device__ void operator()(int val) const
   {
-    if (val == false)
+    if (val == 0)
     {
       printf("Wrong result!\n");
     }
@@ -69,17 +69,20 @@ int main(int argc, char** argv)
   CubDebugExit(args.DeviceInit());
 
   const int n = 1024 * 1024;
-  thrust::device_vector<bool> marks(n);
-  bool *d_marks = thrust::raw_pointer_cast(marks.data());
+  thrust::device_vector<int> marks(n);
+  int *d_marks = thrust::raw_pointer_cast(marks.data());
   Marker op{d_marks};
 
-  auto tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
-    cub::ForEachConfigurationSpace{}.Add<1024, 2>()
-                                    .Add<256, 19>()
-                                    .Add<256, 1>());
+  auto striped_tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
+    cub::ForEachConfigurationSpace{}.Add<1024, 4>()
+                                    .Add<256, 4>());
 
-  cub::DeviceFor::Bulk(n, op, {}, true, tuning);
-  cub::DeviceFor::ForEachN(d_marks, n, op, {}, true, tuning);
+  auto vectorized_tuning = cub::TuneForEach<cub::ForEachAlgorithm::VECTORIZED>(
+    cub::ForEachConfigurationSpace{}.Add<1024, 4>()
+                                    .Add<256, 4>());
+
+  cub::DeviceFor::Bulk(n, op, {}, true, striped_tuning);
+  cub::DeviceFor::ForEachN(d_marks, n, op, {}, true, vectorized_tuning);
 
   AssertEquals(n, thrust::count(marks.begin(), marks.end(), 1));
 }

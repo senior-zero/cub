@@ -37,6 +37,8 @@ CUB_NAMESPACE_BEGIN
 namespace detail
 {
 
+// TODO CacheLoadModifier
+
 template <typename OffsetT, typename OpT, typename InputIteratorT>
 struct ForEachWrapper
 {
@@ -45,7 +47,32 @@ struct ForEachWrapper
 
   __device__ void operator()(OffsetT i)
   {
+    // TODO thrust::raw_pointer_case
     op(*(begin + i));
+  }
+};
+
+template <typename OffsetT, typename OpT, typename T>
+struct ForEachWrapperVectorized
+{
+  OpT op;
+  T* in;
+
+  __device__ void operator()(OffsetT i)
+  {
+    // TODO Deal with the last item
+
+    constexpr int vec_size = 4;
+    using vector_t = typename CubVector<T, vec_size>::Type;
+
+    // TODO thrust::raw_pointer_case
+    vector_t vec = *reinterpret_cast<vector_t*>(in + vec_size * i);
+
+    #pragma unroll
+    for (int j = 0; j < vec_size; j++)
+    {
+      op(*(reinterpret_cast<T*>(&vec) + j));
+    }
   }
 };
 
@@ -79,7 +106,17 @@ struct DeviceFor
                                                    bool debug_synchronous = {},
                                                    Tuning                 = {})
   {
-    using wrapped_op_t = detail::ForEachWrapper<OffsetT, OpT, InputIteratorT>;
+    constexpr bool use_vectorization = Tuning::algorithm == ForEachAlgorithm::VECTORIZED;
+    using wrapped_op_t = std::conditional_t<
+      use_vectorization,
+      detail::ForEachWrapperVectorized<OffsetT, OpT, detail::value_t<InputIteratorT>>,
+      detail::ForEachWrapper<OffsetT, OpT, InputIteratorT>>;
+
+    if (use_vectorization)
+    {
+      num_items = cub::DivideAndRoundUp(num_items, 4);
+    }
+
     return DispatchFor<OffsetT, wrapped_op_t, Tuning>::Dispatch(
       num_items,
       wrapped_op_t{op, begin},
