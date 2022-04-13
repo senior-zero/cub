@@ -182,7 +182,8 @@ int main(int argc, char** argv)
       vectorized_ms /= max_iterations;
       striped_ms /= max_iterations;
 
-      std::cout << n << ", " <<  striped_ms << ", " << vectorized_ms << std::endl;
+      std::cout << n << ", " << striped_ms << ", " << vectorized_ms << ", "
+                << 100.0f - (vectorized_ms / striped_ms * 100.0f) << std::endl;
     }
 
     cudaEventDestroy(begin);
