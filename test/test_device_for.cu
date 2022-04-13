@@ -99,7 +99,7 @@ int main(int argc, char** argv)
 
   // Bench
   {
-    constexpr int max_iterations = 3;
+    constexpr int max_iterations = 1;
     float striped_ms = 0;
     float vectorized_ms = 0;
 
@@ -108,7 +108,7 @@ int main(int argc, char** argv)
     cudaEventCreate(&begin);
     cudaEventCreate(&end);
 
-    for (int n = 1024; n < 512 * 1024 * 1024; n *= 2)
+    for (int n = 1024; n < 512 * 1024 * 1024; n *= 16)
     {
       thrust::device_vector<int> in_1(n, n);
       thrust::device_vector<int> in_2(n, n);
@@ -126,10 +126,10 @@ int main(int argc, char** argv)
       Counter op_2{d_counter_2};
 
       auto striped_tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
-        cub::ForEachConfigurationSpace{}.Add<256, 4>());
+        cub::ForEachConfigurationSpace{}.Add<256, 8>());
 
       auto vectorized_tuning = cub::TuneForEach<cub::ForEachAlgorithm::VECTORIZED>(
-        cub::ForEachConfigurationSpace{}.Add<256, 1>());
+        cub::ForEachConfigurationSpace{}.Add<256, 2>());
 
       cudaEventRecord(begin);
       for (int iteration = 0; iteration < max_iterations; iteration++)

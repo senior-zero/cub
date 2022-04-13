@@ -31,6 +31,7 @@
 #include <cub/util_namespace.cuh>
 #include <cub/device/dispatch/dispatch_for.cuh>
 
+#include <thrust/detail/raw_reference_cast.h>
 
 CUB_NAMESPACE_BEGIN
 
@@ -43,12 +44,11 @@ template <typename OffsetT, typename OpT, typename InputIteratorT>
 struct ForEachWrapper
 {
   OpT op;
-  InputIteratorT begin;
+  InputIteratorT input;
 
   __device__ void operator()(OffsetT i)
   {
-    // TODO thrust::raw_pointer_case
-    op(*(begin + i));
+    op(THRUST_NS_QUALIFIER::raw_reference_cast(input[i]));
   }
 };
 
@@ -56,7 +56,7 @@ template <typename OffsetT, typename OpT, typename T>
 struct ForEachWrapperVectorized
 {
   OpT op;
-  T* in;
+  const T* __restrict in;
 
   __device__ void operator()(OffsetT i)
   {
@@ -66,7 +66,7 @@ struct ForEachWrapperVectorized
     using vector_t = typename CubVector<T, vec_size>::Type;
 
     // TODO thrust::raw_pointer_case
-    vector_t vec = *reinterpret_cast<vector_t*>(in + vec_size * i);
+    vector_t vec = *reinterpret_cast<const vector_t*>(in + vec_size * i);
 
     #pragma unroll
     for (int j = 0; j < vec_size; j++)
@@ -106,6 +106,7 @@ struct DeviceFor
                                                    bool debug_synchronous = {},
                                                    Tuning                 = {})
   {
+    // TODO Check alignment
     constexpr bool use_vectorization = Tuning::algorithm == ForEachAlgorithm::VECTORIZED;
     using wrapped_op_t = std::conditional_t<
       use_vectorization,
