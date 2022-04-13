@@ -131,7 +131,7 @@ class DeviceFor
                                                    Tuning                 = {})
   {
     // TODO Check alignment
-    auto unwrapped_begin = thrust::raw_pointer_cast(&*begin);
+    auto unwrapped_begin = THRUST_NS_QUALIFIER::raw_pointer_cast(&*begin);
     using wrapped_op_t = detail::ForEachWrapperVectorized<OffsetT, OpT, detail::value_t<InputIteratorT>>;
 
     num_items = cub::DivideAndRoundUp(num_items, 4);
@@ -174,7 +174,7 @@ public:
   {
     // TODO Check alignment
     constexpr int use_vectorization = (Tuning::algorithm == ForEachAlgorithm::VECTORIZED)
-                                   && (thrust::is_contiguous_iterator_v<InputIteratorT>);
+                                   && (THRUST_NS_QUALIFIER::is_contiguous_iterator_v<InputIteratorT>);
 
     return ForEachN<InputIteratorT, OffsetT, OpT, Tuning>(
       std::integral_constant<int, use_vectorization>{},
