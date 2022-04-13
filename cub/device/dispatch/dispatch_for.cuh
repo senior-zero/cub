@@ -56,7 +56,7 @@ void device_for_each_kernel(OffsetT num_items, OpT op)
   const auto items_in_tile = static_cast<OffsetT>(
     num_remaining < ITEMS_PER_TILE ? num_remaining : ITEMS_PER_TILE);
 
-  using AgentT = AgentFor<OffsetT, OpT, BLOCK_THREADS, ITEMS_PER_THREAD>;
+  using AgentT = AgentForBlockStriped<OffsetT, OpT, BLOCK_THREADS, ITEMS_PER_THREAD>;
 
   if (items_in_tile == ITEMS_PER_TILE)
   {
@@ -187,7 +187,8 @@ using ForEachConfigurationSpace = detail::for_each_configurations<>;
 
 enum class ForEachAlgorithm
 {
-  BLOCK_STRIPED
+  BLOCK_STRIPED,
+  VECTORIZED
 };
 
 template <ForEachAlgorithm Algorithm,

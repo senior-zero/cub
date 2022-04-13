@@ -34,6 +34,22 @@
 
 CUB_NAMESPACE_BEGIN
 
+namespace detail
+{
+
+template <typename OffsetT, typename OpT, typename InputIteratorT>
+struct ForEachWrapper
+{
+  OpT op;
+  InputIteratorT begin;
+
+  __device__ void operator()(OffsetT i)
+  {
+    op(*(begin + i));
+  }
+};
+
+}
 
 struct DeviceFor
 {
@@ -50,6 +66,25 @@ struct DeviceFor
                                                        op,
                                                        stream,
                                                        debug_synchronous);
+  }
+
+  template <typename InputIteratorT,
+            typename OffsetT,
+            typename OpT,
+            typename Tuning = ForEachDefaultTuning>
+  CUB_RUNTIME_FUNCTION static cudaError_t ForEachN(InputIteratorT begin,
+                                                   OffsetT num_items,
+                                                   OpT op,
+                                                   cudaStream_t stream    = {},
+                                                   bool debug_synchronous = {},
+                                                   Tuning                 = {})
+  {
+    using wrapped_op_t = detail::ForEachWrapper<OffsetT, OpT, InputIteratorT>;
+    return DispatchFor<OffsetT, wrapped_op_t, Tuning>::Dispatch(
+      num_items,
+      wrapped_op_t{op, begin},
+      stream,
+      debug_synchronous);
   }
 };
 

@@ -46,6 +46,19 @@ struct Marker
   }
 };
 
+struct Checker
+{
+  bool *d_marks{};
+
+  __device__ void operator()(bool val) const
+  {
+    if (val == false)
+    {
+      printf("Wrong result!\n");
+    }
+  }
+};
+
 
 int main(int argc, char** argv)
 {
@@ -57,7 +70,8 @@ int main(int argc, char** argv)
 
   const int n = 1024 * 1024;
   thrust::device_vector<bool> marks(n);
-  Marker op{thrust::raw_pointer_cast(marks.data())};
+  bool *d_marks = thrust::raw_pointer_cast(marks.data());
+  Marker op{d_marks};
 
   auto tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
     cub::ForEachConfigurationSpace{}.Add<1024, 2>()
@@ -65,6 +79,7 @@ int main(int argc, char** argv)
                                     .Add<256, 1>());
 
   cub::DeviceFor::Bulk(n, op, {}, true, tuning);
+  cub::DeviceFor::ForEachN(d_marks, n, op, {}, true, tuning);
 
   AssertEquals(n, thrust::count(marks.begin(), marks.end(), 1));
 }

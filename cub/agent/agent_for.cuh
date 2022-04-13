@@ -37,14 +37,14 @@ template <typename OffsetT,
           typename OpT,
           OffsetT BLOCK_THREADS,
           OffsetT ITEMS_PER_THREAD>
-class AgentFor
+class AgentForBlockStriped
 {
   OffsetT tile_base;
   OpT op;
 
 public:
   __device__ __forceinline__
-  AgentFor(OffsetT tile_base, OpT op)
+  AgentForBlockStriped(OffsetT tile_base, OpT op)
     : tile_base(tile_base)
     , op(op)
   {}
