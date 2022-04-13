@@ -59,7 +59,7 @@ int main(int argc, char** argv)
   thrust::device_vector<bool> marks(n);
   Marker op{thrust::raw_pointer_cast(marks.data())};
 
-  auto tuning = cub::TuneForEach<cub::ForEachAlgorithm::STRIPED>(
+  auto tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
     cub::ForEachConfigurationSpace{}.Add<1024, 2>()
                                     .Add<256, 19>()
                                     .Add<256, 1>());

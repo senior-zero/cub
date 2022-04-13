@@ -187,7 +187,7 @@ using ForEachConfigurationSpace = detail::for_each_configurations<>;
 
 enum class ForEachAlgorithm
 {
-  STRIPED
+  BLOCK_STRIPED
 };
 
 template <ForEachAlgorithm Algorithm,
@@ -207,7 +207,7 @@ ForEachTuning<Algorithm, Configurations...>
   return {};
 }
 
-using ForEachDefaultTuning = decltype(TuneForEach<ForEachAlgorithm::STRIPED>(
+using ForEachDefaultTuning = decltype(TuneForEach<ForEachAlgorithm::BLOCK_STRIPED>(
   ForEachConfigurationSpace{}.Add<256, 2>()));
 
 template <typename OffsetT,
