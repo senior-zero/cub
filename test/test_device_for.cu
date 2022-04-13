@@ -46,6 +46,14 @@ struct Marker
   }
 };
 
+struct ConstRemover
+{
+  __device__ void operator()(const int &i) const
+  {
+    const_cast<int&>(i) = 1;
+  }
+};
+
 struct Counter
 {
   int *d_count{};
@@ -94,6 +102,16 @@ int main(int argc, char** argv)
         .Add<256, 4>());
 
     cub::DeviceFor::Bulk(n, op, {}, true, tuning);
+    AssertEquals(n, thrust::count(marks.begin(), marks.end(), 1));
+  }
+
+  // Test
+  {
+    const int n = 32 * 1024 * 1024;
+
+    thrust::device_vector<int> marks(n);
+
+    cub::DeviceFor::ForEach(marks.begin(), marks.end(), ConstRemover{});
     AssertEquals(n, thrust::count(marks.begin(), marks.end(), 1));
   }
 

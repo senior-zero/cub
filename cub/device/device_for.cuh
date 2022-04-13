@@ -32,6 +32,8 @@
 #include <cub/device/dispatch/dispatch_for.cuh>
 
 #include <thrust/detail/raw_reference_cast.h>
+#include <thrust/iterator/iterator_traits.h>
+#include <thrust/distance.h>
 
 CUB_NAMESPACE_BEGIN
 
@@ -123,6 +125,25 @@ struct DeviceFor
       wrapped_op_t{op, begin},
       stream,
       debug_synchronous);
+  }
+
+  template <typename InputIteratorT,
+            typename OpT,
+            typename Tuning = ForEachDefaultTuning>
+  CUB_RUNTIME_FUNCTION static cudaError_t ForEach(InputIteratorT begin,
+                                                  InputIteratorT end,
+                                                  OpT op,
+                                                  cudaStream_t stream    = {},
+                                                  bool debug_synchronous = {},
+                                                  Tuning tuning          = {})
+  {
+    using OffsetT = typename THRUST_NS_QUALIFIER::iterator_traits<
+      InputIteratorT>::difference_type;
+
+    OffsetT num_items =
+      static_cast<OffsetT>(THRUST_NS_QUALIFIER::distance(begin, end));
+
+    return ForEachN(begin, num_items, op, stream, debug_synchronous, tuning);
   }
 };
 

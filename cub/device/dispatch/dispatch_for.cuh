@@ -152,12 +152,12 @@ cudaError_t for_each_configuration_launch(
               static_cast<int>(num_tiles),
               static_cast<int>(block_threads),
               reinterpret_cast<long long>(stream),
-              items_per_thread);
+              static_cast<int>(items_per_thread));
     }
 
     cudaError_t error =
-      THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(num_tiles,
-                                                              block_threads,
+      THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(static_cast<unsigned int>(num_tiles),
+                                                              static_cast<unsigned int>(block_threads),
                                                               0,
                                                               stream)
         .doit(detail::device_for_each_kernel<OffsetT, OpT, block_threads, items_per_thread>,
