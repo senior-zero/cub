@@ -27,11 +27,12 @@
 
 #pragma once
 
+#include <cub/agent/agent_for.cuh>
 #include <cub/config.cuh>
+#include <cub/thread/thread_load.cuh>
 #include <cub/util_device.cuh>
 #include <cub/util_math.cuh>
 #include <cub/util_namespace.cuh>
-#include <cub/agent/agent_for.cuh>
 
 #include <thrust/system/cuda/detail/core/triple_chevron_launch.h>
 
@@ -239,17 +240,21 @@ enum class ForEachAlgorithm
 };
 
 template <ForEachAlgorithm Algorithm,
+          CacheLoadModifier LoadModifier,
           typename... Configurations>
 struct ForEachTuning
 {
-  constexpr static ForEachAlgorithm algorithm = Algorithm;
+  constexpr static ForEachAlgorithm ALGORITHM = Algorithm;
+  constexpr static CacheLoadModifier LOAD_MODIFIER = LoadModifier;
 
-  using configuration_space =
+  using CONFIGURATION_SPACE =
     detail::for_each_configurations<Configurations...>;
 };
 
-template <ForEachAlgorithm Algorithm, typename... Configurations>
-ForEachTuning<Algorithm, Configurations...>
+template <ForEachAlgorithm Algorithm = ForEachAlgorithm::BLOCK_STRIPED,
+          CacheLoadModifier LoadModifier = CacheLoadModifier::LOAD_DEFAULT,
+          typename... Configurations>
+ForEachTuning<Algorithm, LoadModifier, Configurations...>
   TuneForEach(detail::for_each_configurations<Configurations...>)
 {
   return {};
@@ -271,7 +276,7 @@ struct DispatchFor
       return cudaSuccess;
     }
 
-    typename Tuning::configuration_space configuration_space{};
+    typename Tuning::CONFIGURATION_SPACE configuration_space{};
 
     const int target_occupancy =
       detail::for_each_configuration_space_search<OffsetT, OpT>(

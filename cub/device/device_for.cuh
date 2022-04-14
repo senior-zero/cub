@@ -34,6 +34,7 @@
 #include <thrust/detail/raw_reference_cast.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
+#include <thrust/system/cuda/detail/core/util.h>
 #include <thrust/distance.h>
 
 #include <type_traits>
@@ -42,8 +43,6 @@ CUB_NAMESPACE_BEGIN
 
 namespace detail
 {
-
-// TODO CacheLoadModifier
 
 template <typename OffsetT, typename OpT, typename InputIteratorT>
 struct ForEachWrapper
@@ -114,20 +113,22 @@ class DeviceFor
     typename InputIteratorT,
     typename OffsetT,
     typename OpT,
-    typename Tuning>
+    typename TuningT>
   CUB_RUNTIME_FUNCTION static cudaError_t ForEachN(std::integral_constant<int, 0> /* do_not_vectorize */,
                                                    InputIteratorT begin,
                                                    OffsetT num_items,
                                                    OpT op,
                                                    cudaStream_t stream    = {},
                                                    bool debug_synchronous = {},
-                                                   Tuning                 = {})
+                                                   TuningT                = {})
   {
-    using wrapped_op_t = detail::ForEachWrapper<OffsetT, OpT, InputIteratorT>;
+    using load_it_t = typename THRUST_NS_QUALIFIER::cuda_cub::core::LoadIterator<TuningT, InputIteratorT>::type;
+    using wrapped_op_t = detail::ForEachWrapper<OffsetT, OpT, load_it_t>;
+    load_it_t load_iterator = THRUST_NS_QUALIFIER::cuda_cub::core::make_load_iterator(TuningT(), begin);
 
-    return DispatchFor<OffsetT, wrapped_op_t, Tuning>::Dispatch(
+    return DispatchFor<OffsetT, wrapped_op_t, TuningT>::Dispatch(
       num_items,
-      wrapped_op_t{op, begin},
+      wrapped_op_t{op, load_iterator},
       stream,
       debug_synchronous);
   }
@@ -201,8 +202,7 @@ public:
                                                    bool debug_synchronous = {},
                                                    Tuning tuning          = {})
   {
-    // TODO Check alignment
-    constexpr int use_vectorization = (Tuning::algorithm == ForEachAlgorithm::VECTORIZED)
+    constexpr int use_vectorization = (Tuning::ALGORITHM == ForEachAlgorithm::VECTORIZED)
                                    && (THRUST_NS_QUALIFIER::is_contiguous_iterator_v<InputIteratorT>);
 
     return ForEachN<InputIteratorT, OffsetT, OpT, Tuning>(
