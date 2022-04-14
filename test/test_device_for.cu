@@ -119,12 +119,17 @@ int main(int argc, char** argv)
   {
     const int n = 32 * 1024 * 1024;
 
-    thrust::device_vector<int> marks(n);
-    thrust::device_vector<int> counter(n);
+    thrust::device_vector<int> in(n);
+    thrust::device_vector<int> counter(1);
 
     Counter op{thrust::raw_pointer_cast(counter.data())};
 
-    cub::DeviceFor::ForEach(marks.begin(), marks.end(), op);
+    cub::DeviceFor::ForEach(in.begin(), in.end(), op, {}, true);
+    AssertTrue(counter[0] == 0);
+
+    thrust::fill(in.begin(), in.end(), 42);
+    cub::DeviceFor::ForEach(in.begin(), in.end(), op, {}, true);
+    AssertTrue(counter[0] == n);
   }
 
   // Bench
@@ -156,7 +161,7 @@ int main(int argc, char** argv)
       Counter op_2{d_counter_2};
 
       auto striped_tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
-        cub::ForEachConfigurationSpace{}.Add<256, 8>());
+        cub::ForEachConfigurationSpace{}.Add<256, 2>());
 
       auto vectorized_tuning = cub::TuneForEach<cub::ForEachAlgorithm::VECTORIZED>(
         cub::ForEachConfigurationSpace{}.Add<256, 2>());

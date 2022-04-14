@@ -37,6 +37,7 @@
 #include <thrust/system/cuda/detail/core/util.h>
 #include <thrust/distance.h>
 
+#include "dispatch/dispatch_for.cuh"
 #include <type_traits>
 
 CUB_NAMESPACE_BEGIN
@@ -44,15 +45,30 @@ CUB_NAMESPACE_BEGIN
 namespace detail
 {
 
-template <typename OffsetT, typename OpT, typename InputIteratorT>
+template <typename TuningT, typename OffsetT, typename OpT, typename InputIteratorT>
 struct ForEachWrapper
 {
   OpT op;
   InputIteratorT input;
 
+  template <CacheLoadModifier LoadModifier>
+  __device__ auto make_caching_iterator(std::integral_constant<CacheLoadModifier, LoadModifier>) const
+  {
+    return THRUST_NS_QUALIFIER::cuda_cub::core::make_load_iterator(TuningT{}, input);
+  }
+
+  __device__ auto make_caching_iterator(
+    std::integral_constant<CacheLoadModifier, CacheLoadModifier::LOAD_DEFAULT>) const
+  {
+    // Reference type of CacheLoadModifier::LOAD_DEFAULT is equal to value type
+    // Therefore, it can't be used when reference is expected
+    return input;
+  }
+
   __device__ void operator()(OffsetT i)
   {
-    op(THRUST_NS_QUALIFIER::raw_reference_cast(input[i]));
+    auto it = make_caching_iterator(std::integral_constant<CacheLoadModifier, TuningT::LOAD_MODIFIER>{});
+    op(THRUST_NS_QUALIFIER::raw_reference_cast(it[i]));
   }
 };
 
@@ -110,22 +126,6 @@ class DeviceFor
     return (reinterpret_cast<std::size_t>(ptr) & (sizeof(VectorT) - 1)) == 0;
   }
 
-  template <CacheLoadModifier LoadModifier, typename InputIteratorT>
-  static auto make_caching_iterator(std::integral_constant<CacheLoadModifier, LoadModifier>, InputIteratorT begin)
-  {
-    return THRUST_NS_QUALIFIER::cuda_cub::core::make_load_iterator(TuningT(), begin);
-  }
-
-  template <typename InputIteratorT>
-  static auto make_caching_iterator(
-    std::integral_constant<CacheLoadModifier, CacheLoadModifier::LOAD_DEFAULT>,
-    InputIteratorT begin)
-  {
-    // Reference type of CacheLoadModifier::LOAD_DEFAULT is equal to value type
-    // Therefore, it can't be used when reference is expected
-    return begin;
-  }
-
   template <
     typename InputIteratorT,
     typename OffsetT,
@@ -139,15 +139,11 @@ class DeviceFor
                                                    bool debug_synchronous = {},
                                                    TuningT                = {})
   {
-    auto load_it = make_caching_iterator(
-      std::integral_constant<CacheLoadModifier, TuningT::LOAD_MODIFIER>{},
-      begin);
-    using load_it_t = decltype(load_it);
-    using wrapped_op_t = detail::ForEachWrapper<OffsetT, OpT, load_it_t>;
+    using wrapped_op_t = detail::ForEachWrapper<TuningT, OffsetT, OpT, InputIteratorT>;
 
     return DispatchFor<OffsetT, wrapped_op_t, TuningT>::Dispatch(
       num_items,
-      wrapped_op_t{op, load_it},
+      wrapped_op_t{op, begin},
       stream,
       debug_synchronous);
   }
@@ -177,8 +173,8 @@ class DeviceFor
         num_vec_items,
         wrapped_op_t{op,
                      unwrapped_begin,
-                     num_vec_items - 1,
-                     static_cast<int>(num_vec_items * 4 - num_items)},
+                     num_vec_items * wrapped_op_t::vec_size > num_items ? num_vec_items - 1 : num_vec_items,
+                     static_cast<int>(num_vec_items * wrapped_op_t::vec_size - num_items)},
         stream,
         debug_synchronous);
     }
