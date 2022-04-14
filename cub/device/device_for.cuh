@@ -104,6 +104,12 @@ using ForEachDefaultTuningSelection =
 
 class DeviceFor
 {
+  template <typename VectorT, typename T>
+  static bool IsAligned(const T* ptr)
+  {
+    return (reinterpret_cast<std::size_t>(ptr) & (sizeof(VectorT) - 1)) == 0;
+  }
+
   template <
     typename InputIteratorT,
     typename OffsetT,
@@ -126,24 +132,6 @@ class DeviceFor
       debug_synchronous);
   }
 
-  static unsigned int PowerOf2(std::intptr_t n)
-  {
-    unsigned count = 0;
-
-    if (n && !(n & (n - 1)))
-    {
-      return static_cast<unsigned int>(n);
-    }
-
-    while(n != 0)
-    {
-      n >>= 1;
-      count += 1;
-    }
-
-    return 1 << count;
-  }
-
   template <
     typename InputIteratorT,
     typename OffsetT,
@@ -160,8 +148,7 @@ class DeviceFor
     auto unwrapped_begin = THRUST_NS_QUALIFIER::raw_pointer_cast(&*begin);
     using wrapped_op_t = detail::ForEachWrapperVectorized<OffsetT, OpT, detail::value_t<InputIteratorT>>;
 
-    if (PowerOf2(reinterpret_cast<std::intptr_t>(unwrapped_begin)) <=
-        std::alignment_of<typename wrapped_op_t::vector_t>::value)
+    if (IsAligned<typename wrapped_op_t::vector_t>(unwrapped_begin))
     {
       const OffsetT num_vec_items =
         cub::DivideAndRoundUp(num_items, wrapped_op_t::vec_size);
