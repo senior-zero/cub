@@ -103,10 +103,27 @@ using ForEachDefaultTuningSelection =
 
 class DeviceFor
 {
+  // TODO Extract as a separate facility
   template <typename VectorT, typename T>
   static bool IsAligned(const T* ptr)
   {
     return (reinterpret_cast<std::size_t>(ptr) & (sizeof(VectorT) - 1)) == 0;
+  }
+
+  template <CacheLoadModifier LoadModifier, typename InputIteratorT>
+  static auto make_caching_iterator(std::integral_constant<CacheLoadModifier, LoadModifier>, InputIteratorT begin)
+  {
+    return THRUST_NS_QUALIFIER::cuda_cub::core::make_load_iterator(TuningT(), begin);
+  }
+
+  template <typename InputIteratorT>
+  static auto make_caching_iterator(
+    std::integral_constant<CacheLoadModifier, CacheLoadModifier::LOAD_DEFAULT>,
+    InputIteratorT begin)
+  {
+    // Reference type of CacheLoadModifier::LOAD_DEFAULT is equal to value type
+    // Therefore, it can't be used when reference is expected
+    return begin;
   }
 
   template <
@@ -122,13 +139,15 @@ class DeviceFor
                                                    bool debug_synchronous = {},
                                                    TuningT                = {})
   {
-    using load_it_t = typename THRUST_NS_QUALIFIER::cuda_cub::core::LoadIterator<TuningT, InputIteratorT>::type;
+    auto load_it = make_caching_iterator(
+      std::integral_constant<CacheLoadModifier, TuningT::LOAD_MODIFIER>{},
+      begin);
+    using load_it_t = decltype(load_it);
     using wrapped_op_t = detail::ForEachWrapper<OffsetT, OpT, load_it_t>;
-    load_it_t load_iterator = THRUST_NS_QUALIFIER::cuda_cub::core::make_load_iterator(TuningT(), begin);
 
     return DispatchFor<OffsetT, wrapped_op_t, TuningT>::Dispatch(
       num_items,
-      wrapped_op_t{op, load_iterator},
+      wrapped_op_t{op, load_it},
       stream,
       debug_synchronous);
   }

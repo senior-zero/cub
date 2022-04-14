@@ -171,6 +171,7 @@ struct AgentReduce
         Iterator        d_in,
         Int2Type<true>  /*can_vectorize*/)
     {
+        // TODO Reuse extracted version
         return (size_t(d_in) & (sizeof(VectorT) - 1)) == 0;
     }
 
