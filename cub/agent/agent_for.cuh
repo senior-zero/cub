@@ -28,6 +28,7 @@
 #pragma once
 
 #include <cub/config.cuh>
+#include <cub/util_ptx.cuh>
 #include <cub/util_type.cuh>
 
 CUB_NAMESPACE_BEGIN
