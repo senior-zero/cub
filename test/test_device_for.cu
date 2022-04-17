@@ -163,6 +163,7 @@ int main(int argc, char** argv)
       auto striped_tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
         cub::ForEachConfigurationSpace{}.Add<256, 2>());
 
+      // TODO Should be BLOCK_STRIPED_VECTORIZED
       auto vectorized_tuning = cub::TuneForEach<cub::ForEachAlgorithm::VECTORIZED>(
         cub::ForEachConfigurationSpace{}.Add<256, 2>());
 
