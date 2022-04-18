@@ -35,6 +35,7 @@
 #include <thrust/equal.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/sequence.h>
+#include <thrust/random.h>
 
 #include "test_util.h"
 
@@ -137,14 +138,15 @@ void TestBulk(OffsetT num_items)
 }
 
 template <typename OffsetT>
-void TestBulkRandom()
+void TestBulkRandom(thrust::default_random_engine &rng)
 {
   const int num_iterations = 8;
   const OffsetT max_items  = 2 << 26; // Up to 512 MB
+  thrust::uniform_int_distribution<OffsetT> dist(0, max_items);
 
   for (int iteration = 0; iteration < num_iterations; iteration++)
   {
-    OffsetT num_items = RandomValue(max_items);
+    OffsetT num_items = dist(rng);
     TestBulk<OffsetT>(num_items);
   }
 }
@@ -163,16 +165,16 @@ void TestBulkEdgeCases()
 }
 
 template <typename OffsetT>
-void TestBulk()
+void TestBulk(thrust::default_random_engine &rng)
 {
-  TestBulkRandom<OffsetT>();
+  TestBulkRandom<OffsetT>(rng);
   TestBulkEdgeCases<OffsetT>();
 }
 
-void TestBulk()
+void TestBulk(thrust::default_random_engine &rng)
 {
-  TestBulk<int>();
-  TestBulk<std::size_t>();
+  TestBulk<int>(rng);
+  TestBulk<std::size_t>(rng);
 }
 
 template <typename OffsetT>
@@ -256,14 +258,15 @@ void TestForEach(OffsetT num_items)
 }
 
 template <typename OffsetT>
-void TestForEachRandom()
+void TestForEachRandom(thrust::default_random_engine &rng)
 {
   const int num_iterations = 8;
   const OffsetT max_items  = 2 << 26; // Up to 512 MB
+  thrust::uniform_int_distribution<OffsetT> dist(0, max_items);
 
   for (int iteration = 0; iteration < num_iterations; iteration++)
   {
-    OffsetT num_items = RandomValue(max_items);
+    OffsetT num_items = dist(rng);
     TestForEach<OffsetT>(num_items);
   }
 }
@@ -282,9 +285,9 @@ void TestForEachEdgeCases()
 }
 
 template <typename OffsetT>
-void TestForEach()
+void TestForEach(thrust::default_random_engine &rng)
 {
-  TestForEachRandom<OffsetT>();
+  TestForEachRandom<OffsetT>(rng);
   TestForEachEdgeCases<OffsetT>();
 }
 
@@ -344,12 +347,10 @@ void TestForEachOverwrite()
   }
 }
 
-void TestForEach()
+void TestForEach(thrust::default_random_engine &rng)
 {
-  // TODO RNG
-
-  TestForEach<int>();
-  TestForEach<std::size_t>();
+  TestForEach<int>(rng);
+  TestForEach<std::size_t>(rng);
   TestForEachIterator();
   TestForEachOverwrite<cub::CacheLoadModifier::LOAD_DEFAULT>();
   TestForEachOverwrite<cub::CacheLoadModifier::LOAD_CA>();
@@ -363,6 +364,8 @@ int main(int argc, char **argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  TestBulk();
-  TestForEach();
+  thrust::default_random_engine rng;
+
+  TestBulk(rng);
+  TestForEach(rng);
 }
