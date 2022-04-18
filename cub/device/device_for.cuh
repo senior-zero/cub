@@ -45,7 +45,7 @@ CUB_NAMESPACE_BEGIN
 enum class ForEachAlgorithm
 {
   BLOCK_STRIPED,
-  VECTORIZED
+  BLOCK_STRIPED_VECTORIZED
 };
 
 template <ForEachAlgorithm Algorithm,
@@ -149,7 +149,7 @@ template <typename V, typename OpT>
 using ForEachDefaultTuningSelection =
   decltype(TuneForEach <
                detail::for_each::has_unique_value_overload<V, OpT>::value
-             ? ForEachAlgorithm::VECTORIZED
+             ? ForEachAlgorithm::BLOCK_STRIPED_VECTORIZED
              : ForEachAlgorithm::BLOCK_STRIPED >
                  (ForEachConfigurationSpace{}.Add<256, 2>()));
 
@@ -258,7 +258,7 @@ public:
                                                    Tuning tuning          = {})
   {
     constexpr int use_vectorization =
-      (Tuning::ALGORITHM == ForEachAlgorithm::VECTORIZED) &&
+      (Tuning::ALGORITHM == ForEachAlgorithm::BLOCK_STRIPED_VECTORIZED) &&
       (THRUST_NS_QUALIFIER::is_contiguous_iterator_v<InputIteratorT>);
 
     return ForEachN<InputIteratorT, OffsetT, OpT, Tuning>(

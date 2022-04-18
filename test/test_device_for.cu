@@ -252,7 +252,7 @@ void TestForEachTuned(OffsetT num_items)
 template <typename OffsetT>
 void TestForEach(OffsetT num_items)
 {
-  // TODO Return once VECTORIZED is tested
+  // TODO Return once BLOCK_STRIPED_VECTORIZED is tested
   // TestForEachDefault<OffsetT>(num_items);
   TestForEachTuned<OffsetT>(num_items);
 }
