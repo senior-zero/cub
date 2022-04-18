@@ -32,6 +32,7 @@
 
 #include <thrust/count.h>
 #include <thrust/device_vector.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/sequence.h>
 
 #include "test_util.h"
@@ -186,11 +187,12 @@ void TestForEachDefault(OffsetT num_items)
 
 template <typename OffsetT,
           cub::ForEachAlgorithm Algorithm,
+          cub::CacheLoadModifier LoadModifier,
           unsigned BlockThreads,
           unsigned ItemsPerThread>
 void TestForEachTuned(OffsetT num_items)
 {
-  auto tuning = cub::TuneForEach<Algorithm>(
+  auto tuning = cub::TuneForEach<Algorithm, LoadModifier>(
     cub::ForEachConfigurationSpace{}.Add<BlockThreads, ItemsPerThread>());
 
   thrust::device_vector<int> counts(num_items);
@@ -213,16 +215,25 @@ void TestForEachTuned(OffsetT num_items)
   AssertEquals(num_items, num_of_once_marked_items);
 }
 
-template <typename OffsetT>
+template <typename OffsetT,
+          cub::CacheLoadModifier LoadModifier>
 void TestForEachTuned(OffsetT num_items)
 {
   constexpr auto block_striped = cub::ForEachAlgorithm::BLOCK_STRIPED;
 
-  TestForEachTuned<OffsetT, block_striped, 32, 28>(num_items);
-  TestForEachTuned<OffsetT, block_striped, 128, 8>(num_items);
-  TestForEachTuned<OffsetT, block_striped, 256, 7>(num_items);
-  TestForEachTuned<OffsetT, block_striped, 512, 3>(num_items);
-  TestForEachTuned<OffsetT, block_striped, 1024, 1>(num_items);
+  TestForEachTuned<OffsetT, block_striped, LoadModifier, 32, 28>(num_items);
+  TestForEachTuned<OffsetT, block_striped, LoadModifier, 128, 8>(num_items);
+  TestForEachTuned<OffsetT, block_striped, LoadModifier, 256, 7>(num_items);
+  TestForEachTuned<OffsetT, block_striped, LoadModifier, 512, 3>(num_items);
+  TestForEachTuned<OffsetT, block_striped, LoadModifier, 1024, 1>(num_items);
+}
+
+template <typename OffsetT>
+void TestForEachTuned(OffsetT num_items)
+{
+  TestForEachTuned<OffsetT, cub::CacheLoadModifier::LOAD_DEFAULT>(num_items);
+  TestForEachTuned<OffsetT, cub::CacheLoadModifier::LOAD_CA>(num_items);
+  TestForEachTuned<OffsetT, cub::CacheLoadModifier::LOAD_CS>(num_items);
 }
 
 template <typename OffsetT>
@@ -251,7 +262,7 @@ void TestForEachEdgeCases()
 {
   TestForEach<OffsetT>(0);
 
-  for (int power_of_two = 0; power_of_two < 26; power_of_two += 2)
+  for (int power_of_two = 0; power_of_two < 26; power_of_two += 4)
   {
     TestForEach<OffsetT>(static_cast<OffsetT>(2 << power_of_two) - 1);
     TestForEach<OffsetT>(static_cast<OffsetT>(2 << power_of_two));
@@ -266,10 +277,30 @@ void TestForEach()
   TestForEachEdgeCases<OffsetT>();
 }
 
+void TestForEachIterator()
+{
+  const int num_items = 42 * 1024;
+  thrust::device_vector<int> counts(num_items);
+  int *d_counts = thrust::raw_pointer_cast(counts.data());
+  auto begin = thrust::make_counting_iterator(0);
+
+  cub::DeviceFor::ForEachN(begin,
+                           num_items,
+                           Incrementer<int>{d_counts},
+                           {},
+                           true);
+
+  const int num_of_once_marked_items =
+    static_cast<int>(thrust::count(counts.begin(), counts.end(), 1));
+
+  AssertEquals(num_items, num_of_once_marked_items);
+}
+
 void TestForEach()
 {
   TestForEach<int>();
   TestForEach<std::size_t>();
+  TestForEachIterator();
 }
 
 int main(int argc, char **argv)
