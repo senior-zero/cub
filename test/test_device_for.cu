@@ -358,13 +358,50 @@ void TestForEachOverwrite()
   }
 }
 
+void TestForEachOverwrite()
+{
+  TestForEachOverwrite<cub::CacheLoadModifier::LOAD_DEFAULT>();
+  TestForEachOverwrite<cub::CacheLoadModifier::LOAD_CA>();
+}
+
+void TestUnalignedVector()
+{
+  const int num_items = 42 * 1024;
+
+  for (int offset = 0; offset < 3; offset++)
+  {
+    thrust::device_vector<int> counts(num_items);
+    thrust::device_vector<int> input(num_items + offset);
+    thrust::sequence(input.begin() + offset, input.end());
+
+    int *d_counts = thrust::raw_pointer_cast(counts.data());
+    int *d_input = thrust::raw_pointer_cast(input.data()) + offset;
+
+    auto tuning =
+      cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED_VECTORIZED>(
+        cub::ForEachConfigurationSpace{}.Add<256, 2>());
+
+    cub::DeviceFor::ForEachN(d_input,
+                             num_items,
+                             Incrementer<int>{d_counts},
+                             {},
+                             true,
+                             tuning);
+
+    const int num_of_once_marked_items =
+      static_cast<int>(thrust::count(counts.begin(), counts.end(), 1));
+
+    AssertEquals(num_items, num_of_once_marked_items);
+  }
+}
+
 void TestForEach(thrust::default_random_engine &rng)
 {
   TestForEach<int>(rng);
   TestForEach<std::size_t>(rng);
   TestForEachIterator();
-  TestForEachOverwrite<cub::CacheLoadModifier::LOAD_DEFAULT>();
-  TestForEachOverwrite<cub::CacheLoadModifier::LOAD_CA>();
+  TestForEachOverwrite();
+  TestUnalignedVector();
 }
 
 int main(int argc, char **argv)
