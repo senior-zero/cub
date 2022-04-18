@@ -1,87 +1,278 @@
 /******************************************************************************
-* Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
-*
-* Redistribution and use in source and binary forms, with or without
-* modification, are permitted provided that the following conditions are met:
-*     * Redistributions of source code must retain the above copyright
-*       notice, this list of conditions and the following disclaimer.
-*     * Redistributions in binary form must reproduce the above copyright
-*       notice, this list of conditions and the following disclaimer in the
-*       documentation and/or other materials provided with the distribution.
-*     * Neither the name of the NVIDIA CORPORATION nor the
-*       names of its contributors may be used to endorse or promote products
-*       derived from this software without specific prior written permission.
-*
-* THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-* ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-* WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-* DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
-* DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-* (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-* LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-* ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-* (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-* SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-*
-******************************************************************************/
+ * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * Neither the name of the NVIDIA CORPORATION nor the
+ *       names of its contributors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ *AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ *IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL NVIDIA CORPORATION BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ ******************************************************************************/
 
 // Ensure printing of CUDA runtime errors to console
 #define CUB_STDERR
 
 #include <cub/device/device_for.cuh>
 
-#include <thrust/device_vector.h>
 #include <thrust/count.h>
+#include <thrust/device_vector.h>
+#include <thrust/sequence.h>
 
 #include "test_util.h"
 
-
-struct Marker
+template <typename OffsetT>
+struct Incrementer
 {
-  int *d_marks{};
+  int *d_counts{};
 
-  __device__ void operator()(int i) const
+  __device__ void operator()(OffsetT i)
   {
-    d_marks[i] = 1;
+    // Check if some `i` were served more than once
+    atomicAdd(d_counts + static_cast<int>(i), 1);
   }
+};
+
+template <typename OffsetT>
+class OffsetProxy
+{
+  OffsetT m_offset;
+
+public:
+  __host__ __device__ OffsetProxy(OffsetT offset)
+      : m_offset(offset)
+  {}
+
+  __host__ __device__ operator OffsetT() const { return m_offset; }
 };
 
 struct ConstRemover
 {
-  __device__ void operator()(const int &i) const
-  {
-    const_cast<int&>(i) = 1;
-  }
+  __device__ void operator()(const int &i) const { const_cast<int &>(i) = 1; }
 };
 
-struct Counter
+template <typename OffsetT>
+void TestBulkDefault(OffsetT num_items)
 {
-  int *d_count{};
+  thrust::device_vector<int> counts(num_items);
+  int *d_counts = thrust::raw_pointer_cast(counts.data());
 
-  __device__ void operator()(int i) const
-  {
-    if (i == 42)
-    {
-      atomicAdd(d_count, 1);
-    }
-  }
-};
+  cub::DeviceFor::Bulk(num_items, Incrementer<OffsetT>{d_counts}, {}, true);
 
-struct Checker
+  const OffsetT num_of_once_marked_items =
+    static_cast<OffsetT>(thrust::count(counts.begin(), counts.end(), 1));
+
+  AssertEquals(num_items, num_of_once_marked_items);
+}
+
+template <typename OffsetT,
+          cub::ForEachAlgorithm Algorithm,
+          unsigned BlockThreads,
+          unsigned ItemsPerThread>
+void TestBulkTuned(OffsetT num_items)
 {
-  int *d_marks{};
+  auto tuning = cub::TuneForEach<Algorithm>(
+    cub::ForEachConfigurationSpace{}.Add<BlockThreads, ItemsPerThread>());
 
-  __device__ void operator()(int val) const
+  thrust::device_vector<int> counts(num_items);
+  int *d_counts = thrust::raw_pointer_cast(counts.data());
+
+  cub::DeviceFor::Bulk(num_items,
+                       Incrementer<OffsetT>{d_counts},
+                       {},
+                       true,
+                       tuning);
+
+  const OffsetT num_of_once_marked_items =
+    static_cast<OffsetT>(thrust::count(counts.begin(), counts.end(), 1));
+
+  AssertEquals(num_items, num_of_once_marked_items);
+}
+
+template <typename OffsetT>
+void TestBulkTuned(OffsetT num_items)
+{
+  constexpr auto block_striped = cub::ForEachAlgorithm::BLOCK_STRIPED;
+
+  TestBulkTuned<OffsetT, block_striped, 32, 28>(num_items);
+  TestBulkTuned<OffsetT, block_striped, 128, 8>(num_items);
+  TestBulkTuned<OffsetT, block_striped, 256, 2>(num_items);
+  TestBulkTuned<OffsetT, block_striped, 512, 3>(num_items);
+  TestBulkTuned<OffsetT, block_striped, 1024, 1>(num_items);
+}
+
+template <typename OffsetT>
+void TestBulk(OffsetT num_items)
+{
+  TestBulkDefault<OffsetT>(num_items);
+  TestBulkTuned<OffsetT>(num_items);
+}
+
+template <typename OffsetT>
+void TestBulkRandom()
+{
+  const int num_iterations = 8;
+  const OffsetT max_items  = 2 << 26; // Up to 512 MB
+
+  for (int iteration = 0; iteration < num_iterations; iteration++)
   {
-    if (val == 0)
-    {
-      printf("Wrong result!\n");
-    }
+    OffsetT num_items = RandomValue(max_items);
+    TestBulk<OffsetT>(num_items);
   }
-};
+}
 
+template <typename OffsetT>
+void TestBulkEdgeCases()
+{
+  TestBulk<OffsetT>(0);
 
-int main(int argc, char** argv)
+  for (int power_of_two = 0; power_of_two < 26; power_of_two += 2)
+  {
+    TestBulk<OffsetT>(static_cast<OffsetT>(2 << power_of_two) - 1);
+    TestBulk<OffsetT>(static_cast<OffsetT>(2 << power_of_two));
+    TestBulk<OffsetT>(static_cast<OffsetT>(2 << power_of_two) + 1);
+  }
+}
+
+template <typename OffsetT>
+void TestBulk()
+{
+  TestBulkRandom<OffsetT>();
+  TestBulkEdgeCases<OffsetT>();
+}
+
+void TestBulk()
+{
+  TestBulk<int>();
+  TestBulk<std::size_t>();
+}
+
+template <typename OffsetT>
+void TestForEachDefault(OffsetT num_items)
+{
+  thrust::device_vector<int> counts(num_items);
+  thrust::device_vector<OffsetProxy<OffsetT>> input(num_items, OffsetT{});
+  thrust::sequence(input.begin(), input.end(), OffsetT{});
+
+  int *d_counts                 = thrust::raw_pointer_cast(counts.data());
+  OffsetProxy<OffsetT> *d_input = thrust::raw_pointer_cast(input.data());
+
+  cub::DeviceFor::ForEachN(d_input,
+                           num_items,
+                           Incrementer<OffsetProxy<OffsetT>>{d_counts},
+                           {},
+                           true);
+
+  const OffsetT num_of_once_marked_items =
+    static_cast<OffsetT>(thrust::count(counts.begin(), counts.end(), 1));
+
+  AssertEquals(num_items, num_of_once_marked_items);
+}
+
+template <typename OffsetT,
+          cub::ForEachAlgorithm Algorithm,
+          unsigned BlockThreads,
+          unsigned ItemsPerThread>
+void TestForEachTuned(OffsetT num_items)
+{
+  auto tuning = cub::TuneForEach<Algorithm>(
+    cub::ForEachConfigurationSpace{}.Add<BlockThreads, ItemsPerThread>());
+
+  thrust::device_vector<int> counts(num_items);
+  thrust::device_vector<OffsetProxy<OffsetT>> input(num_items, OffsetT{});
+  thrust::sequence(input.begin(), input.end(), OffsetT{});
+
+  int *d_counts                 = thrust::raw_pointer_cast(counts.data());
+  OffsetProxy<OffsetT> *d_input = thrust::raw_pointer_cast(input.data());
+
+  cub::DeviceFor::ForEachN(d_input,
+                           num_items,
+                           Incrementer<OffsetProxy<OffsetT>>{d_counts},
+                           {},
+                           true,
+                           tuning);
+
+  const OffsetT num_of_once_marked_items =
+    static_cast<OffsetT>(thrust::count(counts.begin(), counts.end(), 1));
+
+  AssertEquals(num_items, num_of_once_marked_items);
+}
+
+template <typename OffsetT>
+void TestForEachTuned(OffsetT num_items)
+{
+  constexpr auto block_striped = cub::ForEachAlgorithm::BLOCK_STRIPED;
+
+  TestForEachTuned<OffsetT, block_striped, 32, 28>(num_items);
+  TestForEachTuned<OffsetT, block_striped, 128, 8>(num_items);
+  TestForEachTuned<OffsetT, block_striped, 256, 7>(num_items);
+  TestForEachTuned<OffsetT, block_striped, 512, 3>(num_items);
+  TestForEachTuned<OffsetT, block_striped, 1024, 1>(num_items);
+}
+
+template <typename OffsetT>
+void TestForEach(OffsetT num_items)
+{
+  // TODO Return once VECTORIZED is tested
+  // TestForEachDefault<OffsetT>(num_items);
+  TestForEachTuned<OffsetT>(num_items);
+}
+
+template <typename OffsetT>
+void TestForEachRandom()
+{
+  const int num_iterations = 8;
+  const OffsetT max_items  = 2 << 26; // Up to 512 MB
+
+  for (int iteration = 0; iteration < num_iterations; iteration++)
+  {
+    OffsetT num_items = RandomValue(max_items);
+    TestForEach<OffsetT>(num_items);
+  }
+}
+
+template <typename OffsetT>
+void TestForEachEdgeCases()
+{
+  TestForEach<OffsetT>(0);
+
+  for (int power_of_two = 0; power_of_two < 26; power_of_two += 2)
+  {
+    TestForEach<OffsetT>(static_cast<OffsetT>(2 << power_of_two) - 1);
+    TestForEach<OffsetT>(static_cast<OffsetT>(2 << power_of_two));
+    TestForEach<OffsetT>(static_cast<OffsetT>(2 << power_of_two) + 1);
+  }
+}
+
+template <typename OffsetT>
+void TestForEach()
+{
+  TestForEachRandom<OffsetT>();
+  TestForEachEdgeCases<OffsetT>();
+}
+
+void TestForEach()
+{
+  TestForEach<int>();
+  TestForEach<std::size_t>();
+}
+
+int main(int argc, char **argv)
 {
   // Initialize command line
   CommandLineArgs args(argc, argv);
@@ -89,23 +280,11 @@ int main(int argc, char** argv)
   // Initialize device
   CubDebugExit(args.DeviceInit());
 
-  // Test
-  {
-    const int n = 32 * 1024 * 1024;
-
-    thrust::device_vector<int> marks(n);
-    int *d_marks = thrust::raw_pointer_cast(marks.data());
-    Marker op{d_marks};
-
-    auto tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
-      cub::ForEachConfigurationSpace{}.Add<1024, 4>()
-        .Add<256, 4>());
-
-    cub::DeviceFor::Bulk(n, op, {}, true, tuning);
-    AssertEquals(n, thrust::count(marks.begin(), marks.end(), 1));
-  }
+  TestBulk();
+  TestForEach();
 
   // Test
+  /*
   {
     const int n = 32 * 1024 * 1024;
 
@@ -114,85 +293,5 @@ int main(int argc, char** argv)
     cub::DeviceFor::ForEach(marks.begin(), marks.end(), ConstRemover{});
     AssertEquals(n, thrust::count(marks.begin(), marks.end(), 1));
   }
-
-  // Test
-  {
-    const int n = 32 * 1024 * 1024;
-
-    thrust::device_vector<int> in(n);
-    thrust::device_vector<int> counter(1);
-
-    Counter op{thrust::raw_pointer_cast(counter.data())};
-
-    cub::DeviceFor::ForEach(in.begin(), in.end(), op, {}, true);
-    AssertTrue(counter[0] == 0);
-
-    thrust::fill(in.begin(), in.end(), 42);
-    cub::DeviceFor::ForEach(in.begin(), in.end(), op, {}, true);
-    AssertTrue(counter[0] == n);
-  }
-
-  // Bench
-  {
-    constexpr int max_iterations = 1;
-    float striped_ms = 0;
-    float vectorized_ms = 0;
-
-    cudaEvent_t begin, end;
-
-    cudaEventCreate(&begin);
-    cudaEventCreate(&end);
-
-    for (int n = 1024; n < 512 * 1024 * 1024; n *= 16)
-    {
-      thrust::device_vector<int> in_1(n, n);
-      thrust::device_vector<int> in_2(n, n);
-
-      thrust::device_vector<int> counter_1(n);
-      thrust::device_vector<int> counter_2(n);
-
-      int *d_in_1 = thrust::raw_pointer_cast(in_1.data());
-      int *d_in_2 = thrust::raw_pointer_cast(in_2.data());
-
-      int *d_counter_1 = thrust::raw_pointer_cast(counter_1.data());
-      int *d_counter_2 = thrust::raw_pointer_cast(counter_2.data());
-
-      Counter op_1{d_counter_1};
-      Counter op_2{d_counter_2};
-
-      auto striped_tuning = cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED>(
-        cub::ForEachConfigurationSpace{}.Add<256, 2>());
-
-      // TODO Should be BLOCK_STRIPED_VECTORIZED
-      auto vectorized_tuning = cub::TuneForEach<cub::ForEachAlgorithm::VECTORIZED>(
-        cub::ForEachConfigurationSpace{}.Add<256, 2>());
-
-      cudaEventRecord(begin);
-      for (int iteration = 0; iteration < max_iterations; iteration++)
-      {
-        cub::DeviceFor::ForEachN(d_in_1, n, op_1, {}, {}, striped_tuning);
-      }
-      cudaEventRecord(end);
-      cudaEventSynchronize(end);
-      cudaEventElapsedTime(&striped_ms, begin, end);
-
-      cudaEventRecord(begin);
-      for (int iteration = 0; iteration < max_iterations; iteration++)
-      {
-        cub::DeviceFor::ForEachN(d_in_2, n, op_2, {}, {}, vectorized_tuning);
-      }
-      cudaEventRecord(end);
-      cudaEventSynchronize(end);
-      cudaEventElapsedTime(&vectorized_ms, begin, end);
-
-      vectorized_ms /= max_iterations;
-      striped_ms /= max_iterations;
-
-      std::cout << n << ", " << striped_ms << ", " << vectorized_ms << ", "
-                << 100.0f - (vectorized_ms / striped_ms * 100.0f) << std::endl;
-    }
-
-    cudaEventDestroy(begin);
-    cudaEventDestroy(end);
-  }
+  */
 }
