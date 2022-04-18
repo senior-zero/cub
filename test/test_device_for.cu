@@ -32,6 +32,7 @@
 
 #include <thrust/count.h>
 #include <thrust/device_vector.h>
+#include <thrust/equal.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/sequence.h>
 
@@ -62,9 +63,20 @@ public:
   __host__ __device__ operator OffsetT() const { return m_offset; }
 };
 
-struct ConstRemover
+struct ItemOverwriter
 {
-  __device__ void operator()(const int &i) const { const_cast<int &>(i) = 1; }
+  const std::size_t *d_input;
+  const std::size_t magic_value;
+
+  __device__ void operator()(const std::size_t &i) const
+  {
+    if (i == magic_value)
+    {
+      const std::size_t *d_ptr     = &i;
+      const std::size_t offset     = static_cast<std::size_t>(d_ptr - d_input);
+      const_cast<std::size_t &>(i) = offset;
+    }
+  }
 };
 
 template <typename OffsetT>
@@ -215,8 +227,7 @@ void TestForEachTuned(OffsetT num_items)
   AssertEquals(num_items, num_of_once_marked_items);
 }
 
-template <typename OffsetT,
-          cub::CacheLoadModifier LoadModifier>
+template <typename OffsetT, cub::CacheLoadModifier LoadModifier>
 void TestForEachTuned(OffsetT num_items)
 {
   constexpr auto block_striped = cub::ForEachAlgorithm::BLOCK_STRIPED;
@@ -282,7 +293,7 @@ void TestForEachIterator()
   const int num_items = 42 * 1024;
   thrust::device_vector<int> counts(num_items);
   int *d_counts = thrust::raw_pointer_cast(counts.data());
-  auto begin = thrust::make_counting_iterator(0);
+  auto begin    = thrust::make_counting_iterator(0);
 
   cub::DeviceFor::ForEachN(begin,
                            num_items,
@@ -296,11 +307,52 @@ void TestForEachIterator()
   AssertEquals(num_items, num_of_once_marked_items);
 }
 
+template <cub::CacheLoadModifier LoadModifier>
+void TestForEachOverwrite()
+{
+  const std::size_t num_items   = 42;
+  const std::size_t magic_value = num_items + 1; // expected in ItemOverwriter
+
+  thrust::device_vector<std::size_t> input(num_items, magic_value);
+
+  const std::size_t *d_input = thrust::raw_pointer_cast(input.data());
+
+  // Load modifier can restrict the ability to take the address of an element
+  auto tuning =
+    cub::TuneForEach<cub::ForEachAlgorithm::BLOCK_STRIPED, LoadModifier>(
+      cub::ForEachConfigurationSpace{}.Add<256, 2>());
+
+  cub::DeviceFor::ForEachN(d_input,
+                           num_items,
+                           ItemOverwriter{d_input, magic_value},
+                           {},
+                           true, 
+                           tuning);
+
+  if (LoadModifier == cub::CacheLoadModifier::LOAD_DEFAULT)
+  {
+    AssertTrue(thrust::equal(input.begin(),
+                             input.end(),
+                             thrust::make_counting_iterator(std::size_t{})));
+  }
+  else
+  {
+    const std::size_t num_magic_values = static_cast<std::size_t>(
+      thrust::count(input.begin(), input.end(), magic_value));
+
+    AssertEquals(num_items, num_magic_values);
+  }
+}
+
 void TestForEach()
 {
+  // TODO RNG
+
   TestForEach<int>();
   TestForEach<std::size_t>();
   TestForEachIterator();
+  TestForEachOverwrite<cub::CacheLoadModifier::LOAD_DEFAULT>();
+  TestForEachOverwrite<cub::CacheLoadModifier::LOAD_CA>();
 }
 
 int main(int argc, char **argv)
@@ -313,16 +365,4 @@ int main(int argc, char **argv)
 
   TestBulk();
   TestForEach();
-
-  // Test
-  /*
-  {
-    const int n = 32 * 1024 * 1024;
-
-    thrust::device_vector<int> marks(n);
-
-    cub::DeviceFor::ForEach(marks.begin(), marks.end(), ConstRemover{});
-    AssertEquals(n, thrust::count(marks.begin(), marks.end(), 1));
-  }
-  */
 }

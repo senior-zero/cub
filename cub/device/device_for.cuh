@@ -174,9 +174,9 @@ class DeviceFor
            InputIteratorT begin,
            OffsetT num_items,
            OpT op,
-           cudaStream_t stream    = {},
-           bool debug_synchronous = {},
-           TuningT                = {})
+           cudaStream_t stream,
+           bool debug_synchronous,
+           TuningT)
   {
     using wrapped_op_t =
       detail::for_each::ForEachWrapper<TuningT, OffsetT, OpT, InputIteratorT>;
@@ -194,9 +194,9 @@ class DeviceFor
            InputIteratorT begin,
            OffsetT num_items,
            OpT op,
-           cudaStream_t stream    = {},
-           bool debug_synchronous = {},
-           Tuning tuning          = {})
+           cudaStream_t stream,
+           bool debug_synchronous,
+           Tuning tuning)
   {
     auto unwrapped_begin = THRUST_NS_QUALIFIER::raw_pointer_cast(&*begin);
     using wrapped_op_t   = detail::for_each::
