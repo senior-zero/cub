@@ -406,6 +406,7 @@ void TestStability()
   constexpr unsigned int threads_per_block = 128;
   constexpr unsigned int elements = items_per_thread * threads_per_block;
   constexpr bool stable = true;
+  (void)stable;
 
   thrust::device_vector<CustomType> d_keys(elements);
   thrust::device_vector<std::uint64_t> d_counts(elements);
