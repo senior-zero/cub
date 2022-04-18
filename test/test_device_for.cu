@@ -34,8 +34,8 @@
 #include <thrust/device_vector.h>
 #include <thrust/equal.h>
 #include <thrust/iterator/counting_iterator.h>
-#include <thrust/sequence.h>
 #include <thrust/random.h>
+#include <thrust/sequence.h>
 
 #include "test_util.h"
 
@@ -140,7 +140,7 @@ void TestBulk(OffsetT num_items)
 template <typename OffsetT>
 void TestBulkRandom(thrust::default_random_engine &rng)
 {
-  const int num_iterations = 8;
+  const int num_iterations = 4;
   const OffsetT max_items  = 2 << 26; // Up to 512 MB
   thrust::uniform_int_distribution<OffsetT> dist(0, max_items);
 
@@ -229,16 +229,28 @@ void TestForEachTuned(OffsetT num_items)
   AssertEquals(num_items, num_of_once_marked_items);
 }
 
+template <typename OffsetT,
+          cub::ForEachAlgorithm Algorithm,
+          cub::CacheLoadModifier LoadModifier>
+void TestForEachTuned(OffsetT num_items)
+{
+
+  TestForEachTuned<OffsetT, Algorithm, LoadModifier, 32, 28>(num_items);
+  TestForEachTuned<OffsetT, Algorithm, LoadModifier, 128, 8>(num_items);
+  TestForEachTuned<OffsetT, Algorithm, LoadModifier, 256, 7>(num_items);
+  TestForEachTuned<OffsetT, Algorithm, LoadModifier, 512, 3>(num_items);
+  TestForEachTuned<OffsetT, Algorithm, LoadModifier, 1024, 1>(num_items);
+}
+
 template <typename OffsetT, cub::CacheLoadModifier LoadModifier>
 void TestForEachTuned(OffsetT num_items)
 {
-  constexpr auto block_striped = cub::ForEachAlgorithm::BLOCK_STRIPED;
+  TestForEachTuned<OffsetT, cub::ForEachAlgorithm::BLOCK_STRIPED, LoadModifier>(
+    num_items);
 
-  TestForEachTuned<OffsetT, block_striped, LoadModifier, 32, 28>(num_items);
-  TestForEachTuned<OffsetT, block_striped, LoadModifier, 128, 8>(num_items);
-  TestForEachTuned<OffsetT, block_striped, LoadModifier, 256, 7>(num_items);
-  TestForEachTuned<OffsetT, block_striped, LoadModifier, 512, 3>(num_items);
-  TestForEachTuned<OffsetT, block_striped, LoadModifier, 1024, 1>(num_items);
+  TestForEachTuned<OffsetT,
+                   cub::ForEachAlgorithm::BLOCK_STRIPED_VECTORIZED,
+                   LoadModifier>(num_items);
 }
 
 template <typename OffsetT>
@@ -252,8 +264,7 @@ void TestForEachTuned(OffsetT num_items)
 template <typename OffsetT>
 void TestForEach(OffsetT num_items)
 {
-  // TODO Return once BLOCK_STRIPED_VECTORIZED is tested
-  // TestForEachDefault<OffsetT>(num_items);
+  TestForEachDefault<OffsetT>(num_items);
   TestForEachTuned<OffsetT>(num_items);
 }
 
@@ -329,7 +340,7 @@ void TestForEachOverwrite()
                            num_items,
                            ItemOverwriter{d_input, magic_value},
                            {},
-                           true, 
+                           true,
                            tuning);
 
   if (LoadModifier == cub::CacheLoadModifier::LOAD_DEFAULT)

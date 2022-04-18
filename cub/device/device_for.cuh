@@ -114,7 +114,7 @@ struct ForEachWrapperVectorized
   OpT op;
   const T *in;
   OffsetT partially_filled_vector_id;
-  int partially_filled_vector_size;
+  OffsetT num_items;
 
   constexpr static int vec_size = 4;
   using vector_t                = typename CubVector<T, vec_size>::Type;
@@ -133,9 +133,9 @@ struct ForEachWrapperVectorized
     }
     else
     {
-      for (int j = 0; j < partially_filled_vector_size; j++)
+      for (OffsetT j = i * vec_size; j < num_items; j++)
       {
-        op(in[i * vec_size + j]);
+        op(in[j]);
       }
     }
   }
@@ -212,9 +212,9 @@ class DeviceFor
         wrapped_op_t{
           op,
           unwrapped_begin,
-          num_vec_items * wrapped_op_t::vec_size > num_items ? num_vec_items - 1
-                                                             : num_vec_items,
-          static_cast<int>(num_vec_items * wrapped_op_t::vec_size - num_items)},
+          num_items % wrapped_op_t::vec_size ? num_vec_items - 1
+                                             : num_vec_items,
+          num_items},
         stream,
         debug_synchronous);
     }
