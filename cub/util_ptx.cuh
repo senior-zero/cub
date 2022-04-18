@@ -58,26 +58,30 @@ struct ptx_arch : std::integral_constant<int, PtxArch>
 
 } // namespace detail
 
-using SM350 = detail::ptx_arch<350>;
-using SM370 = detail::ptx_arch<370>;
-using SM500 = detail::ptx_arch<500>;
-using SM520 = detail::ptx_arch<520>;
-using SM530 = detail::ptx_arch<530>;
-using SM600 = detail::ptx_arch<600>;
-using SM610 = detail::ptx_arch<610>;
-using SM620 = detail::ptx_arch<620>;
-using SM700 = detail::ptx_arch<700>;
-using SM750 = detail::ptx_arch<750>;
-using SM800 = detail::ptx_arch<800>;
-using SM860 = detail::ptx_arch<860>;
+namespace ptx
+{
+  using SM350 = detail::ptx_arch<350>;
+  using SM370 = detail::ptx_arch<370>;
+  using SM500 = detail::ptx_arch<500>;
+  using SM520 = detail::ptx_arch<520>;
+  using SM530 = detail::ptx_arch<530>;
+  using SM600 = detail::ptx_arch<600>;
+  using SM610 = detail::ptx_arch<610>;
+  using SM620 = detail::ptx_arch<620>;
+  using SM700 = detail::ptx_arch<700>;
+  using SM750 = detail::ptx_arch<750>;
+  using SM800 = detail::ptx_arch<800>;
+  using SM860 = detail::ptx_arch<860>;
 
-// Starting points for architectures
-using Kepler  = SM350;
-using Maxwell = SM500;
-using Pascal  = SM600;
-using Volta   = SM700;
-using Turing  = SM750;
-using Ampere  = SM800;
+  // Starting points for architectures
+  using any     = SM350;
+  using kepler  = SM350;
+  using maxwell = SM500;
+  using pascal  = SM600;
+  using volta   = SM700;
+  using turing  = SM750;
+  using ampere  = SM800;
+}
 
 
 /******************************************************************************
