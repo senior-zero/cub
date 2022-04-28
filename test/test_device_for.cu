@@ -404,6 +404,9 @@ void TestForEach(thrust::default_random_engine &rng)
   TestUnalignedVector();
 }
 
+template <typename T>
+void print(T v);
+
 int main(int argc, char **argv)
 {
   // Initialize command line
@@ -414,6 +417,12 @@ int main(int argc, char **argv)
 
   thrust::default_random_engine rng;
 
-  TestBulk(rng);
-  TestForEach(rng);
+  //TestBulk(rng);
+  //TestForEach(rng);
+
+  print(cub::detail::for_each::ptx_configurations<>{}
+    .For<cub::PTX::Ampere>(
+      cub::ForEachConfigurationSpace{}.Add<256, 2>().Add<512, 4>())
+    .For<cub::PTX::Volta>(
+      cub::ForEachConfigurationSpace{}.Add<256, 2>()));
 }

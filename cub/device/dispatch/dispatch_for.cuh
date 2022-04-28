@@ -139,6 +139,24 @@ struct configurations
   }
 };
 
+template <int PTXArch, typename Configurations>
+struct ptx_configuration
+{
+  constexpr static int ptx = PTXArch;
+  using configurations = Configurations;
+};
+
+template <typename... Head>
+struct ptx_configurations
+{
+  template <typename PTXArch, typename Configurations>
+  ptx_configurations<Head..., ptx_configuration<PTXArch::value, Configurations>>
+  For(Configurations)
+  {
+    return {};
+  }
+};
+
 template <typename OffsetT, typename OpT>
 int configuration_space_search(configurations<>)
 {

@@ -52,13 +52,13 @@ CUB_NAMESPACE_BEGIN
 namespace detail
 {
 
-template <int PtxArch>
-struct ptx_arch : std::integral_constant<int, PtxArch>
+template <int PTXArch>
+struct ptx_arch : std::integral_constant<int, PTXArch>
 {};
 
 } // namespace detail
 
-namespace ptx
+namespace PTX
 {
   using SM350 = detail::ptx_arch<350>;
   using SM370 = detail::ptx_arch<370>;
@@ -74,13 +74,13 @@ namespace ptx
   using SM860 = detail::ptx_arch<860>;
 
   // Starting points for architectures
-  using any     = SM350;
-  using kepler  = SM350;
-  using maxwell = SM500;
-  using pascal  = SM600;
-  using volta   = SM700;
-  using turing  = SM750;
-  using ampere  = SM800;
+  using Any     = SM350;
+  using Kepler  = SM350;
+  using Maxwell = SM500;
+  using Pascal  = SM600;
+  using Volta   = SM700;
+  using Turing  = SM750;
+  using Ampere  = SM800;
 }
 
 

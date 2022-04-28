@@ -513,8 +513,8 @@ void Test(Int2Type<false> /* is_integer */)
 
 #if CUDART_VERSION >= 5050
     // Test tex-ref iterators for CUDA 5.5
-    TestTexRef<T, CastT>();
-    TestTexTransform<T, CastT>();
+    // TestTexRef<T, CastT>();
+    // TestTexTransform<T, CastT>();
 #endif  // CUDART_VERSION
 }
 
