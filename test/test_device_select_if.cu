@@ -372,12 +372,46 @@ int Solve(
     return num_selected;
 }
 
+template <typename T>
+T *AllocateOutput(std::integral_constant<bool, true> /* in-place */,
+                  T* d_in,
+                  int /* num_items */)
+{
+  return d_in;
+}
+
+template <typename T,
+          typename DeviceInputIteratorT>
+T *AllocateOutput(std::integral_constant<bool, false> /* in-place */,
+                  DeviceInputIteratorT /* d_in */,
+                  int num_items)
+{
+  T *d_out{};
+
+  CubDebugExit(g_allocator.DeviceAllocate((void**)&d_out, sizeof(T) * num_items));
+  CubDebugExit(cudaMemset(d_out, 0, sizeof(T) * num_items));
+
+  return d_out;
+}
+
+template <typename T>
+void FreeOutput(std::integral_constant<bool, true> /* in-place */,
+                T* /* d_out */)
+{ }
+
+template <typename T>
+void FreeOutput(std::integral_constant<bool, false> /* in-place */,
+                T* d_out)
+{
+  CubDebugExit(g_allocator.DeviceFree(d_out));
+}
 
 
 /**
  * Test DeviceSelect for a given problem input
  */
 template <
+    bool                IN_PLACE,
     Backend             BACKEND,
     bool                IS_FLAGGED,
     bool                IS_PARTITION,
@@ -393,12 +427,18 @@ void Test(
     int                     num_selected,
     int                     num_items)
 {
+    std::integral_constant<
+      bool, 
+      std::is_pointer<DeviceInputIteratorT>::value && 
+      (IS_PARTITION == false) &&
+      IN_PLACE>
+        in_place{};
+    
     // Allocate device flags, output, and num-selected
     FlagT*      d_flags = NULL;
-    T*          d_out = NULL;
+    T*          d_out = AllocateOutput<T>(in_place, d_in, num_items);
     int*        d_num_selected_out = NULL;
     CubDebugExit(g_allocator.DeviceAllocate((void**)&d_flags, sizeof(FlagT) * num_items));
-    CubDebugExit(g_allocator.DeviceAllocate((void**)&d_out, sizeof(T) * num_items));
     CubDebugExit(g_allocator.DeviceAllocate((void**)&d_num_selected_out, sizeof(int)));
 
     // Allocate CDP device arrays
@@ -416,7 +456,6 @@ void Test(
 
     // Copy flags and clear device output array
     CubDebugExit(cudaMemcpy(d_flags, h_flags, sizeof(FlagT) * num_items, cudaMemcpyHostToDevice));
-    CubDebugExit(cudaMemset(d_out, 0, sizeof(T) * num_items));
     CubDebugExit(cudaMemset(d_num_selected_out, 0, sizeof(int)));
 
     // Run warmup/correctness iteration
@@ -464,7 +503,7 @@ void Test(
 
     // Cleanup
     if (d_flags) CubDebugExit(g_allocator.DeviceFree(d_flags));
-    if (d_out) CubDebugExit(g_allocator.DeviceFree(d_out));
+    if (d_out) FreeOutput(in_place, d_out);
     if (d_num_selected_out) CubDebugExit(g_allocator.DeviceFree(d_num_selected_out));
     if (d_temp_storage_bytes) CubDebugExit(g_allocator.DeviceFree(d_temp_storage_bytes));
     if (d_cdp_error) CubDebugExit(g_allocator.DeviceFree(d_cdp_error));
@@ -479,6 +518,7 @@ void Test(
  * Test on pointer type
  */
 template <
+    bool            IN_PLACE,
     Backend         BACKEND,
     bool            IS_FLAGGED,
     bool            IS_PARTITION,
@@ -526,7 +566,7 @@ void TestPointer(
     CubDebugExit(cudaMemcpy(d_in, h_in, sizeof(T) * num_items, cudaMemcpyHostToDevice));
 
     // Run Test
-    Test<BACKEND, IS_FLAGGED, IS_PARTITION>(d_in, h_flags, select_op, h_reference, num_selected, num_items);
+    Test<IN_PLACE, BACKEND, IS_FLAGGED, IS_PARTITION>(d_in, h_flags, select_op, h_reference, num_selected, num_items);
 
     // Cleanup
     if (h_in) delete[] h_in;
@@ -578,7 +618,7 @@ void TestIterator(
     fflush(stdout);
 
     // Run Test
-    Test<BACKEND, IS_FLAGGED, IS_PARTITION>(h_in, h_flags, select_op, h_reference, num_selected, num_items);
+    Test<false, BACKEND, IS_FLAGGED, IS_PARTITION>(h_in, h_flags, select_op, h_reference, num_selected, num_items);
 
     // Cleanup
     if (h_reference) delete[] h_reference;
@@ -599,7 +639,8 @@ void Test(
 {
     for (float select_ratio = 0.0f; select_ratio <= 1.0f; select_ratio += 0.2f)
     {
-        TestPointer<BACKEND, IS_FLAGGED, IS_PARTITION, T>(num_items, select_ratio);
+        TestPointer<false, BACKEND, IS_FLAGGED, IS_PARTITION, T>(num_items, select_ratio);
+        TestPointer<true, BACKEND, IS_FLAGGED, IS_PARTITION, T>(num_items, select_ratio);
     }
 }
 
