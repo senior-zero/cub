@@ -131,7 +131,7 @@ struct DeviceAdjacentDifferencePolicy
       AgentAdjacentDifferencePolicy<128,
                                     Nominal8BItemsToItems<ValueT>(7),
                                     BLOCK_LOAD_WARP_TRANSPOSE,
-                                    LOAD_LDG,
+                                    LOAD_DEFAULT,
                                     BLOCK_STORE_WARP_TRANSPOSE>;
   };
 

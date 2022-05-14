@@ -138,7 +138,7 @@ struct DeviceScanByKeyPolicy
         typedef AgentScanByKeyPolicy<
                 128, ITEMS_PER_THREAD,
                 BLOCK_LOAD_WARP_TRANSPOSE,
-                LOAD_LDG,
+                LOAD_DEFAULT,
                 BLOCK_SCAN_WARP_SCANS,
                 BLOCK_STORE_WARP_TRANSPOSE>
             ScanByKeyPolicyT;
@@ -158,7 +158,7 @@ struct DeviceScanByKeyPolicy
         typedef AgentScanByKeyPolicy<
                 256, ITEMS_PER_THREAD,
                 BLOCK_LOAD_WARP_TRANSPOSE,
-                LOAD_LDG,
+                LOAD_DEFAULT,
                 BLOCK_SCAN_WARP_SCANS,
                 BLOCK_STORE_WARP_TRANSPOSE>
             ScanByKeyPolicyT;

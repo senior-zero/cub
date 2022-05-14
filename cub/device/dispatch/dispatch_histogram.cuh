@@ -348,7 +348,7 @@ struct DispatchHistogram
                 128,
                 TScale<8>::VALUE,
                 BLOCK_LOAD_DIRECT,
-                LOAD_LDG,
+                LOAD_DEFAULT,
                 true,
                 BLEND,
                 true>
@@ -363,7 +363,7 @@ struct DispatchHistogram
                 384,
                 TScale<16>::VALUE,
                 BLOCK_LOAD_DIRECT,
-                LOAD_LDG,
+                LOAD_DEFAULT,
                 true,
                 SMEM,
                 false>

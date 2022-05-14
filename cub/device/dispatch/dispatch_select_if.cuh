@@ -160,7 +160,7 @@ struct DispatchSelectIf
                 128,
                 ITEMS_PER_THREAD,
                 BLOCK_LOAD_DIRECT,
-                LOAD_LDG,
+                LOAD_DEFAULT,
                 BLOCK_SCAN_WARP_SCANS>
             SelectIfPolicyT;
     };

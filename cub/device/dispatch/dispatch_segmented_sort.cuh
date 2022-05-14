@@ -1070,13 +1070,13 @@ struct DeviceSegmentedSortPolicy
         cub::AgentSubWarpMergeSortPolicy<(LARGE_ITEMS ? 8 : 2), // Threads per segment
                                          ITEMS_PER_SMALL_THREAD,
                                          WarpLoadAlgorithm::WARP_LOAD_TRANSPOSE,
-                                         CacheLoadModifier::LOAD_LDG>,
+                                         CacheLoadModifier::LOAD_DEFAULT>,
 
         // Medium policy
         cub::AgentSubWarpMergeSortPolicy<16, // Threads per segment
                                          ITEMS_PER_MEDIUM_THREAD,
                                          WarpLoadAlgorithm::WARP_LOAD_TRANSPOSE,
-                                         CacheLoadModifier::LOAD_LDG>>;
+                                         CacheLoadModifier::LOAD_DEFAULT>>;
   };
 
   /// MaxPolicy

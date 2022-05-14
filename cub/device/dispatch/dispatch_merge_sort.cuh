@@ -202,7 +202,7 @@ struct DeviceMergeSortPolicy
       AgentMergeSortPolicy<256,
                            Nominal4BItemsToItems<KeyT>(11),
                            cub::BLOCK_LOAD_WARP_TRANSPOSE,
-                           cub::LOAD_LDG,
+                           cub::LOAD_DEFAULT,
                            cub::BLOCK_STORE_WARP_TRANSPOSE>;
   };
 
@@ -216,7 +216,7 @@ struct DeviceMergeSortPolicy
       AgentMergeSortPolicy<512,
                            Nominal4BItemsToItems<KeyT>(15),
                            cub::BLOCK_LOAD_WARP_TRANSPOSE,
-                           cub::LOAD_LDG,
+                           cub::LOAD_DEFAULT,
                            cub::BLOCK_STORE_WARP_TRANSPOSE>;
   };
 #endif

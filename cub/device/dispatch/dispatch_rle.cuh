@@ -155,7 +155,7 @@ struct DeviceRleDispatch
                 96,
                 ITEMS_PER_THREAD,
                 BLOCK_LOAD_DIRECT,
-                LOAD_LDG,
+                LOAD_DEFAULT,
                 true,
                 BLOCK_SCAN_WARP_SCANS>
             RleSweepPolicy;

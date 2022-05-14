@@ -269,7 +269,7 @@ struct DeviceReducePolicy
                 256, 20, InputT,                       ///< Threads per block, items per thread, compute type
                 4,                                      ///< Number of items per vectorized load
                 BLOCK_REDUCE_WARP_REDUCTIONS,           ///< Cooperative block-wide reduction algorithm to use
-                LOAD_LDG>                               ///< Cache load modifier
+                LOAD_DEFAULT>                           ///< Cache load modifier
             ReducePolicy;
 
         // SingleTilePolicy
@@ -287,7 +287,7 @@ struct DeviceReducePolicy
                 256, 16, InputT,                       ///< Threads per block, items per thread, compute type
                 4,                                      ///< Number of items per vectorized load
                 BLOCK_REDUCE_WARP_REDUCTIONS,           ///< Cooperative block-wide reduction algorithm to use
-                LOAD_LDG>                               ///< Cache load modifier
+                LOAD_DEFAULT>                           ///< Cache load modifier
             ReducePolicy;
 
         // SingleTilePolicy
