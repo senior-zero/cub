@@ -156,7 +156,7 @@ struct DeviceScanPolicy
                 128, 12,                                        ///< Threads per block, items per thread
                 OutputT,
                 BLOCK_LOAD_DIRECT,
-                LOAD_LDG,
+                LOAD_CA,
                 BLOCK_STORE_WARP_TRANSPOSE_TIMESLICED,
                 BLOCK_SCAN_RAKING>
             ScanPolicyT;
@@ -170,7 +170,7 @@ struct DeviceScanPolicy
                 128, 12,                                        ///< Threads per block, items per thread
                 OutputT,
                 BLOCK_LOAD_DIRECT,
-                LOAD_LDG,
+                LOAD_CA,
                 ScanTransposedStore,
                 BLOCK_SCAN_WARP_SCANS>
             ScanPolicyT;

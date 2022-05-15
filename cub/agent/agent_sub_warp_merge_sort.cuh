@@ -43,7 +43,7 @@ template <
   int                      WARP_THREADS_ARG,
   int                      ITEMS_PER_THREAD_ARG,
   cub::WarpLoadAlgorithm   LOAD_ALGORITHM_ARG   = cub::WARP_LOAD_DIRECT,
-  cub::CacheLoadModifier   LOAD_MODIFIER_ARG    = cub::LOAD_LDG,
+  cub::CacheLoadModifier   LOAD_MODIFIER_ARG    = cub::LOAD_CA,
   cub::WarpStoreAlgorithm  STORE_ALGORITHM_ARG  = cub::WARP_STORE_DIRECT>
 struct AgentSubWarpMergeSortPolicy
 {

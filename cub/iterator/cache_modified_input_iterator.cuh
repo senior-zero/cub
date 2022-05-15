@@ -65,7 +65,7 @@ CUB_NAMESPACE_BEGIN
  * - CacheModifiedInputIterator is a random-access input iterator that wraps a native
  *   device pointer of type <tt>ValueType*</tt>. \p ValueType references are
  *   made by reading \p ValueType values through loads modified by \p MODIFIER.
- * - Can be used to load any data type from memory using PTX cache load modifiers (e.g., "LOAD_LDG",
+ * - Can be used to load any data type from memory using PTX cache load modifiers (e.g., "LOAD_CA",
  *   "LOAD_CG", "LOAD_CA", "LOAD_CS", "LOAD_CV", etc.).
  * - Can be constructed, manipulated, and exchanged within and between host and device
  *   functions, but can only be dereferenced within device functions.
@@ -83,7 +83,7 @@ CUB_NAMESPACE_BEGIN
  * double *d_in;            // e.g., [8.0, 6.0, 7.0, 5.0, 3.0, 0.0, 9.0]
  *
  * // Create an iterator wrapper
- * cub::CacheModifiedInputIterator<cub::LOAD_LDG, double> itr(d_in);
+ * cub::CacheModifiedInputIterator<cub::LOAD_CA, double> itr(d_in);
  *
  * // Within device code:
  * printf("%f\n", itr[0]);  // 8.0

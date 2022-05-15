@@ -168,7 +168,7 @@ struct DispatchReduceByKey
                 128,
                 ITEMS_PER_THREAD,
                 BLOCK_LOAD_DIRECT,
-                LOAD_LDG,
+                LOAD_CA,
                 BLOCK_SCAN_WARP_SCANS>
             ReduceByKeyPolicyT;
     };

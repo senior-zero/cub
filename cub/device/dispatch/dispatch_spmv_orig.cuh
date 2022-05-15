@@ -267,11 +267,11 @@ struct DispatchSpmv
         typedef AgentSpmvPolicy<
                 (sizeof(ValueT) > 4) ? 96 : 128,
                 (sizeof(ValueT) > 4) ? 4 : 7,
-                LOAD_LDG,
                 LOAD_CA,
-                LOAD_LDG,
-                LOAD_LDG,
-                LOAD_LDG,
+                LOAD_CA,
+                LOAD_CA,
+                LOAD_CA,
+                LOAD_CA,
                 (sizeof(ValueT) > 4) ? true : false,
                 BLOCK_SCAN_WARP_SCANS>
             SpmvPolicyT;
@@ -280,7 +280,7 @@ struct DispatchSpmv
                 128,
                 3,
                 BLOCK_LOAD_VECTORIZE,
-                LOAD_LDG,
+                LOAD_CA,
                 BLOCK_SCAN_WARP_SCANS>
             SegmentFixupPolicyT;
     };
@@ -293,11 +293,11 @@ struct DispatchSpmv
         typedef AgentSpmvPolicy<
                 (sizeof(ValueT) > 4) ? 128 : 128,
                 (sizeof(ValueT) > 4) ? 9 : 14,
-                LOAD_LDG,
                 LOAD_CA,
-                LOAD_LDG,
-                LOAD_LDG,
-                LOAD_LDG,
+                LOAD_CA,
+                LOAD_CA,
+                LOAD_CA,
+                LOAD_CA,
                 false,
                 BLOCK_SCAN_WARP_SCANS>
             SpmvPolicyT;
@@ -306,7 +306,7 @@ struct DispatchSpmv
                 128,
                 3,
                 BLOCK_LOAD_VECTORIZE,
-                LOAD_LDG,
+                LOAD_CA,
                 BLOCK_SCAN_WARP_SCANS>
             SegmentFixupPolicyT;
     };
@@ -317,11 +317,11 @@ struct DispatchSpmv
         typedef AgentSpmvPolicy<
                 (sizeof(ValueT) > 4) ? 64 : 128,
                 (sizeof(ValueT) > 4) ? 6 : 7,
-                LOAD_LDG,
+                LOAD_CA,
                 LOAD_DEFAULT,
-                (sizeof(ValueT) > 4) ? LOAD_LDG : LOAD_DEFAULT,
-                (sizeof(ValueT) > 4) ? LOAD_LDG : LOAD_DEFAULT,
-                LOAD_LDG,
+                (sizeof(ValueT) > 4) ? LOAD_CA : LOAD_DEFAULT,
+                (sizeof(ValueT) > 4) ? LOAD_CA : LOAD_DEFAULT,
+                LOAD_CA,
                 (sizeof(ValueT) > 4) ? true : false,
                 (sizeof(ValueT) > 4) ? BLOCK_SCAN_WARP_SCANS : BLOCK_SCAN_RAKING_MEMOIZE>
             SpmvPolicyT;
@@ -331,7 +331,7 @@ struct DispatchSpmv
                 128,
                 3,
                 BLOCK_LOAD_VECTORIZE,
-                LOAD_LDG,
+                LOAD_CA,
                 BLOCK_SCAN_RAKING_MEMOIZE>
             SegmentFixupPolicyT;
     };
@@ -357,7 +357,7 @@ struct DispatchSpmv
                 128,
                 3,
                 BLOCK_LOAD_DIRECT,
-                LOAD_LDG,
+                LOAD_CA,
                 BLOCK_SCAN_WARP_SCANS>
             SegmentFixupPolicyT;
     };

@@ -111,7 +111,7 @@ struct DeviceUniqueByKeyPolicy
         using UniqueByKeyPolicyT = AgentUniqueByKeyPolicy<128,
                           ITEMS_PER_THREAD,
                           cub::BLOCK_LOAD_WARP_TRANSPOSE,
-                          cub::LOAD_LDG,
+                          cub::LOAD_CA,
                           cub::BLOCK_SCAN_WARP_SCANS>;
     };
 
@@ -128,7 +128,7 @@ struct DeviceUniqueByKeyPolicy
         using UniqueByKeyPolicyT =  AgentUniqueByKeyPolicy<64,
                             ITEMS_PER_THREAD,
                             cub::BLOCK_LOAD_WARP_TRANSPOSE,
-                            cub::LOAD_LDG,
+                            cub::LOAD_CA,
                             cub::BLOCK_SCAN_WARP_SCANS>;
     };
 

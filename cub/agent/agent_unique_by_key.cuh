@@ -54,7 +54,7 @@ CUB_NAMESPACE_BEGIN
 template <int                     _BLOCK_THREADS,
           int                     _ITEMS_PER_THREAD = 1,
           cub::BlockLoadAlgorithm _LOAD_ALGORITHM   = cub::BLOCK_LOAD_DIRECT,
-          cub::CacheLoadModifier  _LOAD_MODIFIER    = cub::LOAD_LDG,
+          cub::CacheLoadModifier  _LOAD_MODIFIER    = cub::LOAD_CA,
           cub::BlockScanAlgorithm _SCAN_ALGORITHM   = cub::BLOCK_SCAN_WARP_SCANS>
 struct AgentUniqueByKeyPolicy
 {

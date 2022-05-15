@@ -1070,13 +1070,13 @@ struct DeviceSegmentedSortPolicy
         cub::AgentSubWarpMergeSortPolicy<(LARGE_ITEMS ? 8 : 2), // Threads per segment
                                          ITEMS_PER_SMALL_THREAD,
                                          WarpLoadAlgorithm::WARP_LOAD_TRANSPOSE,
-                                         CacheLoadModifier::LOAD_LDG>,
+                                         CacheLoadModifier::LOAD_CA>,
 
         // Medium policy
         cub::AgentSubWarpMergeSortPolicy<16, // Threads per segment
                                          ITEMS_PER_MEDIUM_THREAD,
                                          WarpLoadAlgorithm::WARP_LOAD_TRANSPOSE,
-                                         CacheLoadModifier::LOAD_LDG>>;
+                                         CacheLoadModifier::LOAD_CA>>;
   };
 
   /// MaxPolicy
@@ -1235,7 +1235,7 @@ struct DispatchSegmentedSort : SelectedPolicy
       typename ActivePolicyT::SmallAndMediumSegmentedSortPolicyT;
 
     static_assert(
-      LargeSegmentPolicyT::LOAD_MODIFIER != CacheLoadModifier::LOAD_LDG,
+      LargeSegmentPolicyT::LOAD_MODIFIER != CacheLoadModifier::LOAD_CA,
       "The memory consistency model does not apply to texture accesses");
 
     static_assert(
