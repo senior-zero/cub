@@ -1499,7 +1499,10 @@ struct DispatchRadixSort :
                     }
                 }
 
-                if (CubDebug(error)) break;
+                if (error != cudaSuccess)
+                {
+                    break;
+                }
                 
                 // use the temporary buffers if no overwrite is allowed
                 if (!is_overwrite_okay && pass == 0)
@@ -1686,10 +1689,18 @@ struct DispatchRadixSort :
         }
         
         // Copy keys
+        #ifdef CUB_DETAIL_DEBUG_ENABLE_LOG
+        _CubLog("Invoking async copy of %lld keys on stream %lld\n", (long long)num_items,
+                (long long)stream);
+        #endif
         cudaError_t error = cudaSuccess;
         error = cudaMemcpyAsync(d_keys.Alternate(), d_keys.Current(), num_items * sizeof(KeyT),
-                                cudaMemcpyDefault, stream);
+                                cudaMemcpyDeviceToDevice, stream);
         if (CubDebug(error))
+        {
+            return error;
+        }
+        if (CubDebug(error = detail::DebugSyncStream(stream)))
         {
             return error;
         }
@@ -1698,9 +1709,17 @@ struct DispatchRadixSort :
         // Copy values if necessary
         if (!KEYS_ONLY)
         {
+            #ifdef CUB_DETAIL_DEBUG_ENABLE_LOG
+            _CubLog("Invoking async copy of %lld values on stream %lld\n",
+                    (long long)num_items, (long long)stream);
+            #endif
             error = cudaMemcpyAsync(d_values.Alternate(), d_values.Current(),
-                                    num_items * sizeof(ValueT), cudaMemcpyDefault, stream);
+                                    num_items * sizeof(ValueT), cudaMemcpyDeviceToDevice, stream);
             if (CubDebug(error))
+            {
+                return error;
+            }
+            if (CubDebug(error = detail::DebugSyncStream(stream)))
             {
                 return error;
             }
