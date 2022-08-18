@@ -39,6 +39,8 @@
 #include "util_namespace.cuh"
 #include "util_debug.cuh"
 
+#include <nv/target>
+
 
 CUB_NAMESPACE_BEGIN
 
@@ -686,13 +688,12 @@ __device__ __forceinline__ T ShuffleIndex(
 }
 
 
+namespace detail 
+{
 
-/**
- * Compute a 32b mask of threads having the same least-significant
- * LABEL_BITS of \p label as the calling thread.
- */
+// Base case for pre-Volta GPUs
 template <int LABEL_BITS>
-inline __device__ unsigned int MatchAny(unsigned int label)
+__device__ unsigned int match_any_base(unsigned int label)
 {
     unsigned int retval;
 
@@ -715,14 +716,22 @@ inline __device__ unsigned int MatchAny(unsigned int label)
     }
 
     return retval;
+}
 
-//  // VOLTA match
-//    unsigned int retval;
-//    asm ("{\n"
-//         "    match.any.sync.b32 %0, %1, 0xffffffff;\n"
-//         "}\n" : "=r"(retval) : "r"(label));
-//    return retval;
+}
 
+
+/**
+ * Compute a 32b mask of threads having the same least-significant
+ * LABEL_BITS of \p label as the calling thread.
+ */
+template <int LABEL_BITS>
+__device__ unsigned int MatchAny(unsigned int label) 
+{
+  NV_IF_TARGET(
+      NV_PROVIDES_SM_70,
+      (return __match_any_sync(0xFFFFFFFF, label & ~(~0 << LABEL_BITS));),
+      (return detail::match_any_base<LABEL_BITS>(label);));
 }
 
 CUB_NAMESPACE_END
