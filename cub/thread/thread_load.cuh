@@ -62,6 +62,7 @@ enum CacheLoadModifier
     LOAD_CV,            ///< Cache as volatile (including cached system lines)
     LOAD_LDG,           ///< Cache as texture
     LOAD_VOLATILE,      ///< Volatile (any memory space)
+    LOAD_RELAXED,       ///< TODO
 };
 
 
@@ -273,6 +274,7 @@ _CUB_LOAD_ALL(LOAD_CG, cg)
 _CUB_LOAD_ALL(LOAD_CS, cs)
 _CUB_LOAD_ALL(LOAD_CV, cv)
 _CUB_LOAD_ALL(LOAD_LDG, global.nc)
+_CUB_LOAD_ALL(LOAD_RELAXED, relaxed.gpu)
 
 
 // Macro cleanup

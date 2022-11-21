@@ -60,6 +60,8 @@ enum CacheStoreModifier
     STORE_CS,                   ///< Cache streaming (likely to be accessed once)
     STORE_WT,                   ///< Cache write-through (to system memory)
     STORE_VOLATILE,             ///< Volatile shared (any memory space)
+    STORE_RELAXED,              ///< TODO
+    STORE_RELEASE,              ///< TODO
 };
 
 
@@ -261,6 +263,8 @@ _CUB_STORE_ALL(STORE_WB, wb)
 _CUB_STORE_ALL(STORE_CG, cg)
 _CUB_STORE_ALL(STORE_CS, cs)
 _CUB_STORE_ALL(STORE_WT, wt)
+_CUB_STORE_ALL(STORE_RELAXED, relaxed.gpu)
+_CUB_STORE_ALL(STORE_RELEASE, release.gpu)
 
 // Macro cleanup
 #undef _CUB_STORE_ALL

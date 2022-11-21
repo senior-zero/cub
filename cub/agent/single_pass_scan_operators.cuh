@@ -42,6 +42,8 @@
 #include <cub/util_device.cuh>
 #include <cub/warp/warp_reduce.cuh>
 
+#include <nv/target>
+
 CUB_NAMESPACE_BEGIN
 
 
@@ -230,7 +232,10 @@ struct ScanTileState<T, true>
 
         TxnWord alias;
         *reinterpret_cast<TileDescriptor*>(&alias) = tile_descriptor;
-        ThreadStore<STORE_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);
+
+        NV_IF_TARGET(NV_PROVIDES_SM_70,
+                     (ThreadStore<STORE_RELAXED>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);),
+                     (ThreadStore<STORE_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);));
     }
 
 
@@ -245,7 +250,10 @@ struct ScanTileState<T, true>
 
         TxnWord alias;
         *reinterpret_cast<TileDescriptor*>(&alias) = tile_descriptor;
-        ThreadStore<STORE_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);
+
+        NV_IF_TARGET(NV_PROVIDES_SM_70,
+                     (ThreadStore<STORE_RELAXED>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);),
+                     (ThreadStore<STORE_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);));
     }
 
     /**
@@ -259,9 +267,12 @@ struct ScanTileState<T, true>
         TileDescriptor tile_descriptor;
         do
         {
-            __threadfence_block(); // prevent hoisting loads from loop
-            TxnWord alias = ThreadLoad<LOAD_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
-            tile_descriptor = reinterpret_cast<TileDescriptor&>(alias);
+            NV_IF_TARGET(NV_PROVIDES_SM_70,
+                         (TxnWord alias = ThreadLoad<LOAD_RELAXED>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
+                          tile_descriptor = reinterpret_cast<TileDescriptor&>(alias);),
+                         (__threadfence_block(); // prevent hoisting loads from loop
+                          TxnWord alias = ThreadLoad<LOAD_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
+                          tile_descriptor = reinterpret_cast<TileDescriptor&>(alias);));
 
         } while (WARP_ANY((tile_descriptor.status == SCAN_TILE_INVALID), 0xffffffff));
 
@@ -383,11 +394,11 @@ struct ScanTileState<T, false>
         // Update tile inclusive value
         ThreadStore<STORE_CG>(d_tile_inclusive + TILE_STATUS_PADDING + tile_idx, tile_inclusive);
 
-        // Fence
-        __threadfence();
-
-        // Update tile status
-        ThreadStore<STORE_CG>(d_tile_status + TILE_STATUS_PADDING + tile_idx, StatusWord(SCAN_TILE_INCLUSIVE));
+        NV_IF_TARGET(NV_PROVIDES_SM_70,
+                     (ThreadStore<STORE_RELEASE>(d_tile_status + TILE_STATUS_PADDING + tile_idx, StatusWord(SCAN_TILE_INCLUSIVE));),
+                     (__threadfence(); 
+                      // Update tile status
+                      ThreadStore<STORE_CG>(d_tile_status + TILE_STATUS_PADDING + tile_idx, StatusWord(SCAN_TILE_INCLUSIVE));));
     }
 
 
@@ -399,11 +410,11 @@ struct ScanTileState<T, false>
         // Update tile partial value
         ThreadStore<STORE_CG>(d_tile_partial + TILE_STATUS_PADDING + tile_idx, tile_partial);
 
-        // Fence
-        __threadfence();
-
-        // Update tile status
-        ThreadStore<STORE_CG>(d_tile_status + TILE_STATUS_PADDING + tile_idx, StatusWord(SCAN_TILE_PARTIAL));
+        NV_IF_TARGET(NV_PROVIDES_SM_70,
+                     (ThreadStore<STORE_RELEASE>(d_tile_status + TILE_STATUS_PADDING + tile_idx, StatusWord(SCAN_TILE_PARTIAL));),
+                     (__threadfence(); 
+                      // Update tile status
+                      ThreadStore<STORE_CG>(d_tile_status + TILE_STATUS_PADDING + tile_idx, StatusWord(SCAN_TILE_PARTIAL));));
     }
 
     /**
@@ -415,11 +426,16 @@ struct ScanTileState<T, false>
         T               &value)
     {
         do {
-            status = ThreadLoad<LOAD_CG>(d_tile_status + TILE_STATUS_PADDING + tile_idx);
-
-            __threadfence();    // prevent hoisting loads from loop or loads below above this one
+            NV_IF_TARGET(NV_PROVIDES_SM_70,
+                         (status = ThreadLoad<LOAD_RELAXED>(d_tile_status + TILE_STATUS_PADDING + tile_idx);),
+                         (status = ThreadLoad<LOAD_CG>(d_tile_status + TILE_STATUS_PADDING + tile_idx);
+                          // prevent hoisting loads from loop or loads below above this one
+                          __threadfence();));
 
         } while (status == SCAN_TILE_INVALID);
+
+        NV_IF_TARGET(NV_PROVIDES_SM_70,
+                     (asm volatile("fence.acq_rel.gpu;":::"memory");));
 
         if (status == StatusWord(SCAN_TILE_PARTIAL)) 
             value = ThreadLoad<LOAD_CG>(d_tile_partial + TILE_STATUS_PADDING + tile_idx);
@@ -594,7 +610,10 @@ struct ReduceByKeyScanTileState<ValueT, KeyT, true>
 
         TxnWord alias;
         *reinterpret_cast<TileDescriptor*>(&alias) = tile_descriptor;
-        ThreadStore<STORE_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);
+
+        NV_IF_TARGET(NV_PROVIDES_SM_70,
+                     (ThreadStore<STORE_RELAXED>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);),
+                     (ThreadStore<STORE_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);));
     }
 
 
@@ -610,7 +629,10 @@ struct ReduceByKeyScanTileState<ValueT, KeyT, true>
 
         TxnWord alias;
         *reinterpret_cast<TileDescriptor*>(&alias) = tile_descriptor;
-        ThreadStore<STORE_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);
+
+        NV_IF_TARGET(NV_PROVIDES_SM_70,
+                     (ThreadStore<STORE_RELAXED>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);),
+                     (ThreadStore<STORE_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);));
     }
 
     /**
@@ -639,9 +661,12 @@ struct ReduceByKeyScanTileState<ValueT, KeyT, true>
         TileDescriptor tile_descriptor;
         do
         {
-            __threadfence_block(); // prevent hoisting loads from loop
-            TxnWord alias = ThreadLoad<LOAD_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
-            tile_descriptor = reinterpret_cast<TileDescriptor&>(alias);
+            NV_IF_TARGET(NV_PROVIDES_SM_70,
+                         (TxnWord alias = ThreadLoad<LOAD_RELAXED>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
+                          tile_descriptor = reinterpret_cast<TileDescriptor&>(alias);),
+                         (__threadfence_block(); // prevent hoisting loads from loop
+                          TxnWord alias = ThreadLoad<LOAD_CG>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
+                          tile_descriptor = reinterpret_cast<TileDescriptor&>(alias);));
 
         } while (WARP_ANY((tile_descriptor.status == SCAN_TILE_INVALID), 0xffffffff));
 
