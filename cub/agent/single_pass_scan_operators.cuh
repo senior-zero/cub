@@ -667,7 +667,7 @@ struct ReduceByKeyScanTileState<ValueT, KeyT, true>
         do
         {
             NV_IF_TARGET(NV_PROVIDES_SM_70,
-                         (__nanosleep(350); // TODO Tune for the rest of the architectures
+                         (__nanosleep(400); // TODO Tune for the rest of the architectures
                           TxnWord alias = ThreadLoad<LOAD_RELAXED>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
                           tile_descriptor = reinterpret_cast<TileDescriptor&>(alias);),
                          (__threadfence_block(); // prevent hoisting loads from loop
