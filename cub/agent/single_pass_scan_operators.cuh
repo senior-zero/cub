@@ -270,7 +270,7 @@ struct ScanTileState<T, true>
         do  
         {   
             NV_IF_TARGET(NV_PROVIDES_SM_70,
-                         (__nanosleep(350); // TODO Tune for the rest of the architectures
+                         (__nanosleep(DL_SLEEP); // TODO Tune for the rest of the architectures
                           TxnWord alias = ThreadLoad<LOAD_RELAXED>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
                           tile_descriptor = reinterpret_cast<TileDescriptor&>(alias);),
                          (__threadfence_block(); // prevent hoisting loads from loop
@@ -430,7 +430,8 @@ struct ScanTileState<T, false>
     {
         do {
             NV_IF_TARGET(NV_PROVIDES_SM_70,
-                         (status = ThreadLoad<LOAD_RELAXED>(d_tile_status + TILE_STATUS_PADDING + tile_idx);),
+                         (__nanosleep(DL_SLEEP); // TODO Tune for the rest of the architectures
+                          status = ThreadLoad<LOAD_RELAXED>(d_tile_status + TILE_STATUS_PADDING + tile_idx);),
                          (status = ThreadLoad<LOAD_CG>(d_tile_status + TILE_STATUS_PADDING + tile_idx);
                           // prevent hoisting loads from loop or loads below above this one
                           __threadfence();));
@@ -667,7 +668,7 @@ struct ReduceByKeyScanTileState<ValueT, KeyT, true>
         do
         {
             NV_IF_TARGET(NV_PROVIDES_SM_70,
-                         (__nanosleep(400); // TODO Tune for the rest of the architectures
+                         (__nanosleep(DL_SLEEP); // TODO Tune for the rest of the architectures
                           TxnWord alias = ThreadLoad<LOAD_RELAXED>(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
                           tile_descriptor = reinterpret_cast<TileDescriptor&>(alias);),
                          (__threadfence_block(); // prevent hoisting loads from loop
