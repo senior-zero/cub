@@ -46,8 +46,14 @@
 
 #include <nv/target>
 
+#include <cooperative_groups.h>
+
+namespace cg = cooperative_groups;
+
+
 CUB_NAMESPACE_BEGIN
 
+static constexpr int CLUSTER_SIZE = 8;
 
 /******************************************************************************
  * Prefix functor type for maintaining a running prefix while scanning a
@@ -722,6 +728,7 @@ struct TilePrefixCallbackOp
     // Temporary storage type
     struct _TempStorage
     {
+        T                                   cluster_aggregate;
         typename WarpReduceT::TempStorage   warp_reduce;
         T                                   exclusive_prefix;
         T                                   inclusive_prefix;
@@ -781,7 +788,6 @@ struct TilePrefixCallbackOp
     __device__ __forceinline__
     T operator()(T block_aggregate)
     {
-
         // Update our status with our tile-aggregate
         if (threadIdx.x == 0)
         {
@@ -795,21 +801,39 @@ struct TilePrefixCallbackOp
         StatusWord  predecessor_status;
         T           window_aggregate;
 
-        // Wait for the warp-wide window of predecessor tiles to become valid
-        detail::delay<450>();
-        ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
+        cg::cluster_group cluster = cg::this_cluster();
+        const unsigned int cluster_block_rank = cluster.block_rank();
 
-        // The exclusive tile prefix starts out as the current window aggregate
-        exclusive_prefix = window_aggregate;
-
-        // Keep sliding the window back until we come across a tile whose inclusive prefix is known
-        while (WARP_ALL((predecessor_status != StatusWord(SCAN_TILE_INCLUSIVE)), 0xffffffff))
+        if (cluster_block_rank == 0) 
         {
-            predecessor_idx -= CUB_PTX_WARP_THREADS;
+          // Wait for the warp-wide window of predecessor tiles to become valid
+          detail::delay<450>();
+          ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
 
-            // Update exclusive tile prefix with the window prefix
-            ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
-            exclusive_prefix = scan_op(window_aggregate, exclusive_prefix);
+          // The exclusive tile prefix starts out as the current window aggregate
+          exclusive_prefix = window_aggregate;
+
+          // Keep sliding the window back until we come across a tile whose inclusive prefix is known
+          while (WARP_ALL((predecessor_status != StatusWord(SCAN_TILE_INCLUSIVE)), 0xffffffff))
+          {
+              predecessor_idx -= CUB_PTX_WARP_THREADS;
+
+              // Update exclusive tile prefix with the window prefix
+              ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
+              exclusive_prefix = scan_op(window_aggregate, exclusive_prefix);
+          }
+
+          if (threadIdx.x + 1 < CLUSTER_SIZE) 
+          {
+            T *dst_smem = cluster.map_shared_rank(&temp_storage.cluster_aggregate, threadIdx.x + 1);
+            *dst_smem = exclusive_prefix;
+          }
+        }
+        cluster.sync();
+
+        if (cluster_block_rank > 0) 
+        {
+          exclusive_prefix = temp_storage.cluster_aggregate;
         }
 
         // Compute the inclusive tile prefix and update the status for this tile

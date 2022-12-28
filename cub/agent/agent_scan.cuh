@@ -426,6 +426,12 @@ struct AgentScan
     {
       // Last tile
       ConsumeTile<true>(num_remaining, tile_idx, tile_offset, tile_state);
+    } else {
+      TilePrefixCallbackOpT prefix_op(tile_state,
+                                      temp_storage.scan_storage.prefix,
+                                      scan_op,
+                                      tile_idx);
+      prefix_op(AccumT{});
     }
   }
 

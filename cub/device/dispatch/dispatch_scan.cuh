@@ -164,7 +164,7 @@ template <typename ChainedPolicyT,
           typename OffsetT,
           typename AccumT>
 __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ScanPolicyT::BLOCK_THREADS))
-__cluster_dims__(8, 1, 1)
+__cluster_dims__(CLUSTER_SIZE, 1, 1)
   __global__ void DeviceScanKernel(InputIteratorT d_in,
                                    OutputIteratorT d_out,
                                    ScanTileStateT tile_state,
@@ -435,6 +435,7 @@ struct DispatchScan : SelectedPolicy
       int tile_size = Policy::BLOCK_THREADS * Policy::ITEMS_PER_THREAD;
       int num_tiles =
         static_cast<int>(cub::DivideAndRoundUp(num_items, tile_size));
+      num_tiles = cub::DivideAndRoundUp(num_tiles, CLUSTER_SIZE) * CLUSTER_SIZE;
 
       // Specify temporary storage allocation requirements
       size_t allocation_sizes[1];
