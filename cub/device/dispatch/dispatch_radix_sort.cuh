@@ -557,7 +557,7 @@ template <
     typename AtomicOffsetT = PortionOffsetT>
 __global__ void __launch_bounds__(ChainedPolicyT::ActivePolicy::OnesweepPolicy::BLOCK_THREADS)
 DeviceRadixSortOnesweepKernel
-    (AtomicOffsetT* d_lookback, AtomicOffsetT* d_ctrs, OffsetT* d_bins_out,
+    (AtomicOffsetT* d_lookback, OffsetT* d_bins_out,
      const OffsetT* d_bins_in, KeyT* d_keys_out, const KeyT* d_keys_in, ValueT* d_values_out,
      const ValueT* d_values_in, PortionOffsetT num_items, int current_bit, int num_bits)
 {
@@ -566,7 +566,7 @@ DeviceRadixSortOnesweepKernel
                                    PortionOffsetT> AgentT;
     __shared__ typename AgentT::TempStorage s;
 
-    AgentT agent(s, d_lookback, d_ctrs, d_bins_out, d_bins_in, d_keys_out, d_keys_in,
+    AgentT agent(s, d_lookback, d_bins_out, d_bins_in, d_keys_out, d_keys_in,
                  d_values_out, d_values_in, num_items, current_bit, num_bits);
     agent.Process();
 }
@@ -1397,9 +1397,7 @@ struct DispatchRadixSort :
             // extra key buffer
             is_overwrite_okay || num_passes <= 1 ? 0 : num_items * sizeof(KeyT),
             // extra value buffer
-            is_overwrite_okay || num_passes <= 1 ? 0 : num_items * value_size,
-            // counters
-            num_portions * num_passes * sizeof(AtomicOffsetT),
+            is_overwrite_okay || num_passes <= 1 ? 0 : num_items * value_size
         };
         const int NUM_ALLOCATIONS = sizeof(allocation_sizes) / sizeof(allocation_sizes[0]);
         void* allocations[NUM_ALLOCATIONS] = {};
@@ -1414,13 +1412,8 @@ struct DispatchRadixSort :
         AtomicOffsetT* d_lookback = (AtomicOffsetT*)allocations[1];
         KeyT* d_keys_tmp2 = (KeyT*)allocations[2];
         ValueT* d_values_tmp2 = (ValueT*)allocations[3];
-        AtomicOffsetT* d_ctrs = (AtomicOffsetT*)allocations[4];
 
         do {
-            // initialization
-            if (CubDebug(error = cudaMemsetAsync(
-                   d_ctrs, 0, num_portions * num_passes * sizeof(AtomicOffsetT), stream))) break;
-
             // compute num_passes histograms with RADIX_DIGITS bins each
             if (CubDebug(error = cudaMemsetAsync
                    (d_bins, 0, num_passes * RADIX_DIGITS * sizeof(OffsetT), stream))) break;
@@ -1527,7 +1520,7 @@ struct DispatchRadixSort :
                     error = THRUST_NS_QUALIFIER::cuda_cub::launcher::triple_chevron(
                       num_blocks, ONESWEEP_BLOCK_THREADS, 0, stream
                     ).doit(onesweep_kernel,
-                           d_lookback, d_ctrs + portion * num_passes + pass,
+                           d_lookback, 
                            portion < num_portions - 1 ?
                              d_bins + ((portion + 1) * num_passes + pass) * RADIX_DIGITS : NULL,
                            d_bins + (portion * num_passes + pass) * RADIX_DIGITS,

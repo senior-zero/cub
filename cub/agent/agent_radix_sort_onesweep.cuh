@@ -163,11 +163,8 @@ struct AgentRadixSortOnesweep
             ValueT values_out[TILE_ITEMS];
             typename BlockRadixRankT::TempStorage rank_temp_storage;
         };
-        union
-        {
-            OffsetT global_offsets[RADIX_DIGITS];
-            PortionOffsetT block_idx;
-        };
+
+        OffsetT global_offsets[RADIX_DIGITS];
     };
 
     using TempStorage = Uninitialized<TempStorage_>;
@@ -177,7 +174,6 @@ struct AgentRadixSortOnesweep
 
     // kernel parameters
     AtomicOffsetT* d_lookback;
-    AtomicOffsetT* d_ctrs;
     OffsetT* d_bins_out;
     const OffsetT*  d_bins_in;
     UnsignedBits* d_keys_out;
@@ -632,7 +628,6 @@ struct AgentRadixSortOnesweep
     __device__ __forceinline__ //
     AgentRadixSortOnesweep(TempStorage &temp_storage,
                            AtomicOffsetT *d_lookback,
-                           AtomicOffsetT *d_ctrs,
                            OffsetT *d_bins_out,
                            const OffsetT *d_bins_in,
                            KeyT *d_keys_out,
@@ -644,7 +639,6 @@ struct AgentRadixSortOnesweep
                            int num_bits)
         : s(temp_storage.Alias())
         , d_lookback(d_lookback)
-        , d_ctrs(d_ctrs)
         , d_bins_out(d_bins_out)
         , d_bins_in(d_bins_in)
         , d_keys_out(reinterpret_cast<UnsignedBits *>(d_keys_out))
@@ -655,14 +649,8 @@ struct AgentRadixSortOnesweep
         , digit_extractor(current_bit, num_bits)
         , warp(threadIdx.x / WARP_THREADS)
         , lane(LaneId())
+        , block_idx(blockIdx.x)
     {
-        // initialization
-        if (threadIdx.x == 0)
-        {
-            s.block_idx = atomicAdd(d_ctrs, 1);
-        }
-        CTA_SYNC();
-        block_idx = s.block_idx;
         full_block = (block_idx + 1) * TILE_ITEMS <= num_items;
     }
 };
