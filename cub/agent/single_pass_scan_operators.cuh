@@ -366,7 +366,7 @@ static __device__ __forceinline__ unsigned int dsmem_ld_relaxed(unsigned int con
 
 static __device__ __forceinline__ void dsmem_st_relaxed(uint4 *ptr, uint4 val)
 {
-  asm volatile("st.relaxed.shared.cluster.v4.u32 [%0], {%1, %2, %3, %4};"
+  asm volatile("st.relaxed.shared::cluster.cluster.v4.u32 [%0], {%1, %2, %3, %4};"
                :
                : _CUB_ASM_PTR_(ptr), "r"(val.x), "r"(val.y), "r"(val.z), "r"(val.w)
                : "memory");
@@ -374,7 +374,7 @@ static __device__ __forceinline__ void dsmem_st_relaxed(uint4 *ptr, uint4 val)
 
 static __device__ __forceinline__ void dsmem_st_relaxed(ulonglong2 *ptr, ulonglong2 val)
 {
-  asm volatile("st.relaxed.shared.cluster.v2.u64 [%0], {%1, %2};"
+  asm volatile("st.relaxed.shared::cluster.cluster.v2.u64 [%0], {%1, %2};"
                :
                : _CUB_ASM_PTR_(ptr), "l"(val.x), "l"(val.y)
                : "memory");
@@ -382,7 +382,7 @@ static __device__ __forceinline__ void dsmem_st_relaxed(ulonglong2 *ptr, ulonglo
 
 static __device__ __forceinline__ void dsmem_st_relaxed(ushort4 *ptr, ushort4 val)
 {
-  asm volatile("st.relaxed.shared.cluster.v4.u16 [%0], {%1, %2, %3, %4};"
+  asm volatile("st.relaxed.shared::cluster.cluster.v4.u16 [%0], {%1, %2, %3, %4};"
                :
                : _CUB_ASM_PTR_(ptr), "h"(val.x), "h"(val.y), "h"(val.z), "h"(val.w)
                : "memory");
@@ -390,7 +390,7 @@ static __device__ __forceinline__ void dsmem_st_relaxed(ushort4 *ptr, ushort4 va
 
 static __device__ __forceinline__ void dsmem_st_relaxed(uint2 *ptr, uint2 val)
 {
-  asm volatile("st.relaxed.shared.cluster.v2.u32 [%0], {%1, %2};"
+  asm volatile("st.relaxed.shared::cluster.cluster.v2.u32 [%0], {%1, %2};"
                :
                : _CUB_ASM_PTR_(ptr), "r"(val.x), "r"(val.y)
                : "memory");
@@ -399,7 +399,7 @@ static __device__ __forceinline__ void dsmem_st_relaxed(uint2 *ptr, uint2 val)
 static __device__ __forceinline__ void dsmem_st_relaxed(unsigned long long *ptr,
                                                         unsigned long long val)
 {
-  asm volatile("st.relaxed.shared.cluster.u64 [%0], %1;"
+  asm volatile("st.relaxed.shared::cluster.cluster.u64 [%0], %1;"
                :
                : _CUB_ASM_PTR_(ptr), "l"(val)
                : "memory");
@@ -407,7 +407,7 @@ static __device__ __forceinline__ void dsmem_st_relaxed(unsigned long long *ptr,
 
 static __device__ __forceinline__ void dsmem_st_relaxed(unsigned int *ptr, unsigned int val)
 {
-  asm volatile("st.relaxed.shared.cluster.u32 [%0], %1;"
+  asm volatile("st.relaxed.shared::cluster.cluster.u32 [%0], %1;"
                :
                : _CUB_ASM_PTR_(ptr), "r"(val)
                : "memory");
