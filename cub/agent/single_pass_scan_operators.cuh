@@ -503,7 +503,6 @@ struct ClusterTilePrefixCallbackOp
     BroadcastInclusiveAggregate(T block_aggregate, ScanTileStatus status)
     {
         const unsigned int cta_rank = cooperative_groups::cluster_group::block_rank();
-        const unsigned int dst_cta = cta_rank + 1 + threadIdx.x;
 
         // Notify last CTA first
         for (int dst_cta = CUB_DETAIL_CLUSTER_SIZE - 1; dst_cta > 0; dst_cta--) 
