@@ -555,10 +555,13 @@ struct ClusterTilePrefixCallbackOp
               {
                 TileDescriptor tile_descriptor;
 
-                do
+                if (src_cta < cta_rank)
                 {
-                  LoadTileDescriptor(src_cta, tile_descriptor);
-                } while (tile_descriptor.status == SCAN_TILE_INVALID);
+                  do
+                  {
+                    LoadTileDescriptor(src_cta, tile_descriptor);
+                  } while (tile_descriptor.status == SCAN_TILE_INVALID);
+                }
                 exclusive_prefix = Reduce(cta_rank, src_cta, tile_descriptor.value);
 
                 if (__shfl_sync(CUB_DETAIL_CLUSTER_WARP_MASK,
@@ -586,10 +589,13 @@ struct ClusterTilePrefixCallbackOp
               {
                 TileDescriptor tile_descriptor;
                 StatusWord target_status = src_cta == 0 ? SCAN_TILE_INCLUSIVE : SCAN_TILE_PARTIAL;
-                do
+                if (src_cta < cta_rank)
                 {
-                  LoadTileDescriptor(src_cta, tile_descriptor);
-                } while (tile_descriptor.status != target_status);
+                  do
+                  {
+                    LoadTileDescriptor(src_cta, tile_descriptor);
+                  } while (tile_descriptor.status != target_status);
+                }
                 exclusive_prefix = Reduce(cta_rank, src_cta, tile_descriptor.value);
               }
             }
