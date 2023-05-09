@@ -598,18 +598,6 @@ struct ClusterTilePrefixCallbackOp
         return exclusive_prefix;
     }
 
-    __device__ __forceinline__
-    void ProcessFirstBlock(T block_aggregate)
-    {
-
-    }
-
-    __device__ __forceinline__
-    void ProcessLastBlocks()
-    {
-
-    }
-
     // Get the exclusive prefix stored in temporary storage
     __device__ __forceinline__
     T GetExclusivePrefix()
