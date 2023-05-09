@@ -434,8 +434,9 @@ struct DispatchScan : SelectedPolicy
 
       // Number of input tiles
       int tile_size = Policy::BLOCK_THREADS * Policy::ITEMS_PER_THREAD;
-      int num_tiles =
-        static_cast<int>(cub::DivideAndRoundUp(num_items, tile_size));
+      int num_tiles = static_cast<int>(cub::DivideAndRoundUp(
+        static_cast<unsigned int>(cub::DivideAndRoundUp(num_items, tile_size)),
+        CUB_DETAIL_CLUSTER_SIZE));
 
       // Specify temporary storage allocation requirements
       size_t allocation_sizes[1];
@@ -529,7 +530,7 @@ struct DispatchScan : SelectedPolicy
       }
 
       // Run grids in epochs (in case number of tiles exceeds max x-dimension
-      int scan_grid_size = CUB_MIN(num_tiles, max_dim_x);
+      int scan_grid_size = CUB_MIN(num_tiles * CUB_DETAIL_CLUSTER_SIZE, max_dim_x);
       for (int start_tile = 0; start_tile < num_tiles;
            start_tile += scan_grid_size)
       {
