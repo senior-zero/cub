@@ -581,7 +581,7 @@ struct ClusterTilePrefixCallbackOp
 
                 if (threadIdx.x == 0)
                 {
-                  T inclusive_prefix = scan_op(tile_descriptor.value, block_aggregate);
+                  T inclusive_prefix = scan_op(exclusive_prefix, block_aggregate);
                   tile_status.SetInclusive(tile_idx, inclusive_prefix);
                 }
               }
