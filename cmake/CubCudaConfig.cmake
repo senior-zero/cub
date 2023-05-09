@@ -1,11 +1,5 @@
 enable_language(CUDA)
 
-if (NOT CUB_IN_THRUST)
-  message(FATAL_ERROR
-    "Building CUB as a standalone project is no longer supported. "
-    "Use the Thrust repo instead.")
-endif()
-
 set(CUB_CUDA_FLAGS_BASE "${THRUST_CUDA_FLAGS_BASE}")
 set(CUB_CUDA_FLAGS_RDC "${THRUST_CUDA_FLAGS_RDC}")
 set(CUB_CUDA_FLAGS_NO_RDC "${THRUST_CUDA_FLAGS_NO_RDC}")
