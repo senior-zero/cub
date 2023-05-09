@@ -49,6 +49,10 @@
 CUB_NAMESPACE_BEGIN
 
 
+#ifndef CUB_DETAIL_CLUSTER_SIZE
+#define CUB_DETAIL_CLUSTER_SIZE 8
+#endif
+
 #ifndef CUB_DETAIL_L2_BACKOFF_NS
 #define CUB_DETAIL_L2_BACKOFF_NS 350
 #endif 
@@ -157,6 +161,286 @@ __device__ __forceinline__ void delay_on_dc_gpu_or_prevent_hoisting()
 }
 
 }
+
+/**
+ * Cluster tile status interface.
+ */
+template <
+    typename    T,
+    bool        SINGLE_WORD = Traits<T>::PRIMITIVE>
+struct ScanClusterTileState;
+
+
+/**
+ * Tile status interface specialized for scan status and value types
+ * that can be combined into one machine word that can be
+ * read/written coherently in a single access.
+ */
+template <typename T>
+struct ScanClusterTileState<T, true>
+{
+  using StatusWord = cub::detail::conditional_t<
+    sizeof(T) == 8,
+    unsigned long long,
+    cub::detail::conditional_t<
+      sizeof(T) == 4,
+      unsigned int,
+      cub::detail::conditional_t<sizeof(T) == 2, unsigned short, unsigned char>>>;
+
+  using TxnWord =
+    cub::detail::conditional_t<sizeof(T) == 8,
+                               ulonglong2,
+                               cub::detail::conditional_t<sizeof(T) == 4, uint2, unsigned int>>;
+
+  struct TileDescriptor
+  {
+    StatusWord status;
+    T value;
+  };
+
+  enum
+  {
+    TILE_STATUS_PADDING = CUB_PTX_WARP_THREADS,
+  };
+
+  // Device storage
+  TxnWord *d_tile_descriptors;
+
+  /// Constructor
+  __host__ __device__ __forceinline__ ScanClusterTileState()
+      : d_tile_descriptors(NULL)
+  {}
+
+  /// Initializer
+  __host__ __device__ __forceinline__ cudaError_t Init(int /*num_tiles*/,
+                                                       void *d_temp_storage,
+                                                       size_t /*temp_storage_bytes*/)
+  {
+        d_tile_descriptors = reinterpret_cast<TxnWord *>(d_temp_storage);
+        return cudaSuccess;
+  }
+
+  __host__ __device__ __forceinline__ static cudaError_t AllocationSize(int num_tiles,
+                                                                        size_t &temp_storage_bytes)
+  {
+        temp_storage_bytes = (num_tiles + TILE_STATUS_PADDING) * sizeof(TxnWord);
+        return cudaSuccess;
+  }
+
+  __device__ __forceinline__ void InitializeStatus(int num_tiles)
+  {
+        int tile_idx = (blockIdx.x * blockDim.x) + threadIdx.x;
+
+        TxnWord val                = TxnWord();
+        TileDescriptor *descriptor = reinterpret_cast<TileDescriptor *>(&val);
+
+        if (tile_idx < num_tiles)
+        {
+          // Not-yet-set
+          descriptor->status                                 = StatusWord(SCAN_TILE_INVALID);
+          d_tile_descriptors[TILE_STATUS_PADDING + tile_idx] = val;
+        }
+
+        if ((blockIdx.x == 0) && (threadIdx.x < TILE_STATUS_PADDING))
+        {
+          // Padding
+          descriptor->status              = StatusWord(SCAN_TILE_OOB);
+          d_tile_descriptors[threadIdx.x] = val;
+        }
+  }
+
+  __device__ __forceinline__ void SetInclusive(int tile_idx, T tile_inclusive)
+  {
+        TileDescriptor tile_descriptor;
+        tile_descriptor.status = SCAN_TILE_INCLUSIVE;
+        tile_descriptor.value  = tile_inclusive;
+
+        TxnWord alias;
+        *reinterpret_cast<TileDescriptor *>(&alias) = tile_descriptor;
+
+        detail::store_relaxed(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);
+  }
+
+  __device__ __forceinline__ void SetPartial(int tile_idx, T tile_partial)
+  {
+        TileDescriptor tile_descriptor;
+        tile_descriptor.status = SCAN_TILE_PARTIAL;
+        tile_descriptor.value  = tile_partial;
+
+        TxnWord alias;
+        *reinterpret_cast<TileDescriptor *>(&alias) = tile_descriptor;
+
+        detail::store_relaxed(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx, alias);
+  }
+
+  __device__ __forceinline__ void WaitForValid(int tile_idx, StatusWord &status, T &value)
+  {
+        TileDescriptor tile_descriptor;
+
+        {
+          TxnWord alias = detail::load_relaxed(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
+          tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
+        }
+
+        while (WARP_ANY((tile_descriptor.status == SCAN_TILE_INVALID), 0xffffffff))
+        {
+          detail::delay_or_prevent_hoisting();
+          TxnWord alias = detail::load_relaxed(d_tile_descriptors + TILE_STATUS_PADDING + tile_idx);
+          tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
+        }
+
+        status = tile_descriptor.status;
+        value  = tile_descriptor.value;
+  }
+
+  __device__ __forceinline__ T LoadValid(int tile_idx)
+  {
+        TxnWord alias                  = d_tile_descriptors[TILE_STATUS_PADDING + tile_idx];
+        TileDescriptor tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
+        return tile_descriptor.value;
+  }
+};
+
+template <
+    typename    T,
+    typename    ScanOpT,
+    typename    ScanClusterTileStateT,
+    int         LEGACY_PTX_ARCH = 0>
+struct ClusterTilePrefixCallbackOp
+{
+    // Parameterized warp reduce
+    using WarpReduceT = WarpReduce<T, CUB_PTX_WARP_THREADS>;
+
+    // Temporary storage type
+    struct _TempStorage
+    {
+        typename WarpReduceT::TempStorage   warp_reduce;
+        T                                   exclusive_prefix;
+        T                                   inclusive_prefix;
+        T                                   block_aggregate;
+    };
+
+    // Alias wrapper allowing temporary storage to be unioned
+    struct TempStorage : Uninitialized<_TempStorage> {};
+
+    // Type of status word
+    using StatusWord = typename ScanClusterTileStateT::StatusWord;
+
+    // Fields
+    _TempStorage&               temp_storage;       ///< Reference to a warp-reduction instance
+    ScanClusterTileStateT&      tile_status;        ///< Interface to tile status
+    ScanOpT                     scan_op;            ///< Binary scan operator
+    int                         tile_idx;           ///< The current tile index
+    T                           exclusive_prefix;   ///< Exclusive prefix for the tile
+    T                           inclusive_prefix;   ///< Inclusive prefix for the tile
+
+    // Constructor
+    __device__ __forceinline__
+    ClusterTilePrefixCallbackOp(
+        ScanClusterTileStateT       &tile_status,
+        TempStorage         &temp_storage,
+        ScanOpT              scan_op,
+        int                 tile_idx)
+    :
+        temp_storage(temp_storage.Alias()),
+        tile_status(tile_status),
+        scan_op(scan_op),
+        tile_idx(tile_idx) {}
+
+
+    // Block until all predecessors within the warp-wide window have non-invalid status
+    __device__ __forceinline__
+    void ProcessWindow(
+        int         predecessor_idx,        ///< Preceding tile index to inspect
+        StatusWord  &predecessor_status,    ///< [out] Preceding tile status
+        T           &window_aggregate)      ///< [out] Relevant partial reduction from this window of preceding tiles
+    {
+        T value;
+        tile_status.WaitForValid(predecessor_idx, predecessor_status, value);
+
+        // Perform a segmented reduction to get the prefix for the current window.
+        // Use the swizzled scan operator because we are now scanning *down* towards thread0.
+
+        int tail_flag = (predecessor_status == StatusWord(SCAN_TILE_INCLUSIVE));
+        window_aggregate = WarpReduceT(temp_storage.warp_reduce).TailSegmentedReduce(
+            value,
+            tail_flag,
+            SwizzleScanOp<ScanOpT>(scan_op));
+    }
+
+
+    // BlockScan prefix callback functor (called by the first warp)
+    __device__ __forceinline__
+    T operator()(T block_aggregate)
+    {
+        // Update our status with our tile-aggregate
+        if (threadIdx.x == 0)
+        {
+          detail::uninitialized_copy(&temp_storage.block_aggregate,
+                                     block_aggregate);
+
+          tile_status.SetPartial(tile_idx, block_aggregate);
+        }
+
+        int         predecessor_idx = tile_idx - threadIdx.x - 1;
+        StatusWord  predecessor_status;
+        T           window_aggregate;
+
+        // Wait for the warp-wide window of predecessor tiles to become valid
+        detail::delay<CUB_DETAIL_L2_WRITE_LATENCY_NS>();
+        ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
+
+        // The exclusive tile prefix starts out as the current window aggregate
+        exclusive_prefix = window_aggregate;
+
+        // Keep sliding the window back until we come across a tile whose inclusive prefix is known
+        while (WARP_ALL((predecessor_status != StatusWord(SCAN_TILE_INCLUSIVE)), 0xffffffff))
+        {
+            predecessor_idx -= CUB_PTX_WARP_THREADS;
+
+            // Update exclusive tile prefix with the window prefix
+            ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
+            exclusive_prefix = scan_op(window_aggregate, exclusive_prefix);
+        }
+
+        // Compute the inclusive tile prefix and update the status for this tile
+        if (threadIdx.x == 0)
+        {
+            inclusive_prefix = scan_op(exclusive_prefix, block_aggregate);
+            tile_status.SetInclusive(tile_idx, inclusive_prefix);
+
+            detail::uninitialized_copy(&temp_storage.exclusive_prefix,
+                                       exclusive_prefix);
+
+            detail::uninitialized_copy(&temp_storage.inclusive_prefix,
+                                       inclusive_prefix);
+        }
+
+        // Return exclusive_prefix
+        return exclusive_prefix;
+    }
+
+    // Get the exclusive prefix stored in temporary storage
+    __device__ __forceinline__
+    T GetExclusivePrefix()
+    {
+        return temp_storage.exclusive_prefix;
+    }
+
+    // Get the inclusive prefix stored in temporary storage
+    __device__ __forceinline__
+    T GetInclusivePrefix()
+    {
+        return temp_storage.inclusive_prefix;
+    }
+
+    // Get the block aggregate stored in temporary storage
+    __device__ __forceinline__
+    T GetBlockAggregate()
+    {
+        return temp_storage.block_aggregate;
+    }
+};
 
 /**
  * Tile status interface.

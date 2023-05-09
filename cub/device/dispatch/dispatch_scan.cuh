@@ -36,6 +36,7 @@
 #pragma once
 
 #include <iterator>
+#include "cub/agent/single_pass_scan_operators.cuh"
 
 #include <cub/agent/agent_scan.cuh>
 #include <cub/config.cuh>
@@ -158,15 +159,16 @@ __global__ void DeviceCompactInitKernel(ScanTileStateT tile_state,
 template <typename ChainedPolicyT,
           typename InputIteratorT,
           typename OutputIteratorT,
-          typename ScanTileStateT,
+          typename ScanClusterTileStateT,
           typename ScanOpT,
           typename InitValueT,
           typename OffsetT,
           typename AccumT>
 __launch_bounds__(int(ChainedPolicyT::ActivePolicy::ScanPolicyT::BLOCK_THREADS))
+__cluster_dims__(CUB_DETAIL_CLUSTER_SIZE, 1, 1)
   __global__ void DeviceScanKernel(InputIteratorT d_in,
                                    OutputIteratorT d_out,
-                                   ScanTileStateT tile_state,
+                                   ScanClusterTileStateT tile_state,
                                    int start_tile,
                                    ScanOpT scan_op,
                                    InitValueT init_value,
@@ -412,7 +414,7 @@ struct DispatchScan : SelectedPolicy
   Invoke(InitKernel init_kernel, ScanKernel scan_kernel)
   {
     typedef typename ActivePolicyT::ScanPolicyT Policy;
-    typedef typename cub::ScanTileState<AccumT> ScanTileStateT;
+    typedef typename cub::ScanClusterTileState<AccumT> ScanTileStateT;
 
     // `LOAD_LDG` makes in-place execution UB and doesn't lead to better
     // performance.
@@ -580,7 +582,7 @@ struct DispatchScan : SelectedPolicy
   CUB_RUNTIME_FUNCTION __host__ __forceinline__ cudaError_t Invoke()
   {
     typedef typename DispatchScan::MaxPolicy MaxPolicyT;
-    typedef typename cub::ScanTileState<AccumT> ScanTileStateT;
+    typedef typename cub::ScanClusterTileState<AccumT> ScanTileStateT;
     // Ensure kernels are instantiated.
     return Invoke<ActivePolicyT>(DeviceScanInitKernel<ScanTileStateT>,
                                  DeviceScanKernel<MaxPolicyT,

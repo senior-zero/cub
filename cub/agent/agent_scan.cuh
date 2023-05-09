@@ -135,7 +135,7 @@ struct AgentScan
   using InputT = cub::detail::value_t<InputIteratorT>;
 
   // Tile status descriptor interface type
-  using ScanTileStateT = ScanTileState<AccumT>;
+  using ScanTileStateT = ScanClusterTileState<AccumT>;
 
   // Input iterator wrapper type (for applying cache modifier)
   // Wrap the native input pointer with CacheModifiedInputIterator
@@ -176,7 +176,7 @@ struct AgentScan
     BlockScanT;
 
   // Callback type for obtaining tile prefix during block scan
-  typedef TilePrefixCallbackOp<AccumT, ScanOpT, ScanTileStateT>
+  typedef ClusterTilePrefixCallbackOp<AccumT, ScanOpT, ScanTileStateT>
     TilePrefixCallbackOpT;
 
   // Stateful BlockScan prefix callback type for managing a running total while
