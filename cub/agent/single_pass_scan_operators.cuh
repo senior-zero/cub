@@ -350,7 +350,7 @@ struct ClusterTilePrefixCallbackOp
         temp_storage(temp_storage.Alias()),
         tile_status(tile_status),
         scan_op(scan_op),
-        tile_idx(tile_idx) {}
+        tile_idx(tile_idx / CUB_DETAIL_CLUSTER_SIZE) {}
 
 
     // Block until all predecessors within the warp-wide window have non-invalid status
