@@ -377,7 +377,9 @@ struct ClusterTilePrefixCallbackOp
     BroadcastBlockAggregate(T block_aggregate, ScanTileStatus status)
     {
         const unsigned int cta_rank = cooperative_groups::cluster_group::block_rank();
-        for (int dst_cta = cta_rank + 1 + threadIdx.x; dst_cta < CUB_DETAIL_CLUSTER_SIZE; dst_cta += 32) 
+        const unsigned int dst_cta = cta_rank + 1 + threadIdx.x;
+
+        if (dst_cta < CUB_DETAIL_CLUSTER_SIZE) 
         {
             TxnWord * dsmem = cooperative_groups::cluster_group::map_shared_rank(temp_storage.dsmem, dst_cta);
 
