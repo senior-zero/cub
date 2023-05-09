@@ -340,8 +340,7 @@ struct AgentScan
     prefix_op.InitializeDSMem();
 
     // Arrive at cluster barrier
-    cooperative_groups::cluster_group cluster = cooperative_groups::this_cluster();
-    cooperative_groups::cluster_group::arrival_token token = cluster.barrier_arrive();
+    cooperative_groups::cluster_group::arrival_token token = cooperative_groups::cluster_group::barrier_arrive();
 
     // Load items
     AccumT items[ITEMS_PER_THREAD];
@@ -359,7 +358,7 @@ struct AgentScan
     }
 
     // Wait for all threads in the cluster to finish loading / dsmem initialization
-    cluster.barrier_wait(std::move(token));
+    cooperative_groups::cluster_group::barrier_wait(std::move(token));
     // CTA_SYNC();
 
     // Perform tile scan
@@ -373,7 +372,7 @@ struct AgentScan
                block_aggregate,
                Int2Type<IS_INCLUSIVE>());
 
-      prefix_op.BroadcastBlockAggregate(cluster, block_aggregate, SCAN_TILE_INCLUSIVE);
+      prefix_op.BroadcastBlockAggregate(block_aggregate, SCAN_TILE_INCLUSIVE);
     }
     else
     {

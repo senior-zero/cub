@@ -374,12 +374,12 @@ struct ClusterTilePrefixCallbackOp
     }
 
     __device__ __forceinline__ void
-    BroadcastBlockAggregate(cooperative_groups::cluster_group cluster, T block_aggregate, ScanTileStatus status)
+    BroadcastBlockAggregate(T block_aggregate, ScanTileStatus status)
     {
-        const unsigned int cta_rank = cluster.block_rank();
+        const unsigned int cta_rank = cooperative_groups::cluster_group::block_rank();
         for (int dst_cta = cta_rank + 1 + threadIdx.x; dst_cta < CUB_DETAIL_CLUSTER_SIZE; dst_cta += 32) 
         {
-            TxnWord * dsmem = cluster.map_shared_rank(temp_storage.dsmem, dst_cta);
+            TxnWord * dsmem = cooperative_groups::cluster_group::map_shared_rank(temp_storage.dsmem, dst_cta);
 
             TileDescriptor tile_descriptor;
             tile_descriptor.status = status;
@@ -397,8 +397,7 @@ struct ClusterTilePrefixCallbackOp
     __device__ __forceinline__
     T operator()(T block_aggregate)
     {
-        cooperative_groups::cluster_group cluster = cooperative_groups::this_cluster();
-        BroadcastBlockAggregate(cluster, block_aggregate, SCAN_TILE_PARTIAL);
+        BroadcastBlockAggregate(block_aggregate, SCAN_TILE_PARTIAL);
 
         // Update our status with our tile-aggregate
         if (threadIdx.x == 0)
