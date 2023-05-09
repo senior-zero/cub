@@ -332,6 +332,17 @@ struct AgentScan
                                               OffsetT tile_offset,
                                               ScanTileStateT &tile_state)
   {
+    // Reset dsmem
+    TilePrefixCallbackOpT prefix_op(tile_state,
+                                    temp_storage.scan_storage.prefix,
+                                    scan_op,
+                                    tile_idx);
+    prefix_op.InitializeDSMem();
+
+    // Arrive at cluster barrier
+    cooperative_groups::cluster_group cluster = cooperative_groups::this_cluster();
+    cooperative_groups::cluster_group::arrival_token token = cluster.barrier_arrive();
+
     // Load items
     AccumT items[ITEMS_PER_THREAD];
 
@@ -347,7 +358,9 @@ struct AgentScan
       BlockLoadT(temp_storage.load).Load(d_in + tile_offset, items);
     }
 
-    CTA_SYNC();
+    // Wait for all threads in the cluster to finish loading / dsmem initialization
+    cluster.barrier_wait(std::move(token));
+    // CTA_SYNC();
 
     // Perform tile scan
     if (tile_idx == 0)
@@ -360,18 +373,11 @@ struct AgentScan
                block_aggregate,
                Int2Type<IS_INCLUSIVE>());
 
-      if ((!IS_LAST_TILE) && (threadIdx.x == 0))
-      {
-        tile_state.SetInclusive(0, block_aggregate);
-      }
+      prefix_op.BroadcastBlockAggregate(cluster, block_aggregate, SCAN_TILE_INCLUSIVE);
     }
     else
     {
       // Scan non-first tile
-      TilePrefixCallbackOpT prefix_op(tile_state,
-                                      temp_storage.scan_storage.prefix,
-                                      scan_op,
-                                      tile_idx);
       ScanTile(items, scan_op, prefix_op, Int2Type<IS_INCLUSIVE>());
     }
 
@@ -417,159 +423,22 @@ struct AgentScan
     // Remaining items (including this tile)
     OffsetT num_remaining = num_items - tile_offset;
 
-    if (num_remaining > TILE_ITEMS)
+    const unsigned int cluster_id = tile_idx / CUB_DETAIL_CLUSTER_SIZE;
+
+    if (cluster_id < (gridDim.x / CUB_DETAIL_CLUSTER_SIZE) - 1)
     {
-      // Not last tile
-      ConsumeTile<false>(num_remaining, tile_idx, tile_offset, tile_state);
-    }
-    else if (num_remaining > 0)
-    {
-      // Last tile
-      ConsumeTile<true>(num_remaining, tile_idx, tile_offset, tile_state);
-    }
-  }
-
-  //---------------------------------------------------------------------------
-  // Scan an sequence of consecutive tiles (independent of other thread blocks)
-  //---------------------------------------------------------------------------
-
-  /**
-   * @brief Process a tile of input
-   *
-   * @param tile_offset
-   *   Tile offset
-   *
-   * @param prefix_op
-   *   Running prefix operator
-   *
-   * @param valid_items
-   *   Number of valid items in the tile
-   */
-  template <bool IS_FIRST_TILE, bool IS_LAST_TILE>
-  __device__ __forceinline__ void ConsumeTile(OffsetT tile_offset,
-                                              RunningPrefixCallbackOp &prefix_op,
-                                              int valid_items = TILE_ITEMS)
-  {
-    // Load items
-    AccumT items[ITEMS_PER_THREAD];
-
-    if (IS_LAST_TILE)
-    {
-      // Fill last element with the first element because collectives are
-      // not suffix guarded.
-      BlockLoadT(temp_storage.load)
-        .Load(d_in + tile_offset, items, valid_items, *(d_in + tile_offset));
-    }
-    else
-    {
-      BlockLoadT(temp_storage.load).Load(d_in + tile_offset, items);
-    }
-
-    CTA_SYNC();
-
-    // Block scan
-    if (IS_FIRST_TILE)
-    {
-      AccumT block_aggregate;
-      ScanTile(items,
-               init_value,
-               scan_op,
-               block_aggregate,
-               Int2Type<IS_INCLUSIVE>());
-      prefix_op.running_total = block_aggregate;
-    }
-    else
-    {
-      ScanTile(items, scan_op, prefix_op, Int2Type<IS_INCLUSIVE>());
-    }
-
-    CTA_SYNC();
-
-    // Store items
-    if (IS_LAST_TILE)
-    {
-      BlockStoreT(temp_storage.store)
-        .Store(d_out + tile_offset, items, valid_items);
-    }
-    else
-    {
-      BlockStoreT(temp_storage.store).Store(d_out + tile_offset, items);
-    }
-  }
-
-  /**
-   * @brief Scan a consecutive share of input tiles
-   *
-   * @param[in] range_offset
-   *   Threadblock begin offset (inclusive)
-   *
-   * @param[in] range_end
-   *   Threadblock end offset (exclusive)
-   */
-  __device__ __forceinline__ void ConsumeRange(OffsetT range_offset,
-                                               OffsetT range_end)
-  {
-    BlockScanRunningPrefixOp<AccumT, ScanOpT> prefix_op(scan_op);
-
-    if (range_offset + TILE_ITEMS <= range_end)
-    {
-      // Consume first tile of input (full)
-      ConsumeTile<true, true>(range_offset, prefix_op);
-      range_offset += TILE_ITEMS;
-
-      // Consume subsequent full tiles of input
-      while (range_offset + TILE_ITEMS <= range_end)
+      if (num_remaining > TILE_ITEMS)
       {
-        ConsumeTile<false, true>(range_offset, prefix_op);
-        range_offset += TILE_ITEMS;
+        // Not last tile
+        ConsumeTile<false>(num_remaining, tile_idx, tile_offset, tile_state);
       }
-
-      // Consume a partially-full tile
-      if (range_offset < range_end)
+      else if (num_remaining > 0)
       {
-        int valid_items = range_end - range_offset;
-        ConsumeTile<false, false>(range_offset, prefix_op, valid_items);
+        // Last tile
+        ConsumeTile<true>(num_remaining, tile_idx, tile_offset, tile_state);
       }
     }
-    else
-    {
-      // Consume the first tile of input (partially-full)
-      int valid_items = range_end - range_offset;
-      ConsumeTile<true, false>(range_offset, prefix_op, valid_items);
-    }
-  }
-
-  /**
-   * @brief Scan a consecutive share of input tiles, seeded with the
-   *        specified prefix value
-   * @param[in] range_offset
-   *   Threadblock begin offset (inclusive)
-   *
-   * @param[in] range_end
-   *   Threadblock end offset (exclusive)
-   *
-   * @param[in] prefix
-   *   The prefix to apply to the scan segment
-   */
-  __device__ __forceinline__ void ConsumeRange(OffsetT range_offset,
-                                               OffsetT range_end,
-                                               AccumT prefix)
-  {
-    BlockScanRunningPrefixOp<AccumT, ScanOpT> prefix_op(prefix, scan_op);
-
-    // Consume full tiles of input
-    while (range_offset + TILE_ITEMS <= range_end)
-    {
-      ConsumeTile<true, false>(range_offset, prefix_op);
-      range_offset += TILE_ITEMS;
-    }
-
-    // Consume a partially-full tile
-    if (range_offset < range_end)
-    {
-      int valid_items = range_end - range_offset;
-      ConsumeTile<false, false>(range_offset, prefix_op, valid_items);
-    }
+    // TODO Last cluster
   }
 };
 

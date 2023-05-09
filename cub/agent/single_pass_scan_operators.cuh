@@ -46,6 +46,8 @@
 
 #include <nv/target>
 
+#include <cooperative_groups.h>
+
 CUB_NAMESPACE_BEGIN
 
 
@@ -310,6 +312,8 @@ struct ClusterTilePrefixCallbackOp
 {
     // Parameterized warp reduce
     using WarpReduceT = WarpReduce<T, CUB_PTX_WARP_THREADS>;
+    using TxnWord = typename ScanClusterTileStateT::TxnWord;
+    using TileDescriptor = typename ScanClusterTileStateT::TileDescriptor;
 
     // Temporary storage type
     struct _TempStorage
@@ -318,6 +322,7 @@ struct ClusterTilePrefixCallbackOp
         T                                   exclusive_prefix;
         T                                   inclusive_prefix;
         T                                   block_aggregate;
+        TxnWord                             dsmem[CUB_DETAIL_CLUSTER_SIZE];
     };
 
     // Alias wrapper allowing temporary storage to be unioned
@@ -337,10 +342,10 @@ struct ClusterTilePrefixCallbackOp
     // Constructor
     __device__ __forceinline__
     ClusterTilePrefixCallbackOp(
-        ScanClusterTileStateT       &tile_status,
-        TempStorage         &temp_storage,
-        ScanOpT              scan_op,
-        int                 tile_idx)
+        ScanClusterTileStateT &tile_status,
+        TempStorage           &temp_storage,
+        ScanOpT                scan_op,
+        int                    tile_idx)
     :
         temp_storage(temp_storage.Alias()),
         tile_status(tile_status),
@@ -368,11 +373,33 @@ struct ClusterTilePrefixCallbackOp
             SwizzleScanOp<ScanOpT>(scan_op));
     }
 
+    __device__ __forceinline__ void
+    BroadcastBlockAggregate(cooperative_groups::cluster_group cluster, T block_aggregate, ScanTileStatus status)
+    {
+        const unsigned int cta_rank = cluster.block_rank();
+        for (int dst_cta = cta_rank + 1 + threadIdx.x; dst_cta < CUB_DETAIL_CLUSTER_SIZE; dst_cta += 32) 
+        {
+            TxnWord * dsmem = cluster.map_shared_rank(temp_storage.dsmem, dst_cta);
+
+            TileDescriptor tile_descriptor;
+            tile_descriptor.status = status;
+            tile_descriptor.value  = block_aggregate;
+
+            TxnWord alias;
+            *reinterpret_cast<TileDescriptor *>(&alias) = tile_descriptor;
+
+            // TODO st.relaxed.shared.cluster 
+            dsmem[cta_rank] = alias;
+        }
+    }
 
     // BlockScan prefix callback functor (called by the first warp)
     __device__ __forceinline__
     T operator()(T block_aggregate)
     {
+        cooperative_groups::cluster_group cluster = cooperative_groups::this_cluster();
+        BroadcastBlockAggregate(cluster, block_aggregate, SCAN_TILE_PARTIAL);
+
         // Update our status with our tile-aggregate
         if (threadIdx.x == 0)
         {
@@ -420,6 +447,18 @@ struct ClusterTilePrefixCallbackOp
         return exclusive_prefix;
     }
 
+    __device__ __forceinline__
+    void ProcessFirstBlock(T block_aggregate)
+    {
+
+    }
+
+    __device__ __forceinline__
+    void ProcessLastBlocks()
+    {
+
+    }
+
     // Get the exclusive prefix stored in temporary storage
     __device__ __forceinline__
     T GetExclusivePrefix()
@@ -439,6 +478,18 @@ struct ClusterTilePrefixCallbackOp
     T GetBlockAggregate()
     {
         return temp_storage.block_aggregate;
+    }
+
+    __device__ __forceinline__ void InitializeDSMem()
+    {
+        TxnWord val = TxnWord();
+        TileDescriptor *descriptor = reinterpret_cast<TileDescriptor*>(&val);
+
+        descriptor->status = StatusWord(SCAN_TILE_INVALID);
+
+        if (threadIdx.x < CUB_DETAIL_CLUSTER_SIZE) {
+            temp_storage.dsmem[threadIdx.x] = val;
+        }
     }
 };
 
