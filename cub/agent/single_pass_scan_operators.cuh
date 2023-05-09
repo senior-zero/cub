@@ -445,8 +445,8 @@ struct ClusterTilePrefixCallbackOp
         {
             // Intermediate CTAs wait for inclusive result
             TxnWord * lsmem = temp_storage.dsmem;
-
             const unsigned int src_cta = threadIdx.x;
+
             if (src_cta < CUB_DETAIL_CLUSTER_SIZE)
             {
                 if (cta_rank == CUB_DETAIL_CLUSTER_SIZE - 1)
@@ -456,38 +456,26 @@ struct ClusterTilePrefixCallbackOp
                     do {
                         LoadTileDescriptor(src_cta, tile_descriptor);
                     } while (tile_descriptor.status == SCAN_TILE_INVALID);
-                    T window_aggregate = Reduce(cta_rank, src_cta, tile_descriptor.value);
+                    exclusive_prefix = Reduce(cta_rank, src_cta, tile_descriptor.value);
+
+                    if (__shfl_sync(WarpMask<CUB_DETAIL_CLUSTER_SIZE>(0),
+                                    tile_descriptor.status == SCAN_TILE_PARTIAL,
+                                    0,
+                                    CUB_DETAIL_CLUSTER_SIZE))
+                    {
+                        if (threadIdx.x == 0) 
+                        {
+                            do {
+                                LoadTileDescriptor(src_cta, tile_descriptor);
+                            } while (tile_descriptor.status != SCAN_TILE_INCLUSIVE);
+                        }
+                        exclusive_prefix = Reduce(cta_rank, src_cta, tile_descriptor.value);
+                    }
 
                     if (threadIdx.x == 0) 
                     {
-                        if (tile_descriptor.status == SCAN_TILE_PARTIAL)
-                        {
-                            block_aggregate = scan_op(tile_descriptor.value, block_aggregate);
-                            tile_status.SetPartial(tile_idx, block_aggregate);
-                        }
-                        else if (tile_descriptor.status == SCAN_TILE_INCLUSIVE)
-                        {
-                            {
-                                // TODO ld.relaxed.shared.cluster
-                                TxnWord alias = lsmem[src_cta];
-                                tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
-                            }
-
-                            while (tile_descriptor.status != SCAN_TILE_INCLUSIVE)
-                            {
-                                // TODO ld.relaxed.shared.cluster
-                                TxnWord alias = lsmem[src_cta];
-                                tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
-                            }
-
-                            // TODO Reduce between CUB_DETAIL_CLUSTER_SIZE threads
-
-                            if (threadIdx.x == 0) 
-                            {
-                                block_aggregate = scan_op(tile_descriptor.value, block_aggregate);
-                                tile_status.SetInclusive(tile_idx, block_aggregate);
-                            }
-                        }
+                        block_aggregate = scan_op(tile_descriptor.value, block_aggregate);
+                        tile_status.SetInclusive(tile_idx, block_aggregate);
                     }
                 }
                 else
@@ -495,7 +483,6 @@ struct ClusterTilePrefixCallbackOp
                     TileDescriptor tile_descriptor;
                     StatusWord target_status = src_cta == 0 ? SCAN_TILE_INCLUSIVE
                                                             : SCAN_TILE_PARTIAL;
-
                     do
                     {
                         LoadTileDescriptor(src_cta, tile_descriptor);
