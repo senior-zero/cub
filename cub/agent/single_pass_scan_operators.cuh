@@ -304,6 +304,115 @@ struct ScanClusterTileState<T, true>
   }
 };
 
+static __device__ __forceinline__ uint4 dsmem_ld_relaxed(uint4 const *ptr)
+{
+  uint4 retval;
+  asm volatile("ld.relaxed.shared.cluster.v4.u32 {%0, %1, %2, %3}, [%4];"
+               : "=r"(retval.x), "=r"(retval.y), "=r"(retval.z), "=r"(retval.w)
+               : _CUB_ASM_PTR_(ptr)
+               : "memory");
+  return retval;
+}
+
+static __device__ __forceinline__ ulonglong2 dsmem_ld_relaxed(ulonglong2 const *ptr)
+{
+  ulonglong2 retval;
+  asm volatile("ld.relaxed.shared.cluster.v2.u64 {%0, %1}, [%2];"
+               : "=l"(retval.x), "=l"(retval.y)
+               : _CUB_ASM_PTR_(ptr)
+               : "memory");
+  return retval;
+}
+
+static __device__ __forceinline__ ushort4 dsmem_ld_relaxed(ushort4 const *ptr)
+{
+  ushort4 retval;
+  asm volatile("ld.relaxed.shared.cluster.v4.u16 {%0, %1, %2, %3}, [%4];"
+               : "=h"(retval.x), "=h"(retval.y), "=h"(retval.z), "=h"(retval.w)
+               : _CUB_ASM_PTR_(ptr)
+               : "memory");
+  return retval;
+}
+
+static __device__ __forceinline__ uint2 dsmem_ld_relaxed(uint2 const *ptr)
+{
+  uint2 retval;
+  asm volatile("ld.relaxed.shared.cluster.v2.u32 {%0, %1}, [%2];"
+               : "=r"(retval.x), "=r"(retval.y)
+               : _CUB_ASM_PTR_(ptr)
+               : "memory");
+  return retval;
+}
+
+static __device__ __forceinline__ unsigned long long dsmem_ld_relaxed(unsigned long long const *ptr)
+{
+  unsigned long long retval;
+  asm volatile("ld.relaxed.shared.cluster.u64 %0, [%1];"
+               : "=l"(retval)
+               : _CUB_ASM_PTR_(ptr)
+               : "memory");
+  return retval;
+}
+
+static __device__ __forceinline__ unsigned int dsmem_ld_relaxed(unsigned int const *ptr)
+{
+  unsigned int retval;
+  asm volatile("ld.relaxed.shared.cluster.u32 %0, [%1];"
+               : "=r"(retval)
+               : _CUB_ASM_PTR_(ptr)
+               : "memory");
+  return retval;
+}
+
+static __device__ __forceinline__ void dsmem_st_relaxed(uint4 *ptr, uint4 val)
+{
+  asm volatile("st.relaxed.shared.cluster.v4.u32 [%0], {%1, %2, %3, %4};"
+               :
+               : _CUB_ASM_PTR_(ptr), "r"(val.x), "r"(val.y), "r"(val.z), "r"(val.w)
+               : "memory");
+}
+
+static __device__ __forceinline__ void dsmem_st_relaxed(ulonglong2 *ptr, ulonglong2 val)
+{
+  asm volatile("st.relaxed.shared.cluster.v2.u64 [%0], {%1, %2};"
+               :
+               : _CUB_ASM_PTR_(ptr), "l"(val.x), "l"(val.y)
+               : "memory");
+}
+
+static __device__ __forceinline__ void dsmem_st_relaxed(ushort4 *ptr, ushort4 val)
+{
+  asm volatile("st.relaxed.shared.cluster.v4.u16 [%0], {%1, %2, %3, %4};"
+               :
+               : _CUB_ASM_PTR_(ptr), "h"(val.x), "h"(val.y), "h"(val.z), "h"(val.w)
+               : "memory");
+}
+
+static __device__ __forceinline__ void dsmem_st_relaxed(uint2 *ptr, uint2 val)
+{
+  asm volatile("st.relaxed.shared.cluster.v2.u32 [%0], {%1, %2};"
+               :
+               : _CUB_ASM_PTR_(ptr), "r"(val.x), "r"(val.y)
+               : "memory");
+}
+
+static __device__ __forceinline__ void dsmem_st_relaxed(unsigned long long *ptr,
+                                                        unsigned long long val)
+{
+  asm volatile("st.relaxed.shared.cluster.u64 [%0], %1;"
+               :
+               : _CUB_ASM_PTR_(ptr), "l"(val)
+               : "memory");
+}
+
+static __device__ __forceinline__ void dsmem_st_relaxed(unsigned int *ptr, unsigned int val)
+{
+  asm volatile("st.relaxed.shared.cluster.u32 [%0], %1;"
+               :
+               : _CUB_ASM_PTR_(ptr), "r"(val)
+               : "memory");
+}
+
 template <
     typename    T,
     typename    ScanOpT,
@@ -386,8 +495,7 @@ struct ClusterTilePrefixCallbackOp
             TxnWord alias;
             *reinterpret_cast<TileDescriptor *>(&alias) = tile_descriptor;
 
-            // TODO st.relaxed.shared.cluster 
-            dsmem[cta_rank] = alias;
+            dsmem_st_relaxed(dsmem + cta_rank, alias);
         }
     }
 
@@ -401,8 +509,7 @@ struct ClusterTilePrefixCallbackOp
     __device__ __forceinline__ 
     void LoadTileDescriptor(unsigned int src_cta, TileDescriptor &tile_descriptor)
     {
-        // TODO ld.relaxed.shared.cluster
-        TxnWord alias = temp_storage.dsmem[src_cta];
+        TxnWord alias = dsmem_ld_relaxed(temp_storage.dsmem + src_cta);
         tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
     }
 
