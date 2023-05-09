@@ -401,6 +401,129 @@ struct ClusterTilePrefixCallbackOp
     {
         BroadcastBlockAggregate(block_aggregate, SCAN_TILE_PARTIAL);
 
+        const unsigned int cta_rank = cooperative_groups::cluster_group::block_rank();
+
+        if (cta_rank == 0) 
+        {
+            // First CTA is performing decoupled look-back
+            int         predecessor_idx = tile_idx - threadIdx.x - 1;
+            StatusWord  predecessor_status;
+            T           window_aggregate;
+
+            // Wait for the warp-wide window of predecessor tiles to become valid
+            detail::delay<CUB_DETAIL_L2_WRITE_LATENCY_NS>();
+            ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
+
+            // The exclusive tile prefix starts out as the current window aggregate
+            exclusive_prefix = window_aggregate;
+
+            // Keep sliding the window back until we come across a tile whose inclusive prefix is known
+            while (WARP_ALL((predecessor_status != StatusWord(SCAN_TILE_INCLUSIVE)), 0xffffffff))
+            {
+                predecessor_idx -= CUB_PTX_WARP_THREADS;
+
+                // Update exclusive tile prefix with the window prefix
+                ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
+                exclusive_prefix = scan_op(window_aggregate, exclusive_prefix);
+            }
+
+            inclusive_prefix = scan_op(exclusive_prefix, block_aggregate);
+            BroadcastBlockAggregate(inclusive_prefix, SCAN_TILE_INCLUSIVE);
+        }
+        else
+        {
+            // Intermediate CTAs wait for inclusive result
+            TxnWord * lsmem = temp_storage.dsmem;
+
+            const unsigned int src_cta = threadIdx.x;
+            if (src_cta < CUB_DETAIL_CLUSTER_SIZE)
+            {
+                if (cta_rank == CUB_DETAIL_CLUSTER_SIZE - 1)
+                {
+                    TileDescriptor tile_descriptor;
+
+                    {
+                        // TODO ld.relaxed.shared.cluster
+                        TxnWord alias = lsmem[src_cta];
+                        tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
+                    }
+
+                    while (tile_descriptor.status == SCAN_TILE_INVALID)
+                    {
+                        // TODO ld.relaxed.shared.cluster
+                        TxnWord alias = lsmem[src_cta];
+                        tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
+                    }
+
+                    // TODO Reduce between CUB_DETAIL_CLUSTER_SIZE threads
+
+                    if (tile_descriptor.status == SCAN_TILE_PARTIAL)
+                    {
+                        if (threadIdx.x == 0) 
+                        {
+                            block_aggregate = scan_op(tile_descriptor.value, block_aggregate);
+                            detail::uninitialized_copy(&temp_storage.block_aggregate,
+                                                        block_aggregate);
+
+                            tile_status.SetPartial(tile_idx, block_aggregate);
+                        }
+                    }
+                    else if (tile_descriptor.status == SCAN_TILE_INCLUSIVE)
+                    {
+                        {
+                            // TODO ld.relaxed.shared.cluster
+                            TxnWord alias = lsmem[src_cta];
+                            tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
+                        }
+
+                        while (tile_descriptor.status != SCAN_TILE_INCLUSIVE)
+                        {
+                            // TODO ld.relaxed.shared.cluster
+                            TxnWord alias = lsmem[src_cta];
+                            tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
+                        }
+
+                        // TODO Reduce between CUB_DETAIL_CLUSTER_SIZE threads
+
+                        if (threadIdx.x == 0) 
+                        {
+                            block_aggregate = scan_op(tile_descriptor.value, block_aggregate);
+                            detail::uninitialized_copy(&temp_storage.block_aggregate,
+                                                        block_aggregate);
+
+                            tile_status.SetInclusive(tile_idx, block_aggregate);
+                        }
+                    }
+                }
+                else 
+                {
+                    TileDescriptor tile_descriptor;
+
+                    {
+                        // TODO ld.relaxed.shared.cluster
+                        TxnWord alias = lsmem[src_cta];
+                        tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
+                    }
+
+                    while (tile_descriptor.status != SCAN_TILE_INCLUSIVE)
+                    {
+                        // TODO ld.relaxed.shared.cluster
+                        TxnWord alias = lsmem[src_cta];
+                        tile_descriptor = reinterpret_cast<TileDescriptor &>(alias);
+                    }
+
+                    // TODO Reduce between CUB_DETAIL_CLUSTER_SIZE threads
+
+                    if (threadIdx.x == 0) 
+                    {
+                        block_aggregate = scan_op(tile_descriptor.value, block_aggregate);
+                        detail::uninitialized_copy(&temp_storage.block_aggregate,
+                                                    block_aggregate);
+                    }
+                }
+            }
+        }
+
         // Update our status with our tile-aggregate
         if (threadIdx.x == 0)
         {
@@ -408,27 +531,6 @@ struct ClusterTilePrefixCallbackOp
                                      block_aggregate);
 
           tile_status.SetPartial(tile_idx, block_aggregate);
-        }
-
-        int         predecessor_idx = tile_idx - threadIdx.x - 1;
-        StatusWord  predecessor_status;
-        T           window_aggregate;
-
-        // Wait for the warp-wide window of predecessor tiles to become valid
-        detail::delay<CUB_DETAIL_L2_WRITE_LATENCY_NS>();
-        ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
-
-        // The exclusive tile prefix starts out as the current window aggregate
-        exclusive_prefix = window_aggregate;
-
-        // Keep sliding the window back until we come across a tile whose inclusive prefix is known
-        while (WARP_ALL((predecessor_status != StatusWord(SCAN_TILE_INCLUSIVE)), 0xffffffff))
-        {
-            predecessor_idx -= CUB_PTX_WARP_THREADS;
-
-            // Update exclusive tile prefix with the window prefix
-            ProcessWindow(predecessor_idx, predecessor_status, window_aggregate);
-            exclusive_prefix = scan_op(window_aggregate, exclusive_prefix);
         }
 
         // Compute the inclusive tile prefix and update the status for this tile
