@@ -358,6 +358,7 @@ struct AgentScan
 
     // Wait for all threads in the cluster to finish loading / dsmem initialization
     cooperative_groups::cluster_group::barrier_wait(std::move(token));
+    __threadfence();
 
     // Perform tile scan
     if (tile_idx == 0)
