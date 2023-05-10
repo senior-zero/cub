@@ -593,6 +593,8 @@ struct ClusterTilePrefixCallbackOp
                 }
                 exclusive_prefix = Reduce(cta_rank, src_cta, tile_descriptor.value);
 
+                // second thread of block 31 reads 2399 instead of 1920
+
                 if (__shfl_sync(CUB_DETAIL_CLUSTER_WARP_MASK,
                                 tile_descriptor.status == SCAN_TILE_PARTIAL,
                                 0,
