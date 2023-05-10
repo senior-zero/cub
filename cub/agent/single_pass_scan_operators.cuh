@@ -714,7 +714,7 @@ struct ClusterTilePrefixCallbackOp
         descriptor->status = StatusWord(SCAN_TILE_INVALID);
 
         if (threadIdx.x < CUB_DETAIL_CLUSTER_SIZE) {
-            lsmem_st_relaxed(temp_storage.dsmem + threadIdx.x, val);
+            temp_storage.dsmem[threadIdx.x] = val;
         }
     }
 };
