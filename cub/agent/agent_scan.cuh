@@ -421,9 +421,8 @@ struct AgentScan
     // Remaining items (including this tile)
     OffsetT num_remaining = num_items - tile_offset;
 
-    const unsigned int cluster_id = tile_idx / CUB_DETAIL_CLUSTER_SIZE;
-
-    if (cluster_id < (gridDim.x / CUB_DETAIL_CLUSTER_SIZE) - 1)
+    // const unsigned int cluster_id = tile_idx / CUB_DETAIL_CLUSTER_SIZE;
+    // if (cluster_id < (gridDim.x / CUB_DETAIL_CLUSTER_SIZE) - 1)
     {
       if (num_remaining > TILE_ITEMS)
       {
