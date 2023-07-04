@@ -149,7 +149,6 @@ void partition(nvbench::state &state, nvbench::type_list<T, OffsetT>)
   thrust::device_vector<nvbench::uint8_t> temp(temp_size);
   auto *temp_storage = thrust::raw_pointer_cast(temp.data());
 
-  state.set_blocking_kernel_timeout(-1);
   state.exec([&](nvbench::launch &launch) {
     dispatch_t::Dispatch(temp_storage,
                          temp_size,
